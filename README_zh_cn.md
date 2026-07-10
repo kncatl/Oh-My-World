@@ -23,7 +23,7 @@
 ## 安装
 
 1. 为 Minecraft 1.21.1 安装 NeoForge
-2. 从 [Releases](https://github.com/kncatl/Oh-My-World/releases) 下载 `oh-my-world-1.0.0.jar`
+2. 从 [Releases](https://github.com/kncatl/Oh-My-World/releases) 下载最新的版本
 3. 放入 `mods/` 文件夹
 4. 使用 NeoForge 配置文件启动 Minecraft
 
@@ -63,7 +63,7 @@ cd Oh-My-World
 cp gradle.properties.example gradle.properties
 # 编辑 gradle.properties：设置 org.gradle.java.home 为你的 JDK 21 路径（如不在 PATH 上）
 ./gradlew build
-# 产物：build/libs/oh-my-world-1.0.0.jar
+# 产物：build/libs/oh-my-world-1.x.x.jar
 ```
 
 ## 许可协议
