@@ -45,8 +45,8 @@ Default preset:
   Function call syntax: functionName(arg1, arg2, ...)
 
   -- Integer --
-  floordiv(a, b)   Floor division (toward -infinity), java.lang.Math.floorDiv(a, b)
-  floormod(a, b)   Floor modulo (result always >= 0), java.lang.Math.floorMod(a, b)
+  floordiv(a, b)   Floor division (toward -infinity)
+  floormod(a, b)   Floor modulo (result always >= 0)
 
   -- General Math --
   abs(x)           Absolute value
@@ -99,48 +99,37 @@ Default preset:
   ▸ Uniform layer (same block everywhere):
     y=0: minecraft:bedrock
 
-
   ▸ 1x1 checkerboard (alternating blocks):
     y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
-
   ▸ 3x3 grid (large cells, no center swap):
     y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
-
 
   ▸ 3x3 grid + center swap:
     y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0
       ? (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:gray_concrete : minecraft:white_concrete)
       : (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:white_concrete : minecraft:gray_concrete)
 
-
   ▸ Horizontal stripes (every 4 blocks along X):
     y=1..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
-
 
   ▸ Circle (radius 20):
     y=1..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
 
-
   ▸ Diamond region (absolute values):
     y=1..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
-
 
   ▸ Sine wave stripes:
     y=1..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
 
-
   ▸ Cyclic: 3 bedrock + 2 dirt + 1 checker (6-layer cycle):
     y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
-
 
   ▸ Blacklist random (exclude stone, dirt, grass):
     y=1..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
 
-
   ▸ Smooth noise patches:
     y=1..64: smooth(x,z,0.1,0.1)>0.5 ? minecraft:white_concrete : minecraft:gray_concrete
-
 
   ▸ Discrete noise + random pool:
     y=1..64: rng(x,z)>0.5 ? rand(minecraft:stone,minecraft:cobblestone) : rand(minecraft:oak_planks,minecraft:glass)
