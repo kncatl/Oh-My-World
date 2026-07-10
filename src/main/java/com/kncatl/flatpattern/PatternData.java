@@ -4,7 +4,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
@@ -95,14 +99,10 @@ public class PatternData {
         return false;
     }
 
-    private static String stripNewlines(String s) {
-        return s.replace("\r", "").replace("\n", "");
-    }
-
-    public static void fillChunk(net.minecraft.world.level.chunk.ChunkAccess chunk, List<Object> layers) {
-        net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
-        net.minecraft.world.level.levelgen.Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR_WG);
-        net.minecraft.world.level.levelgen.Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE_WG);
+    public static void fillChunk(ChunkAccess chunk, List<Object> layers) {
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int cx = chunk.getPos().getMinBlockX();
         int cz = chunk.getPos().getMinBlockZ();
 
@@ -111,7 +111,7 @@ public class PatternData {
                 for (int y = f.yStart(); y <= f.yEnd(); y++) {
                     for (int x = 0; x < 16; x++) {
                         for (int z = 0; z < 16; z++) {
-                            net.minecraft.world.level.block.state.BlockState st = f.getBlock(cx + x, cz + z, y);
+                            BlockState st = f.getBlock(cx + x, cz + z, y);
                             chunk.setBlockState(pos.set(x, y, z), st, false);
                             h0.update(x, y, z, st);
                             h1.update(x, y, z, st);
@@ -122,7 +122,7 @@ public class PatternData {
                 for (int y = c.yStart(); y <= c.yEnd(); y++) {
                     for (int x = 0; x < 16; x++) {
                         for (int z = 0; z < 16; z++) {
-                            net.minecraft.world.level.block.state.BlockState st = c.getBlock(cx + x, cz + z, y);
+                            BlockState st = c.getBlock(cx + x, cz + z, y);
                             chunk.setBlockState(pos.set(x, y, z), st, false);
                             h0.update(x, y, z, st);
                             h1.update(x, y, z, st);
@@ -131,5 +131,9 @@ public class PatternData {
                 }
             }
         }
+    }
+
+    private static String stripNewlines(String s) {
+        return s.replace("\r", "").replace("\n", "");
     }
 }

@@ -1,7 +1,6 @@
 package com.kncatl.flatpattern;
 
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -39,7 +38,7 @@ public class FlatPattern {
                 }
                 LOGGER.debug("README files created at {}", dir);
             } catch (Exception e) {
-                LOGGER.warn("Failed to create ohmyworld/README.md", e);
+                LOGGER.warn("Failed to create ohmyworld/README", e);
             }
         }
     }
