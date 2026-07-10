@@ -23,7 +23,7 @@
 ## Installation
 
 1. Install NeoForge for Minecraft 1.21.1
-2. Download `oh-my-world-1.0.0.jar` from [Releases](https://github.com/kncatl/Oh-My-World/releases)
+2. Download the latest version from [Releases](https://github.com/kncatl/Oh-My-World/releases)
 3. Place the jar in your `mods/` folder
 4. Launch Minecraft with the NeoForge profile
 
@@ -63,7 +63,7 @@ cd Oh-My-World
 cp gradle.properties.example gradle.properties
 # Edit gradle.properties: set org.gradle.java.home to your JDK 21 path (if not on PATH)
 ./gradlew build
-# Output: build/libs/oh-my-world-1.0.0.jar
+# Output: build/libs/oh-my-world-1.x.x.jar
 ```
 
 ## License
