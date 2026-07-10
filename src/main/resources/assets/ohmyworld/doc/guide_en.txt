@@ -1,0 +1,179 @@
+═══ Oh My World — Formula Writing Guide ═══
+
+1. Format
+
+Separate layers with semicolons ";". Two formats are supported:
+
+[Single expression]
+  y=<start>..<end>: <expression>
+  y=<layer>: <expression>             ← single layer, range omitted
+
+[Cyclic expression]
+  y=<start>..<end>: <count>*[<expr>],<count>*[<expr>],...
+
+  Within the specified y-range, the comma-separated groups repeat
+  in cycles until the entire range is filled.
+
+  Example:
+  y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+
+  Cycle length = 3+2+1 = 6 layers. Pattern: 3×bedrock, 2×dirt, 1×checker, repeat...
+
+Default preset:
+  y=0: minecraft:bedrock;y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+2. Variables
+
+  x    World X coordinate (integer, can be negative)
+  z    World Z coordinate (integer, can be negative)
+  ly   Relative y within the layer (0-based, ly = currentY - layerStartY)
+
+
+3. Operators
+
+  Arithmetic:   +  -  *  /  %
+  Comparison:   ==  !=  <  >  <=  >=
+  Logical:      &&  ||  !
+  Grouping:     ( )
+
+  Ternary:      condition ? valueA : valueB
+
+
+4. Built-in Functions
+
+  Function call syntax: functionName(arg1, arg2, ...)
+
+  -- Integer --
+  floordiv(a, b)   Floor division (toward -infinity), java.lang.Math.floorDiv(a, b)
+  floormod(a, b)   Floor modulo (result always >= 0), java.lang.Math.floorMod(a, b)
+
+  -- General Math --
+  abs(x)           Absolute value
+  max(a, b)        Maximum
+  min(a, b)        Minimum
+  floor(x)         Floor (round down)
+  ceil(x)          Ceil (round up)
+  round(x)         Round to nearest integer
+  sign(x)          Signum (1, -1, or 0)
+  sqrt(x)          Square root
+  pow(a, b)        Power a^b
+  exp(x)           e^x
+  log(x)           Natural logarithm ln(x)
+  log10(x)         Base-10 logarithm
+
+  -- Trigonometric (arguments/returns in radians) --
+  sin(x)           Sine
+  cos(x)           Cosine
+  tan(x)           Tangent
+  asin(x)          Arcsin (-pi/2 ~ pi/2)
+  acos(x)          Arccos (0 ~ pi)
+  atan(x)          Arctan (-pi/2 ~ pi/2)
+  todeg(rad)       Radians to degrees
+  torad(deg)       Degrees to radians
+
+  ★ Trig functions take radians. To use degrees, wrap with torad():
+    Example: sin(torad(30)) = 0.5
+
+  ★ For grid patterns (with / and %), MUST use floordiv and floormod
+    instead of / and %. Otherwise negative coordinates produce malformed cells.
+
+  -- Random --
+  rand()                        Random block from ALL registered blocks (excluding air)
+  rand(b1, b2, ...)             Whitelist — random from the specified blocks
+  randexcept(b1, b2, ...)       Blacklist — random from all blocks EXCEPT specified ones
+
+  -- Noise --
+  rng(x, z)                     Pseudo-random value 0.0~1.0 based on coordinates
+  rng(x, z, a, b)               Same, mapped to [a, b)
+  smooth(x, z)                  2D smooth noise 0.0~1.0 (bilinear interpolation)
+  smooth(x, z, sx, sz)          Scaled smooth noise: multiply x,z by sx,sz first
+
+  ★ rng() values jump between adjacent coordinates — suitable for discrete random patterns.
+    smooth() values transition smoothly — suitable for terrain, gradients, organic patterns.
+    Both are hash-based: same coordinate always returns the same value.
+
+
+5. Expression Examples
+
+  ▸ Uniform layer (same block everywhere):
+    y=0: minecraft:bedrock
+
+
+  ▸ 1x1 checkerboard (alternating blocks):
+    y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ 3x3 grid (large cells, no center swap):
+    y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ 3x3 grid + center swap:
+    y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0
+      ? (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:gray_concrete : minecraft:white_concrete)
+      : (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:white_concrete : minecraft:gray_concrete)
+
+
+  ▸ Horizontal stripes (every 4 blocks along X):
+    y=1..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ Circle (radius 20):
+    y=1..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ Diamond region (absolute values):
+    y=1..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ Sine wave stripes:
+    y=1..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ Cyclic: 3 bedrock + 2 dirt + 1 checker (6-layer cycle):
+    y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+
+
+  ▸ Blacklist random (exclude stone, dirt, grass):
+    y=1..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
+
+
+  ▸ Smooth noise patches:
+    y=1..64: smooth(x,z,0.1,0.1)>0.5 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+  ▸ Discrete noise + random pool:
+    y=1..64: rng(x,z)>0.5 ? rand(minecraft:stone,minecraft:cobblestone) : rand(minecraft:oak_planks,minecraft:glass)
+
+
+6. Blocks
+
+Use standard Minecraft resource IDs:
+
+  minecraft:white_concrete   minecraft:gray_concrete   minecraft:bedrock
+  minecraft:dirt             minecraft:grass_block      minecraft:stone
+  minecraft:glass            minecraft:cobblestone       minecraft:oak_planks
+
+Supported concrete colors (hardcoded, no registry needed):
+  white_concrete, gray_concrete, black_concrete, red_concrete,
+  blue_concrete, yellow_concrete, green_concrete, orange_concrete,
+  purple_concrete, light_gray_concrete, light_blue_concrete,
+  magenta_concrete, lime_concrete, pink_concrete, cyan_concrete,
+  brown_concrete
+
+Other blocks are resolved via BuiltInRegistries.BLOCK.
+
+
+7. Notes
+
+1. Semicolons ";" must be in English mode. Chinese ";" won't work.
+2. All block IDs must be typed in English.
+3. Nest ternary conditions with explicit parentheses.
+4. For grid patterns with / or %, MUST use floordiv/floormod.
+5. % in expressions like (x+z)%2 is fine as a direct operator.
+6. The ly variable is for intra-layer offset (rarely needed).
+7. Cyclic [expr] brackets enclose any valid expression.
+8. Commas "," in cyclic format separate groups; commas inside [ ] are fine.
+9. rand() is deterministic: same (x,z,y) always returns the same block.
+10. It is recommended to set "Generate Structures" to OFF when the top
+    layer of your pattern is not a flat, continuous surface.

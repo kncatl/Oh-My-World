@@ -1,0 +1,39 @@
+# === Oh My World Gradle Properties ===
+# Copy this file to gradle.properties and fill in your local settings.
+
+# ---- Required: JDK 21 Path ----
+# Set the path to your JDK 21 installation. Example:
+#   Windows: C:/Program Files/Eclipse Adoptium/jdk-21.0.5+11
+#   Linux:   /home/user/jdk-21
+#   macOS:   /Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home
+# org.gradle.java.home=/path/to/your/jdk21
+
+# ---- Optional: HTTP Proxy ----
+# If your network requires a proxy to access Maven repositories, uncomment and configure:
+# systemProp.http.proxyHost=127.0.0.1
+# systemProp.http.proxyPort=7890
+# systemProp.https.proxyHost=127.0.0.1
+# systemProp.https.proxyPort=7890
+# systemProp.http.nonProxyHosts=localhost|127.*|172.*|10.*|192.168.*
+
+# ---- Gradle Settings ----
+org.gradle.jvmargs=-Xmx1G
+org.gradle.daemon=true
+org.gradle.parallel=true
+org.gradle.caching=true
+org.gradle.configuration-cache=false
+
+# ---- Minecraft / NeoForge Versions ----
+parchment_minecraft_version=1.21.1
+parchment_mappings_version=2024.11.17
+minecraft_version=1.21.1
+minecraft_version_range=[1.21.1]
+neo_version=21.1.234
+loader_version_range=[1,)
+
+# ---- Mod Properties ----
+mod_id=ohmyworld
+mod_name=Oh My World
+mod_license=MIT
+mod_version=1.0.0
+mod_group_id=io.github.kncatl.Oh-My-World

@@ -1,0 +1,28 @@
+package com.kncatl.flatpattern.expr;
+
+public sealed interface ExprNode {
+
+    record NumberNode(double value) implements ExprNode {}
+
+    record VariableNode(String name) implements ExprNode {}
+
+    record BlockNode(String blockId) implements ExprNode {}
+
+    record BinaryNode(ExprNode left, BinaryOp op, ExprNode right) implements ExprNode {}
+
+    record UnaryNode(UnaryOp op, ExprNode operand) implements ExprNode {}
+
+    record ConditionalNode(ExprNode condition, ExprNode thenExpr, ExprNode elseExpr) implements ExprNode {}
+
+    record FuncCallNode(String name, java.util.List<ExprNode> args) implements ExprNode {}
+
+    enum BinaryOp {
+        ADD, SUB, MUL, DIV, MOD,
+        EQ, NE, LT, GT, LE, GE,
+        AND, OR
+    }
+
+    enum UnaryOp {
+        NOT, NEG
+    }
+}

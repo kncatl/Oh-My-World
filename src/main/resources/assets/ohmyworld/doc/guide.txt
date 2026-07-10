@@ -1,0 +1,279 @@
+═══ 自定义超平坦图案 公式编写说明 ═══
+
+一、格式
+
+每层规则用分号 ";" 分隔。层规则有两种格式：
+
+【普通格式】
+  y=<起始>..<结束>: <表达式>
+  y=<层>: <表达式>               ← 单层可省略范围
+
+【循环格式】
+  y=<起始>..<结束>: <厚度>*[<表达式>],<厚度>*[<表达式>],...
+
+  在指定 y 范围内，按逗号分隔的组循环铺设：每组的厚度层使用对应表达式，
+  组完一轮后从第一组重新开始，直到填满整个 y 范围。
+
+  例：
+  y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+
+  效果：周期 6 层（3+2+1），从底到顶重复：3×基岩, 2×泥土, 1×棋盘格, 3×基岩... 直到 y=64。
+
+默认预设：
+
+  y=0: minecraft:bedrock;y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+二、变量
+
+  x    世界 X 坐标（整数，可正可负）
+  z    世界 Z 坐标（整数，可正可负）
+  ly   层内相对 y 坐标（从 0 开始，即 ly = 当前 y - 层起始 y）
+
+
+三、运算符
+
+  算术：     +  -  *  /  %
+  比较：     ==  !=  <  >  <=  >=
+  逻辑：     &&  ||  !
+  分组：     ( )
+
+  三元条件： 条件 ? 值A : 值B
+
+
+四、内置函数
+
+  函数调用格式： 函数名(参数1, 参数2, ...)
+
+  ── 整数运算 ──
+  floordiv(a, b)   向负无穷取整除法，等价 Math.floorDiv(a, b)
+  floormod(a, b)   向负无穷取模，结果始终 >= 0，等价 Math.floorMod(a, b)
+
+  ── 通用数学 ──
+  abs(x)           绝对值
+  max(a, b)        取较大值
+  min(a, b)        取较小值
+  floor(x)         向下取整
+  ceil(x)          向上取整
+  round(x)         四舍五入
+  sign(x)          符号函数（正数返回 1，负数返回 -1，0 返回 0）
+  sqrt(x)          平方根
+  pow(a, b)        幂运算 a^b
+  exp(x)           e^x
+  log(x)           自然对数 ln(x)
+  log10(x)         以 10 为底对数
+
+  ── 三角函数（参数 / 返回值均为弧度）──
+  sin(x)           正弦
+  cos(x)           余弦
+  tan(x)           正切
+  asin(x)          反正弦（返回值 -π/2 ~ π/2）
+  acos(x)          反余弦（返回值 0 ~ π）
+  atan(x)          反正切（返回值 -π/2 ~ π/2）
+  todeg(rad)       弧度转角度
+   torad(deg)       角度转弧度
+
+   ── 随机 ──
+   rand()                     从所有已注册方块（排除空气）中等概率随机选取一个
+   rand(b1, b2, ...)          白名单模式——从指定的方块列表中随机选取
+   randexcept(b1, b2, ...)    黑名单模式——从全部方块中排除指定的方块后随机选取
+
+   ── 噪声 ──
+   rng(x, z)                  基于坐标的伪随机值，返回 0.0~1.0 之间的双精度浮点数
+   rng(x, z, a, b)            基于坐标的伪随机值，映射到 [a, b) 区间
+   smooth(x, z)               2D 平滑噪声，返回 0.0~1.0，相邻坐标值平滑过渡
+   smooth(x, z, sx, sz)       缩放后的平滑噪声：先对 x,z 乘以 sx,sz 再计算
+
+   ★ rng() 相邻坐标值可能剧烈跳变，适合离散随机图案。
+     smooth() 相邻坐标值平滑过渡，适合地形、渐变、云雾等有机图案。
+     两者均基于坐标哈希，同一坐标永远返回同一值。
+
+   ★ rand() 基于 (x, z, y) 坐标哈希生成"伪随机"值——同一坐标永远返回同一方块，
+     不会闪烁变化。每个坐标的随机结果在创建时即确定且不会改变。
+
+   ★ 三角函数的参数单位是弧度。如需使用角度，用 torad() 转换：
+     例：sin(torad(30)) = 0.5
+
+   ★ 涉及格子类图案（/ 和 % 运算）务必使用 floordiv 和 floormod 替代 / 和 %，
+     否则负坐标区域会出现异常尺寸的格子。详见第五节示例。
+
+
+五、表达式示例
+
+▸ 均匀层（所有坐标返回同一个块）：
+
+  y=0: minecraft:bedrock
+
+
+▸ 1×1 棋盘格（相邻方块交替）：
+
+  y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 3×3 格子（大格子交替，无中心交换）：
+
+  y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+  ★ 不能用 ((x/3)+(z/3))%2——负数除法向零截断，原点附近会形成 5×5 异常格子。
+
+
+▸ 3×3 格子 + 中心交换（中心块取对面格子的颜色）：
+
+  y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0
+    ? (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:gray_concrete : minecraft:white_concrete)
+    : (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:white_concrete : minecraft:gray_concrete)
+
+
+▸ 沿 X 方向每 4 格换色（条纹）：
+
+  y=1..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 沿 Z 方向的单格条纹：
+
+  y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+  注：1×1 棋盘格用 + 即可，不涉及 / 或 % 大数，无需 floordiv。
+
+
+▸ 半径 20 格以内的圆形，圆形区域放白色，以外放灰色：
+
+  y=1..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 多色棋盘格（4 种颜色，按 x,z 奇偶）：
+
+  y=1..64: x%2==0 ? (z%2==0 ? minecraft:white_concrete : minecraft:red_concrete)
+                   : (z%2==0 ? minecraft:blue_concrete  : minecraft:yellow_concrete)
+
+
+▸ 正弦波条纹（灰度变化）：
+
+  y=1..64: (x+z*3)%6<3 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 绝对值的图案（菱形区域）：
+
+  y=1..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 正弦波条纹（连续灰度渐变，需搭配彩色块呈现）：
+
+  y=1..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+  每个周期约 36 格（360° / 10° = 36）。
+
+▸ 正弦波 ：
+
+  y=-61: abs(z - (sin(x / 5.0) * 5)) <= 1 ? minecraft:white_concrete : minecraft:light_gray_concrete
+
+▸ 圆形波纹（同心圆）：
+
+  y=1..64: sin(sqrt(x*x+z*z)*0.5)>0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 循环层：3 层基岩 + 2 层泥土 + 1 层棋盘格交替（周期 6 层）：
+
+  y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+
+
+▸ 循环层：1 层白混凝土 + 1 层灰混凝土交替（每层都换色）：
+
+  y=1..64: 1*[minecraft:white_concrete],1*[minecraft:gray_concrete]
+
+  效果与 (x+z)%2 棋盘格不同——这里是水平方向统一颜色，逐层交替。
+  棋盘格是同一层内方块交替。
+
+
+▸ 循环层 + 普通层混用：
+
+  y=0: minecraft:bedrock
+  y=1..64: 2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+
+  第 0 层为基岩，第 1~64 层按 2 泥土 + 1 棋盘格循环。
+
+
+▸ 指定池随机：棋盘格白色部分随机替换为 3 种方块之一：
+
+  y=1..64: (x+z)%2==0 ? rand(minecraft:white_concrete, minecraft:dirt, minecraft:bedrock) : minecraft:gray_concrete
+
+
+▸ 全方块随机（整个层从全部注册方块中随机抽取）：
+
+  y=1..64: rand()
+
+
+▸ 条件随机 + 不同随机池：
+
+  y=1..64: (floordiv(x,4)+floordiv(z,4))%2==0 ? rand(minecraft:stone, minecraft:cobblestone) : rand(minecraft:oak_planks, minecraft:glass)
+
+
+▸ 黑名单随机：从全部方块中排除石头、泥土、草方块后随机：
+
+  y=1..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
+
+
+▸ 离散噪声纹理（rng 密集随机点，无平滑）：
+
+  y=1..64: rng(x,z)>0.5 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 平滑噪声地形（smooth 有连续过渡）：
+
+  y=1..64: smooth(x,z,0.1,0.1)>0.5 ? minecraft:white_concrete : minecraft:gray_concrete
+
+  其中 0.1,0.1 是 x,z 方向的缩放因子——值越小图案越大（如 0.05 生成大片斑块）。
+
+
+六、块（Block）
+
+块用标准 Minecraft 资源 ID 表示：
+
+  minecraft:white_concrete
+  minecraft:gray_concrete
+  minecraft:bedrock
+  minecraft:dirt
+  minecraft:grass_block
+  minecraft:stone
+  minecraft:glass
+  minecraft:cobblestone
+  minecraft:oak_planks
+
+支持的颜色混凝土（switch 常量，无需注册表）：
+  white_concrete, gray_concrete, black_concrete, red_concrete,
+  blue_concrete, yellow_concrete, green_concrete, orange_concrete,
+  purple_concrete, light_gray_concrete, light_blue_concrete,
+  magenta_concrete, lime_concrete, pink_concrete, cyan_concrete,
+  brown_concrete
+
+其他块通过 BuiltInRegistries.BLOCK 注册表查询。
+
+
+七、组合示例
+
+▸ 1 层基岩 + 10 层泥土 + 1 层草方块 + 54 层 3×3 棋盘格：
+
+  y=0: minecraft:bedrock;y=1..10: minecraft:dirt;
+  y=11: minecraft:grass_block;
+  y=12..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+
+
+▸ 循环层：基岩底 + 64 层泥棋盘循环（3 泥土,1 棋盘格...4 泥土,1 棋盘格）：
+
+  y=0: minecraft:bedrock;y=1..64: 3*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+
+
+八、注意事项
+
+1. 分号 ";" 必须在英文输入法下输入，中文分号 "；" 不能识别。
+2. 所有 Minecraft 块 ID 必须在英文输入法下输入。
+3. 嵌套三元条件时务必用括号明确优先级。
+4. 格子类图案（涉及 / 和 %）必须使用 floordiv 和 floormod 函数，
+    不能直接使用 / 和 % 运算符，否则负坐标区域会出现异常。
+5. 不涉及大小判断的 % 运算（如 (x+z)%2）可直接用运算符，不受影响。
+6. ly 变量用于层内偏移（如渐变效果），通常不需要使用。
+7. 循环格式中方括号 [ ] 内可以是任意复杂表达式（含三元、函数等）。
+8. 循环格式中的逗号 "," 用于分隔每组，方括号内的逗号不影响解析。
+9. rand() 为伪随机——同一坐标永远返回同一方块，创建时确定，不会因进出
+   世界而改变。rand() 的全池模式排除空气（minecraft:air）。
+10. 建议在生成顶层为非超平坦的地形时将“生成结构”一项设为“关”。

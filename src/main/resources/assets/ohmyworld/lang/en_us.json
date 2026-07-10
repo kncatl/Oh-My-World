@@ -1,0 +1,12 @@
+{
+  "ohmyworld.description": "Oh My World",
+  "ohmyworld.flat_plus": "Formula Generator",
+  "generator.ohmyworld.flat_plus": "Formula Generator",
+  "ohmyworld.custom_screen.title": "Formula Generator",
+  "ohmyworld.custom_screen.layers": "Enter generation formula. See \"<game_dir>/ohmyworld/README_en_us.md\" for guide",
+  "ohmyworld.custom_screen.done": "Done",
+  "ohmyworld.custom_screen.cancel": "Cancel",
+  "ohmyworld.custom_screen.save": "Save Formula",
+  "ohmyworld.custom_screen.save_name": "Enter a name to save the formula when you click Save or Create New World.",
+  "ohmyworld.custom_screen.save_name2": "Saved in the same folder as \"README_en_us.md\""
+}

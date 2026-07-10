@@ -1,0 +1,12 @@
+{
+  "ohmyworld.description": "Oh My World",
+  "ohmyworld.flat_plus": "公式化生成",
+  "generator.ohmyworld.flat_plus": "公式化生成",
+  "ohmyworld.custom_screen.title": "公式化生成",
+  "ohmyworld.custom_screen.layers": "请输入生成公式，公式编写说明可以查阅\"<游戏文件夹>/ohmyworld/README_zh_cn.md\"",
+  "ohmyworld.custom_screen.done": "完成",
+  "ohmyworld.custom_screen.cancel": "取消",
+  "ohmyworld.custom_screen.save": "保存公式",
+  "ohmyworld.custom_screen.save_name": "键入有效内容时可以在点击保存按钮或完成按钮后保存公式",
+  "ohmyworld.custom_screen.save_name2": "保存位置与\"README_zh_cn.md\"相同"
+}
