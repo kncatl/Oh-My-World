@@ -8,12 +8,12 @@ import java.util.regex.Pattern;
 public class ExprLexer {
 
     private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "([a-z][a-z0-9_.-]*:[a-z][a-z0-9/._-]*)" +  // BLOCK_ID (must be first)
-            "|([a-zA-Z_][a-zA-Z0-9_]*)" +                 // IDENTIFIER
-            "|([0-9]+(?:\\.[0-9]+)?)" +                     // NUMBER (int or float)
-            "|(==|!=|<=|>=|&&|\\|\\|)" +                  // multi-char operators
-            "|([+\\-*/%<>!?:,()])" +                        // single-char operators
-            "|(\\s+)"                                      // whitespace (skip)
+            "([a-z][a-z0-9_.-]*:[a-z][a-z0-9/._-]*)" +
+            "|([a-zA-Z_][a-zA-Z0-9_]*)" +
+            "|([0-9]+(?:\\.[0-9]+)?)" +
+            "|(==|!=|<=|>=|&&|\\|\\|)" +
+            "|([+\\-*/%<>!?:,()])" +
+            "|(\\s+)"
     );
 
     public static List<Token> tokenize(String input) {
@@ -63,8 +63,8 @@ public class ExprLexer {
             case "||" -> TokenType.OR;
             case "!" -> TokenType.NOT;
             case "?" -> TokenType.QUESTION;
-            case "," -> TokenType.COMMA;
             case ":" -> TokenType.COLON;
+            case "," -> TokenType.COMMA;
             case "(" -> TokenType.LPAREN;
             case ")" -> TokenType.RPAREN;
             default -> throw new IllegalArgumentException("Unknown operator: " + op);
