@@ -2,9 +2,7 @@
     "required": true,
     "package": "com.kncatl.flatpattern.mixin",
     "compatibilityLevel": "JAVA_21",
-    "mixins": [
-        "MixinFlatLevelSource"
-    ],
+    "mixins": ["MixinFlatLevelSource"],
     "client": [],
     "server": []
 }
