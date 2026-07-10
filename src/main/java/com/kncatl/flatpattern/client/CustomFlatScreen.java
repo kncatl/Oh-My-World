@@ -26,7 +26,6 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private EditBox layersInput;
     private EditBox nameInput;
     private Button saveBtn;
-    private Button doneBtn;
 
     private static final Component TITLE = Component.translatable("ohmyworld.custom_screen.title");
     private static final Component LAYERS_LABEL = Component.translatable("ohmyworld.custom_screen.layers");
@@ -51,38 +50,29 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int centerX = this.width / 2;
         int boxW = 300;
         int boxY = 45;
-        int fxH = 44; // 72 * 60%
+        int fxH = 44;
 
-        // 公式输入框
-        this.layersInput = new EditBox(this.font, centerX - boxW / 2 + 10, boxY + 20, boxW - 20, fxH,
-                LAYERS_LABEL);
+        this.layersInput = new EditBox(this.font, centerX - boxW / 2 + 10, boxY + 20, boxW - 20, fxH, LAYERS_LABEL);
         this.layersInput.setMaxLength(2000);
         this.layersInput.setValue(PatternData.getRawInput());
         this.addRenderableWidget(this.layersInput);
 
-        int nameY = boxY + 20 + fxH + 40; // 公式框底部 + 20px + 20px
-        this.nameInput = new EditBox(this.font, centerX - boxW / 2 + 10, nameY, boxW - 20, 20,
-                SAVE_NAME);
+        int nameY = boxY + 20 + fxH + 40;
+        this.nameInput = new EditBox(this.font, centerX - boxW / 2 + 10, nameY, boxW - 20, 20, SAVE_NAME);
         this.nameInput.setMaxLength(64);
         this.addRenderableWidget(this.nameInput);
 
         int btnY = nameY + 30;
-        this.saveBtn = Button.builder(SAVE, b -> onSave())
-                .bounds(centerX - boxW / 2, btnY, 80, 20).build();
-        this.doneBtn = Button.builder(DONE, b -> onDone())
-                .bounds(centerX + boxW / 2 - 80, btnY, 80, 20).build();
+        this.saveBtn = Button.builder(SAVE, b -> onSave()).bounds(centerX - boxW / 2, btnY, 80, 20).build();
         this.addRenderableWidget(this.saveBtn);
-        this.addRenderableWidget(this.doneBtn);
-
-        this.addRenderableWidget(Button.builder(CANCEL, b -> onCancel())
-                .bounds(centerX - 40, btnY + 26, 80, 20).build());
+        this.addRenderableWidget(Button.builder(DONE, b -> onDone()).bounds(centerX + boxW / 2 - 80, btnY, 80, 20).build());
+        this.addRenderableWidget(Button.builder(CANCEL, b -> onCancel()).bounds(centerX - 40, btnY + 26, 80, 20).build());
 
         updateButtonState();
     }
 
     private void updateButtonState() {
-        boolean valid = !this.layersInput.getValue().isBlank()
-                && !this.nameInput.getValue().isBlank();
+        boolean valid = !this.layersInput.getValue().isBlank() && !this.nameInput.getValue().isBlank();
         this.saveBtn.active = valid;
     }
 
@@ -90,7 +80,6 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         String name = this.nameInput.getValue().trim();
         String formula = this.layersInput.getValue();
         if (name.isEmpty() || formula.isBlank()) return;
-
         try {
             Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
             Files.createDirectories(dir);
@@ -109,15 +98,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                     dims.replaceOverworldGenerator(reg, new PatternFlatSource(flatSource.settings())));
         }
 
-        if (!this.nameInput.getValue().isBlank()) {
-            onSave();
-        }
+        if (!this.nameInput.getValue().isBlank()) onSave();
         this.minecraft.setScreen(this.parent);
     }
 
-    private void onCancel() {
-        this.minecraft.setScreen(this.parent);
-    }
+    private void onCancel() { this.minecraft.setScreen(this.parent); }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
@@ -130,7 +115,5 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     @Override
-    public void onClose() {
-        this.minecraft.setScreen(this.parent);
-    }
+    public void onClose() { this.minecraft.setScreen(this.parent); }
 }
