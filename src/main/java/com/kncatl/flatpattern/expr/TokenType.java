@@ -5,7 +5,7 @@ public enum TokenType {
     PLUS, MINUS, STAR, SLASH, PERCENT,
     EQ, NE, LT, GT, LE, GE,
     AND, OR, NOT,
-    QUESTION, COLON, COMMA,
+    QUESTION, COLON, COMMA, LBRACE, RBRACE, SEMI, ASSIGN,
     LPAREN, RPAREN,
     EOF
 }

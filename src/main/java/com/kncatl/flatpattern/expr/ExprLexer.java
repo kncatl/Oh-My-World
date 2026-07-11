@@ -12,7 +12,7 @@ public class ExprLexer {
             "|([a-zA-Z_][a-zA-Z0-9_]*)" +
             "|([0-9]+(?:\\.[0-9]+)?)" +
             "|(==|!=|<=|>=|&&|\\|\\|)" +
-            "|([+\\-*/%<>!?:,()])" +
+            "|([+\\-*/%<>=!?:;,(){}])" +
             "|(\\s+)"
     );
 
@@ -65,8 +65,12 @@ public class ExprLexer {
             case "?" -> TokenType.QUESTION;
             case ":" -> TokenType.COLON;
             case "," -> TokenType.COMMA;
+            case ";" -> TokenType.SEMI;
+            case "=" -> TokenType.ASSIGN;
             case "(" -> TokenType.LPAREN;
             case ")" -> TokenType.RPAREN;
+            case "{" -> TokenType.LBRACE;
+            case "}" -> TokenType.RBRACE;
             default -> throw new IllegalArgumentException("Unknown operator: " + op);
         };
     }
