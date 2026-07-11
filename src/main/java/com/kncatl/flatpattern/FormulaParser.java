@@ -19,7 +19,7 @@ public class FormulaParser {
         String cleaned = input.replace("\r", "").replace("\n", "");
         if (cleaned.isBlank()) return layers;
 
-        for (String line : cleaned.split(";")) {
+        for (String line : smartSplit(cleaned)) {
             line = line.trim();
             if (line.isEmpty()) continue;
 
@@ -48,47 +48,52 @@ public class FormulaParser {
 
                 if (exprPart.contains("*[")) {
                     List<CyclicLayerDef.Entry> entries = parseCyclic(exprPart);
-                    if (!entries.isEmpty()) {
-                        layers.add(new CyclicLayerDef(yStart, yEnd, entries));
-                    }
+                    if (!entries.isEmpty()) layers.add(new CyclicLayerDef(yStart, yEnd, entries));
                 } else {
                     ExprNode expr = new ExprParser(ExprLexer.tokenize(exprPart)).parse();
                     layers.add(new FormulaLayerDef(yStart, yEnd, expr));
                 }
             } catch (Exception e) {
-                LOGGER.warn("FormulaParser: failed to parse line '{}': {}", line, e.getMessage());
+                LOGGER.error("FormulaParser: failed to parse: {}", line, e);
             }
         }
         return layers;
+    }
+
+    private static String[] smartSplit(String input) {
+        List<String> parts = new ArrayList<>();
+        int start = 0, depth = 0;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '{') depth++;
+            else if (c == '}') depth--;
+            else if (c == ';' && depth == 0) { parts.add(input.substring(start, i)); start = i + 1; }
+        }
+        parts.add(input.substring(start));
+        return parts.toArray(new String[0]);
     }
 
     private static List<CyclicLayerDef.Entry> parseCyclic(String exprPart) {
         List<CyclicLayerDef.Entry> entries = new ArrayList<>();
         int pos = 0;
         while (pos < exprPart.length()) {
-            while (pos < exprPart.length() && (exprPart.charAt(pos) == ' ' || exprPart.charAt(pos) == ',')) {
-                pos++;
-            }
+            while (pos < exprPart.length() && (exprPart.charAt(pos) == ' ' || exprPart.charAt(pos) == ',')) pos++;
             if (pos >= exprPart.length()) break;
-
             int star = exprPart.indexOf('*', pos);
             if (star < 0) break;
             int t = Integer.parseInt(exprPart.substring(pos, star).trim());
             pos = star + 1;
-
             if (pos >= exprPart.length() || exprPart.charAt(pos) != '[') break;
             pos++;
             int depth = 1, start = pos;
             while (pos < exprPart.length() && depth > 0) {
                 char c = exprPart.charAt(pos);
-                if (c == '[') depth++;
-                else if (c == ']') depth--;
+                if (c == '[') depth++; else if (c == ']') depth--;
                 if (depth > 0) pos++;
             }
             if (depth != 0) break;
             String inner = exprPart.substring(start, pos).trim();
             pos++;
-
             ExprNode expr = new ExprParser(ExprLexer.tokenize(inner)).parse();
             entries.add(new CyclicLayerDef.Entry(t, expr));
         }

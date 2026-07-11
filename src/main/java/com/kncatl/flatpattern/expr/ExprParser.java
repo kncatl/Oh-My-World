@@ -1,7 +1,9 @@
 package com.kncatl.flatpattern.expr;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ExprParser {
     private final List<Token> tokens;
@@ -93,6 +95,10 @@ public class ExprParser {
             return new ExprNode.VariableNode(name);
         }
         if (match(TokenType.LPAREN)) { ExprNode node = conditional(); expect(TokenType.RPAREN); return node; }
+        if (match(TokenType.LBRACE)) {
+            try { ExprNode block = parseBlock(); expect(TokenType.RBRACE); return block; }
+            catch (Exception e) { throw new IllegalArgumentException("Block parse error: " + e.getMessage(), e); }
+        }
         throw new IllegalArgumentException("Unexpected token: " + peek());
     }
 
@@ -102,4 +108,44 @@ public class ExprParser {
     private Token peek() { return pos < tokens.size() ? tokens.get(pos) : null; }
     private Token previous() { return tokens.get(pos - 1); }
     private void advance() { pos++; }
+
+    private ExprNode parseBlock() {
+        List<ExprNode.LetBinding> bindings = new ArrayList<>();
+        Map<String, Integer> idx = new HashMap<>();
+        while (true) {
+            if (check(TokenType.RBRACE)) break;
+            if (check(TokenType.IDENTIFIER) && peek().text().equals("let")) {
+                advance();
+                if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected variable name after 'let'");
+                String name = previous().text();
+                expect(TokenType.ASSIGN);
+                ExprNode value = doInline(conditional(), idx);
+                match(TokenType.SEMI);
+                idx.put(name, bindings.size());
+                bindings.add(new ExprNode.LetBinding(name, value));
+            } else {
+                ExprNode body = doInline(conditional(), idx);
+                return new ExprNode.BlockExprNode(bindings, body);
+            }
+        }
+        return new ExprNode.BlockExprNode(bindings, new ExprNode.NumberNode(0));
+    }
+
+    private static ExprNode doInline(ExprNode node, Map<String, Integer> idx) {
+        return switch (node) {
+            case ExprNode.VariableNode v -> {
+                Integer i = idx.get(v.name());
+                yield i != null ? new ExprNode.IndexedVarNode(i) : node;
+            }
+            case ExprNode.BinaryNode b -> new ExprNode.BinaryNode(doInline(b.left(), idx), b.op(), doInline(b.right(), idx));
+            case ExprNode.UnaryNode u -> new ExprNode.UnaryNode(u.op(), doInline(u.operand(), idx));
+            case ExprNode.ConditionalNode c -> new ExprNode.ConditionalNode(doInline(c.condition(), idx), doInline(c.thenExpr(), idx), doInline(c.elseExpr(), idx));
+            case ExprNode.FuncCallNode f -> {
+                List<ExprNode> newArgs = new ArrayList<>();
+                for (ExprNode a : f.args()) newArgs.add(doInline(a, idx));
+                yield new ExprNode.FuncCallNode(f.name(), newArgs);
+            }
+            default -> node;
+        };
+    }
 }
