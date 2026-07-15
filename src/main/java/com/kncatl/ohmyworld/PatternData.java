@@ -54,6 +54,7 @@ public class PatternData {
     }
 
     public static boolean isPending() { return pending; }
+    public static void clearPending() { pending = false; }
 
     private static Path markerPath(ServerLevel level) {
         return level.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)

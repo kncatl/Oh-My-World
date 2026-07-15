@@ -25,7 +25,10 @@ public class FlatPatternScreenEvents {
         var holder = state.getWorldType().preset(); if (holder == null) return;
         ResourceLocation key = holder.unwrapKey().map(k -> k.location()).orElse(null); if (key == null) return;
         if (Objects.equals(key, lastPresetKey)) return; lastPresetKey = key;
-        if (!FlatPatternClient.OUR_KEY.location().equals(key)) return;
+        if (!FlatPatternClient.OUR_KEY.location().equals(key)) {
+            PatternData.clearPending();
+            return;
+        }
         ChunkGenerator gen = state.getSettings().selectedDimensions().overworld();
         if (!(gen instanceof FlatLevelSource fs)) return; if (gen instanceof PatternFlatSource) return;
         state.updateDimensions((reg,dims) -> dims.replaceOverworldGenerator(reg, new PatternFlatSource(fs.settings())));
