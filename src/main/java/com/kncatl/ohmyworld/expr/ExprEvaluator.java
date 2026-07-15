@@ -1,0 +1,63 @@
+package com.kncatl.ohmyworld.expr;
+
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import com.kncatl.ohmyworld.expr.ExprNode.BinaryOp;
+
+public class ExprEvaluator {
+    private static final ThreadLocal<double[]> VAR_SLOTS = ThreadLocal.withInitial(() -> new double[0]);
+    public static Object eval(ExprNode node, int x, int z, int ly) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> n.value();
+            case ExprNode.VariableNode v -> varValue(v.name(), x, z, ly);
+            case ExprNode.IndexedVarNode iv -> VAR_SLOTS.get()[iv.index()];
+            case ExprNode.BlockNode b -> BlockResolver.resolve(b.blockId());
+            case ExprNode.BinaryNode b -> evalBinary(b, x, z, ly);
+            case ExprNode.UnaryNode u -> evalUnary(u, x, z, ly);
+            case ExprNode.ConditionalNode c -> evalConditional(c, x, z, ly);
+            case ExprNode.FuncCallNode f -> evalFunc(f, x, z, ly);
+            case ExprNode.BlockExprNode be -> evalBlockExpr(be, x, z, ly);
+        };
+    }
+    private static double varValue(String name, int x, int z, int ly) { return switch (name) { case "x" -> x; case "z" -> z; case "ly" -> ly; default -> 0; }; }
+    private static Object evalBlockExpr(ExprNode.BlockExprNode be, int x, int z, int ly) {
+        int n = be.bindings().size(); double[] slots = VAR_SLOTS.get();
+        if (slots.length < n) VAR_SLOTS.set(slots = new double[n]);
+        for (int i = 0; i < n; i++) slots[i] = toDouble(eval(be.bindings().get(i).value(), x, z, ly));
+        return eval(be.body(), x, z, ly);
+    }
+    private static Object evalBinary(ExprNode.BinaryNode b, int x, int z, int ly) {
+        Object l = eval(b.left(), x, z, ly), r = eval(b.right(), x, z, ly); BinaryOp op = b.op();
+        if (op == BinaryOp.AND || op == BinaryOp.OR) return op == BinaryOp.AND ? (toBool(l) && toBool(r)) : (toBool(l) || toBool(r));
+        if (op == BinaryOp.EQ || op == BinaryOp.NE) return compEqNe(op, l, r);
+        if (op == BinaryOp.LT || op == BinaryOp.GT || op == BinaryOp.LE || op == BinaryOp.GE) { double la = toDouble(l), ra = toDouble(r); return switch (op) { case LT -> la < ra; case GT -> la > ra; case LE -> la <= ra; case GE -> la >= ra; default -> false; }; }
+        double la = toDouble(l), ra = toDouble(r);
+        return switch (op) { case ADD -> la+ra; case SUB -> la-ra; case MUL -> la*ra; case DIV -> ra==0?0:la/ra; case MOD -> ra==0?0:la%ra; default -> 0d; };
+    }
+    private static boolean compEqNe(BinaryOp op, Object l, Object r) { boolean eq; if (l instanceof String ls && r instanceof String rs) eq = ls.equals(rs); else if (l instanceof Boolean lb && r instanceof Boolean rb) eq = lb == rb; else eq = Math.abs(toDouble(l)-toDouble(r)) < 1e-9; return op == BinaryOp.EQ ? eq : !eq; }
+    private static Object evalUnary(ExprNode.UnaryNode u, int x, int z, int ly) { Object v = eval(u.operand(), x, z, ly); return switch (u.op()) { case NOT -> !toBool(v); case NEG -> -toDouble(v); }; }
+    private static Object evalConditional(ExprNode.ConditionalNode c, int x, int z, int ly) { return toBool(eval(c.condition(), x, z, ly)) ? eval(c.thenExpr(), x, z, ly) : eval(c.elseExpr(), x, z, ly); }
+    private static Object evalFunc(ExprNode.FuncCallNode f, int x, int z, int ly) { List<Object> raw = new ArrayList<>(); for (ExprNode a : f.args()) raw.add(eval(a, x, z, ly)); return switch (f.name()) {
+        case "floordiv" -> { int a = toInt(raw.get(0)), b = toInt(raw.get(1)); yield (double)(b==0?0:Math.floorDiv(a,b)); } case "floormod" -> { int a = toInt(raw.get(0)), b = toInt(raw.get(1)); yield (double)(b==0?0:Math.floorMod(a,b)); }
+        case "abs" -> Math.abs(toDouble(raw.get(0))); case "max" -> Math.max(toDouble(raw.get(0)), toDouble(raw.get(1))); case "min" -> Math.min(toDouble(raw.get(0)), toDouble(raw.get(1)));
+        case "floor" -> Math.floor(toDouble(raw.get(0))); case "ceil" -> Math.ceil(toDouble(raw.get(0))); case "round" -> (double)Math.round(toDouble(raw.get(0)));
+        case "sign" -> (double)Math.signum(toDouble(raw.get(0))); case "sqrt" -> Math.sqrt(toDouble(raw.get(0))); case "pow" -> Math.pow(toDouble(raw.get(0)), toDouble(raw.get(1)));
+        case "exp" -> Math.exp(toDouble(raw.get(0))); case "log" -> Math.log(toDouble(raw.get(0))); case "log10" -> Math.log10(toDouble(raw.get(0)));
+        case "sin" -> Math.sin(toDouble(raw.get(0))); case "cos" -> Math.cos(toDouble(raw.get(0))); case "tan" -> Math.tan(toDouble(raw.get(0)));
+        case "asin" -> Math.asin(toDouble(raw.get(0))); case "acos" -> Math.acos(toDouble(raw.get(0))); case "atan" -> Math.atan(toDouble(raw.get(0)));
+        case "todeg" -> Math.toDegrees(toDouble(raw.get(0))); case "torad" -> Math.toRadians(toDouble(raw.get(0)));
+        case "rand" -> evalRand(raw, x, z, ly); case "randexcept" -> evalRandExcept(raw, x, z, ly); default -> toDouble(raw.get(0));
+    }; }
+    private static int pickIndex(int x, int z, int y, int bound) { if (bound<=0) return 0; int h = (x*374761393)^(z*668265263)^(y*997307); h = h^(h>>>16); return Math.floorMod(h&0x7FFFFFFF, bound); }
+    private static Object evalRand(List<Object> raw, int x, int z, int ly) { if (raw.isEmpty()) { List<BlockState> all = getAllBlocks(); return all.get(pickIndex(x,z,ly,all.size())); } List<BlockState> s = new ArrayList<>(); for (Object a : raw) if (a instanceof BlockState bs) s.add(bs); if (s.isEmpty()) return BlockResolver.resolve("minecraft:air"); return s.get(pickIndex(x,z,ly,s.size())); }
+    private static Object evalRandExcept(List<Object> raw, int x, int z, int ly) { List<BlockState> all = new ArrayList<>(getAllBlocks()); for (Object a : raw) if (a instanceof BlockState bs) all.remove(bs); if (all.isEmpty()) return BlockResolver.resolve("minecraft:air"); return all.get(pickIndex(x,z,ly,all.size())); }
+    private static List<BlockState> ALL_BLOCKS; private static List<BlockState> getAllBlocks() { if (ALL_BLOCKS==null) { List<BlockState> l = new ArrayList<>(); for (Block b : BuiltInRegistries.BLOCK) if (b!=Blocks.AIR) l.add(b.defaultBlockState()); ALL_BLOCKS=l; } return ALL_BLOCKS; }
+    public static BlockState evalToBlock(ExprNode n, int x, int z, int ly) { Object r = eval(n, x, z, ly); if (r instanceof BlockState bs) return bs; return BlockResolver.resolve("minecraft:air"); }
+    private static double toDouble(Object o) { if (o instanceof Number n) return n.doubleValue(); if (o instanceof Boolean b) return b?1d:0d; return 0d; }
+    private static int toInt(Object o) { if (o instanceof Number n) return n.intValue(); if (o instanceof Boolean b) return b?1:0; return 0; }
+    private static boolean toBool(Object o) { if (o instanceof Boolean b) return b; if (o instanceof Number n) return n.doubleValue()!=0; return false; }
+}
