@@ -22,8 +22,12 @@ public class WorldLoadHandler {
 
         if (config.serverMode()) {
             PatternData.set(FormulaParser.parse(config.formula()), config.formula());
-        } else if (!PatternData.restoreFromMarker(sl) && PatternData.isPending()) {
-            PatternData.markActive(sl);
+        } else if (!PatternData.restoreFromMarker(sl)) {
+            if (PatternData.isPending()) {
+                PatternData.markActive(sl);
+            } else {
+                PatternData.clearActive();
+            }
         }
 
         if (PatternData.isActive()) {

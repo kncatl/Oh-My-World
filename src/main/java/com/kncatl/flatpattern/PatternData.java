@@ -46,6 +46,7 @@ public class PatternData {
     }
 
     public static boolean isActive() { return active; }
+    public static void clearActive() { active = false; }
 
     public static void setPending() {
         pending = true;
