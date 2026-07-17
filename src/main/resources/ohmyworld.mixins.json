@@ -1,6 +1,6 @@
 {
     "required": true,
-    "package": "com.kncatl.flatpattern.mixin",
+    "package": "com.kncatl.ohmyworld.mixin",
     "compatibilityLevel": "JAVA_21",
     "mixins": ["MixinFlatLevelSource"],
     "client": [],

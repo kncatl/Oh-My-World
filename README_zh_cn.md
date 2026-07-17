@@ -9,10 +9,11 @@
 ## 功能
 
 - 创建世界界面新增 **"公式化生成"** 世界类型
-- **表达式引擎**：内置 30+ 数学函数（`sin`/`cos`/`tan`、平滑噪声 `smooth`、伪随机 `rng`/`rand` 等）
+- **表达式引擎**：内置 23 个数学函数（`sin`/`cos`/`tan`、整数运算 `floordiv`/`floormod`、伪随机 `rand`/`randexcept` 等）
 - **循环层**：在指定 y 范围内按序列循环铺设不同表达式的结果
-- 支持棋盘格、条纹、正弦波、有机噪声地形等图案
+- 支持棋盘格、条纹、正弦波、随机地形等图案
 - **自定义公式编辑器**，支持保存/加载到本地文件
+- **实时错误反馈**——公式解析错误直接在编辑器中显示
 - **跨会话持久化**——图案配置随世界存档保存
 
 ## 环境要求
@@ -46,9 +47,6 @@ y=0: minecraft:bedrock;y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraf
 
 # 循环层：3 基岩 + 2 泥土 + 1 棋盘格（每 6 层循环）
 y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
-
-# 平滑噪声地形
-y=1..64: smooth(x,z,0.1,0.1)>0.5 ? minecraft:white_concrete : minecraft:gray_concrete
 
 # 随机方块池
 y=1..64: rand(minecraft:stone, minecraft:dirt, minecraft:oak_planks)

@@ -8,5 +8,10 @@
   "ohmyworld.custom_screen.cancel": "取消",
   "ohmyworld.custom_screen.save": "保存公式",
   "ohmyworld.custom_screen.save_name": "键入有效内容时可以在点击保存按钮或完成按钮后保存公式",
-  "ohmyworld.custom_screen.save_name2": "保存位置与\"README_zh_cn.md\"相同"
+  "ohmyworld.custom_screen.save_name2": "保存位置与\"README_zh_cn.md\"相同",
+  "ohmyworld.custom_screen.load": "加载公式",
+  "ohmyworld.custom_screen.load_title": "选择一个已保存的公式加载",
+  "ohmyworld.custom_screen.no_saves": "在 <游戏文件夹>/ohmyworld/ 中未找到已保存的公式",
+  "ohmyworld.custom_screen.errors": "错误（%d）：",
+  "ohmyworld.custom_screen.no_errors": "未检测到错误。"
 }

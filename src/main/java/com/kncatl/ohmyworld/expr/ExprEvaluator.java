@@ -1,4 +1,4 @@
-package com.kncatl.flatpattern.expr;
+package com.kncatl.ohmyworld.expr;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -8,20 +8,35 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
-import com.kncatl.flatpattern.expr.ExprNode.BinaryOp;
+import com.kncatl.ohmyworld.expr.ExprNode.BinaryOp;
 
 public class ExprEvaluator {
+
+    private static final ThreadLocal<double[]> VAR_SLOTS = ThreadLocal.withInitial(() -> new double[0]);
 
     public static Object eval(ExprNode node, int x, int z, int ly) {
         return switch (node) {
             case ExprNode.NumberNode n -> n.value();
             case ExprNode.VariableNode v -> varValue(v.name(), x, z, ly);
+            case ExprNode.IndexedVarNode iv -> VAR_SLOTS.get()[iv.index()];
             case ExprNode.BlockNode b -> BlockResolver.resolve(b.blockId());
             case ExprNode.BinaryNode b -> evalBinary(b, x, z, ly);
             case ExprNode.UnaryNode u -> evalUnary(u, x, z, ly);
             case ExprNode.ConditionalNode c -> evalConditional(c, x, z, ly);
             case ExprNode.FuncCallNode f -> evalFunc(f, x, z, ly);
+            case ExprNode.BlockExprNode be -> evalBlockExpr(be, x, z, ly);
         };
+    }
+
+    private static Object evalBlockExpr(ExprNode.BlockExprNode be, int x, int z, int ly) {
+        int required = 0;
+        for (ExprNode.LetBinding lb : be.bindings()) if (lb.index() + 1 > required) required = lb.index() + 1;
+        double[] slots = VAR_SLOTS.get();
+        if (slots.length < required) VAR_SLOTS.set(slots = new double[required]);
+        for (ExprNode.LetBinding lb : be.bindings()) {
+            slots[lb.index()] = toDouble(eval(lb.value(), x, z, ly));
+        }
+        return eval(be.body(), x, z, ly);
     }
 
     private static double varValue(String name, int x, int z, int ly) {
@@ -29,9 +44,10 @@ public class ExprEvaluator {
     }
 
     private static Object evalBinary(ExprNode.BinaryNode b, int x, int z, int ly) {
-        Object left = eval(b.left(), x, z, ly); Object right = eval(b.right(), x, z, ly);
         BinaryOp op = b.op();
-        if (op == BinaryOp.AND || op == BinaryOp.OR) { return op == BinaryOp.AND ? (toBool(left) && toBool(right)) : (toBool(left) || toBool(right)); }
+        if (op == BinaryOp.AND) return toBool(eval(b.left(), x, z, ly)) && toBool(eval(b.right(), x, z, ly));
+        if (op == BinaryOp.OR) return toBool(eval(b.left(), x, z, ly)) || toBool(eval(b.right(), x, z, ly));
+        Object left = eval(b.left(), x, z, ly); Object right = eval(b.right(), x, z, ly);
         if (op == BinaryOp.EQ || op == BinaryOp.NE) return compEqNe(op, left, right);
         if (op == BinaryOp.LT || op == BinaryOp.GT || op == BinaryOp.LE || op == BinaryOp.GE) {
             double la = toDouble(left); double ra = toDouble(right);
@@ -76,58 +92,39 @@ public class ExprEvaluator {
             case "asin"  -> Math.asin(toDouble(raw.get(0))); case "acos" -> Math.acos(toDouble(raw.get(0))); case "atan" -> Math.atan(toDouble(raw.get(0)));
             case "todeg" -> Math.toDegrees(toDouble(raw.get(0))); case "torad" -> Math.toRadians(toDouble(raw.get(0)));
             case "rand" -> evalRand(raw, x, z, ly); case "randexcept" -> evalRandExcept(raw, x, z, ly);
-            case "rng" -> evalRng(raw, x, z); case "smooth" -> evalSmooth(raw, x, z);
-            default -> toDouble(raw.get(0));
+            default -> throw new IllegalArgumentException("Unknown function: " + f.name());
         };
+    }
+
+    private static int pickIndex(int x, int z, int y, int bound) {
+        if (bound <= 0) return 0;
+        int h = (x * 374761393) ^ (z * 668265263) ^ (y * 997307);
+        h = h ^ (h >>> 16);
+        return Math.floorMod(h & 0x7FFFFFFF, bound);
+    }
+
+    private static Object evalRand(List<Object> raw, int x, int z, int ly) {
+        if (raw.isEmpty()) {
+            List<BlockState> all = getAllBlocks();
+            return all.get(pickIndex(x, z, ly, all.size()));
+        }
+        List<BlockState> states = new ArrayList<>();
+        for (Object arg : raw) if (arg instanceof BlockState bs) states.add(bs);
+        if (states.isEmpty()) return BlockResolver.resolve("minecraft:air");
+        return states.get(pickIndex(x, z, ly, states.size()));
+    }
+
+    private static Object evalRandExcept(List<Object> raw, int x, int z, int ly) {
+        List<BlockState> all = new ArrayList<>(getAllBlocks());
+        for (Object arg : raw) if (arg instanceof BlockState bs) all.remove(bs);
+        if (all.isEmpty()) return BlockResolver.resolve("minecraft:air");
+        return all.get(pickIndex(x, z, ly, all.size()));
     }
 
     private static List<BlockState> ALL_BLOCKS;
     private static List<BlockState> getAllBlocks() {
         if (ALL_BLOCKS == null) { List<BlockState> list = new ArrayList<>(); for (Block block : BuiltInRegistries.BLOCK) if (block != Blocks.AIR) list.add(block.defaultBlockState()); ALL_BLOCKS = list; }
         return ALL_BLOCKS;
-    }
-
-    private static int pickIndex(int x, int z, int y, int bound) {
-        if (bound <= 0) return 0;
-        long mix = ((long)x * 374761393L + (long)z * 668265263L + y) ^ 0x5DEECE66DL;
-        mix = (mix ^ (mix >>> 33)) * 0xFF51AFD7ED558CCDL; mix = (mix ^ (mix >>> 33)) * 0xC4CEB9FE1A85EC53L; mix = mix ^ (mix >>> 33);
-        return (int)Math.floorMod(mix, (long)bound);
-    }
-
-    private static Object evalRand(List<Object> raw, int x, int z, int ly) {
-        if (raw.isEmpty()) return getAllBlocks().get(pickIndex(x, z, ly, getAllBlocks().size()));
-        List<BlockState> states = new ArrayList<>(); for (Object arg : raw) if (arg instanceof BlockState bs) states.add(bs);
-        if (states.isEmpty()) return BlockResolver.resolve("minecraft:air");
-        return states.get(pickIndex(x, z, ly, states.size()));
-    }
-
-    private static Object evalRandExcept(List<Object> raw, int x, int z, int ly) {
-        List<BlockState> all = new ArrayList<>(getAllBlocks()); for (Object arg : raw) if (arg instanceof BlockState bs) all.remove(bs);
-        if (all.isEmpty()) return BlockResolver.resolve("minecraft:air");
-        return all.get(pickIndex(x, z, ly, all.size()));
-    }
-
-    private static double hashDouble(int x, int y) {
-        long mix = ((long)x * 374761393L + (long)y * 668265263L) ^ 0x5DEECE66DL;
-        mix = (mix ^ (mix >>> 33)) * 0xFF51AFD7ED558CCDL; mix = (mix ^ (mix >>> 33)) * 0xC4CEB9FE1A85EC53L; mix = mix ^ (mix >>> 33);
-        return (double)(mix & 0x7FFFFFFFFFFFFFFFL) / (double)0x7FFFFFFFFFFFFFFFL;
-    }
-
-    private static Object evalRng(List<Object> raw, int x, int z) {
-        double val = hashDouble(x, z); if (raw.size() >= 2) { double a = toDouble(raw.get(0)); double b = toDouble(raw.get(1)); return a + val * (b - a); }
-        return val;
-    }
-
-    private static Object evalSmooth(List<Object> raw, int x, int z) {
-        if (raw.size() >= 2) return smoothNoise(x * toDouble(raw.get(0)), z * toDouble(raw.get(1)));
-        return smoothNoise(x, z);
-    }
-
-    private static double smoothNoise(double x, double z) {
-        int ix = (int)Math.floor(x); int iz = (int)Math.floor(z); double fx = x - ix; double fz = z - iz;
-        fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
-        double v00 = hashDouble(ix, iz); double v10 = hashDouble(ix + 1, iz); double v01 = hashDouble(ix, iz + 1); double v11 = hashDouble(ix + 1, iz + 1);
-        return v00 + (v10 - v00) * fx + (v01 - v00) * fz + (v00 - v10 - v01 + v11) * fx * fz;
     }
 
     public static BlockState evalToBlock(ExprNode node, int x, int z, int ly) {

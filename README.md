@@ -9,10 +9,11 @@
 ## Features
 
 - **Formula Generator** world type in the Create World screen
-- **Expression engine** with 30+ built-in functions: arithmetic, trigonometry (`sin`, `cos`, `tan`), smooth noise (`smooth`), pseudo-random (`rng`, `rand`)
+- **Expression engine** with 23 built-in functions: arithmetic, trigonometry (`sin`, `cos`, `tan`), integer math (`floordiv`, `floormod`), pseudo-random (`rand`, `randexcept`)
 - **Cyclic layer patterns** — define repeating sequences within a y-range
-- **Checkboard, stripes, sine waves, organic noise terrain** and more
+- **Checkboard, stripes, sine waves, random terrain** and more
 - **Custom formula editor** with save/load to local files
+- **Live parse error feedback** — formula errors are shown directly in the editor
 - **Cross-session persistence** — your pattern is stored with the world
 
 ## Requirements
@@ -46,9 +47,6 @@ y=0: minecraft:bedrock;y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraf
 
 # Cyclic: 3 bedrock + 2 dirt + 1 checker (repeating every 6 layers)
 y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
-
-# Smooth noise terrain
-y=1..64: smooth(x,z,0.1,0.1)>0.5 ? minecraft:white_concrete : minecraft:gray_concrete
 
 # Random pool
 y=1..64: rand(minecraft:stone, minecraft:dirt, minecraft:oak_planks)

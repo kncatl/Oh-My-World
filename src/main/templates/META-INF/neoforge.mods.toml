@@ -16,6 +16,8 @@ displayName="${mod_name}" #mandatory
 
 displayURL="https://github.com/kncatl/Oh-My-World" #optional
 
+displayTest="NONE" #optional — does not require client to have this mod
+
 logoFile="logo.png" #optional
 
 #credits="" #optional

@@ -8,5 +8,10 @@
   "ohmyworld.custom_screen.cancel": "Cancel",
   "ohmyworld.custom_screen.save": "Save Formula",
   "ohmyworld.custom_screen.save_name": "Enter a name to save the formula when you click Save or Create New World.",
-  "ohmyworld.custom_screen.save_name2": "Saved in the same folder as \"README_en_us.md\""
+  "ohmyworld.custom_screen.save_name2": "Saved in the same folder as \"README_en_us.md\"",
+  "ohmyworld.custom_screen.load": "Load Formula",
+  "ohmyworld.custom_screen.load_title": "Select a saved formula to load",
+  "ohmyworld.custom_screen.no_saves": "No saved formulas found in <game_dir>/ohmyworld/",
+  "ohmyworld.custom_screen.errors": "Errors (%d):",
+  "ohmyworld.custom_screen.no_errors": "No errors detected."
 }
