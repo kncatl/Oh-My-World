@@ -7,6 +7,7 @@ import net.minecraft.world.level.levelgen.presets.WorldPreset;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.RegisterPresetEditorsEvent;
 
 @EventBusSubscriber(modid = "ohmyworld", value = Dist.CLIENT, bus = EventBusSubscriber.Bus.MOD)
@@ -19,5 +20,10 @@ public class FlatPatternClient {
     @SubscribeEvent
     public static void registerPresetEditors(RegisterPresetEditorsEvent event) {
         event.register(OUR_KEY, CustomFlatScreen::new);
+    }
+
+    @SubscribeEvent
+    public static void onClientSetup(FMLClientSetupEvent event) {
+        FlatPatternScreenEvents.register();
     }
 }

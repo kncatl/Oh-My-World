@@ -1,19 +1,16 @@
 package com.kncatl.ohmyworld;
 
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.event.level.LevelEvent;
 
-@EventBusSubscriber(modid = FlatPattern.MODID)
-public class WorldLoadHandler {
+import com.kncatl.ohmyworld.platform.Platform;
 
-    @SubscribeEvent
-    public static void onLevelLoad(LevelEvent.Load event) {
-        if (!(event.getLevel() instanceof ServerLevel sl)) return;
-        if (sl.dimension() != Level.OVERWORLD) return;
+public final class WorldLoadHandler {
 
+    public static void register() {
+        Platform.get().onLevelLoad(WorldLoadHandler::onLevelLoad);
+    }
+
+    private static void onLevelLoad(ServerLevel sl) {
         OhMyWorldConfig config = OhMyWorldConfig.load();
 
         if (config.serverMode()) {

@@ -5,8 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.loading.FMLPaths;
 
+import com.kncatl.ohmyworld.platform.Platform;
+import com.kncatl.ohmyworld.platform.neoforge.NeoForgePlatform;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
@@ -19,28 +20,34 @@ public class FlatPattern {
     public FlatPattern() {
         if (!initialized) {
             initialized = true;
+            Platform.set(new NeoForgePlatform());
             OhMyWorldConfig.load();
-            try {
-                Path dir = FMLPaths.GAMEDIR.get().resolve("ohmyworld");
-                Files.createDirectories(dir);
+            copyGuideFiles();
+            WorldLoadHandler.register();
+        }
+    }
 
-                Path zh = dir.resolve("README_zh_cn.md");
-                if (!Files.exists(zh)) {
-                    try (InputStream in = getClass().getResourceAsStream("/assets/ohmyworld/doc/guide.txt")) {
-                        if (in != null) Files.copy(in, zh);
-                    }
-                }
+    private static void copyGuideFiles() {
+        try {
+            Path dir = Platform.get().gameDir().resolve("ohmyworld");
+            Files.createDirectories(dir);
 
-                Path en = dir.resolve("README_en_us.md");
-                if (!Files.exists(en)) {
-                    try (InputStream in = getClass().getResourceAsStream("/assets/ohmyworld/doc/guide_en.txt")) {
-                        if (in != null) Files.copy(in, en);
-                    }
+            Path zh = dir.resolve("README_zh_cn.md");
+            if (!Files.exists(zh)) {
+                try (InputStream in = FlatPattern.class.getResourceAsStream("/assets/ohmyworld/doc/guide.txt")) {
+                    if (in != null) Files.copy(in, zh);
                 }
-                LOGGER.debug("README files created at {}", dir);
-            } catch (Exception e) {
-                LOGGER.warn("Failed to create ohmyworld/README", e);
             }
+
+            Path en = dir.resolve("README_en_us.md");
+            if (!Files.exists(en)) {
+                try (InputStream in = FlatPattern.class.getResourceAsStream("/assets/ohmyworld/doc/guide_en.txt")) {
+                    if (in != null) Files.copy(in, en);
+                }
+            }
+            LOGGER.debug("README files created at {}", dir);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to create ohmyworld/README", e);
         }
     }
 }
