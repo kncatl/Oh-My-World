@@ -1,15 +1,20 @@
 fun prop(name: String): String = property(name).toString()
 
+// Stonecutter 注入的项目名形如 "1.21.1-neoforge"
+val mcVersion = stonecutter.current.version
+val loader = stonecutter.current.project.substringAfterLast('-')
+
 plugins {
     id("java-library")
     id("net.neoforged.moddev")
 }
 
+// 产物名: oh-my-world-<mc>-<loader>-<modver>.jar
 version = prop("mod_version")
 group = prop("mod_group_id")
 
 base {
-    archivesName = "oh-my-world"
+    archivesName = "oh-my-world-$mcVersion-$loader"
 }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
