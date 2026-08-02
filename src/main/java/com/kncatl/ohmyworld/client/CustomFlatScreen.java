@@ -40,8 +40,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final Component LOAD = Component.translatable("ohmyworld.custom_screen.load");
     private static final Component LOAD_TITLE = Component.translatable("ohmyworld.custom_screen.load_title");
     private static final Component NO_SAVES = Component.translatable("ohmyworld.custom_screen.no_saves");
-    private static final int ERROR_COLOR = 0xFF5555;
-    private static final int OK_COLOR = 0x55FF55;
+    private static final int ERROR_COLOR = 0xFFFF5555;
+    private static final int OK_COLOR = 0xFF55FF55;
 
     public CustomFlatScreen(CreateWorldScreen parent, WorldCreationContext context) {
         super(TITLE);
@@ -141,7 +141,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                 @Override
                 public void render(GuiGraphics g, int mx, int my, float pt) {
                     super.render(g, mx, my, pt);
-                    g.drawCenteredString(this.font, NO_SAVES, this.width / 2, this.height / 2 - 10, 0xFF5555);
+                    g.drawCenteredString(this.font, NO_SAVES, this.width / 2, this.height / 2 - 10, 0xFFFF5555);
                 }
                 @Override
                 public void onClose() { this.minecraft.setScreen(CustomFlatScreen.this); }
@@ -194,10 +194,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(this.font, TITLE, this.width / 2, 18, 0xFFFFFF);
-        graphics.drawString(this.font, LAYERS_LABEL, this.width / 2 - 145, 47, 0xA0A0A0);
-        graphics.drawString(this.font, SAVE_NAME, this.width / 2 - 145, this.nameInput.getY() - 22, 0xA0A0A0);
-        graphics.drawString(this.font, SAVE_NAME2, this.width / 2 - 145, this.nameInput.getY() - 12, 0xA0A0A0);
+        graphics.drawCenteredString(this.font, TITLE, this.width / 2, 18, 0xFFFFFFFF);
+        graphics.drawString(this.font, LAYERS_LABEL, this.width / 2 - 145, 47, 0xFFA0A0A0);
+        graphics.drawString(this.font, SAVE_NAME, this.width / 2 - 145, this.nameInput.getY() - 22, 0xFFA0A0A0);
+        graphics.drawString(this.font, SAVE_NAME2, this.width / 2 - 145, this.nameInput.getY() - 12, 0xFFA0A0A0);
 
         int errorY = this.nameInput.getY() + 30 + 26 + 20 + 10;
         if (currentErrors.isEmpty()) {
