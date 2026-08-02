@@ -10,6 +10,9 @@ val neoVersion = when (mcVersion) {
     "1.21.11" -> "21.11.45"
     else -> throw GradleException("Unsupported Minecraft version: $mcVersion (add it to build.neoforge.gradle.kts)")
 }
+// javafml 语言提供器版本范围（与 FancyModLoader 主版本对齐，与 MC/NeoForge 版本无关）
+// 1.21.x 系列使用 [1,)；后续版本如需可调整
+val loaderVersionRange = "[1,)"
 val parchmentMc: String? = when (mcVersion) {
     "1.21.1" -> "1.21.1"
     else -> null
@@ -98,7 +101,7 @@ val generateModMetadata = tasks.register<ProcessResources>("generateModMetadata"
         "minecraft_version" to mcVersion,
         "minecraft_version_range" to "[$mcVersion]",
         "neo_version" to neoVersion,
-        "loader_version_range" to "[$neoVersion,)",
+        "loader_version_range" to loaderVersionRange,
         "mod_id" to prop("mod_id"),
         "mod_name" to prop("mod_name"),
         "mod_license" to prop("mod_license"),
