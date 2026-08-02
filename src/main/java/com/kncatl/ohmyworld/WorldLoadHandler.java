@@ -11,10 +11,13 @@ public final class WorldLoadHandler {
     }
 
     private static void onLevelLoad(ServerLevel sl) {
-        OhMyWorldConfig config = OhMyWorldConfig.load();
+        // 每次世界加载时重新读取配置文件，支持运行中热修改 ohmyworld.json
+        OhMyWorldConfig config = OhMyWorldConfig.reload();
 
         if (config.serverMode()) {
             PatternData.set(FormulaParser.parse(config.formula()), config.formula());
+            // server_mode 下也写入 marker，保证之后关闭 server_mode 时世界仍能恢复自身公式
+            PatternData.markActive(sl);
         } else if (!PatternData.restoreFromMarker(sl)) {
             if (PatternData.isPending()) {
                 PatternData.markActive(sl);

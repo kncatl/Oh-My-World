@@ -30,6 +30,12 @@ public class OhMyWorldConfig {
 
     public static OhMyWorldConfig load() {
         if (instance != null) return instance;
+        return reload();
+    }
+
+    /** 强制重新从磁盘读取配置（世界加载时调用，支持运行中热修改 ohmyworld.json） */
+    public static OhMyWorldConfig reload() {
+        instance = null;
         Path configPath = configPath();
 
         if (Files.exists(configPath)) {

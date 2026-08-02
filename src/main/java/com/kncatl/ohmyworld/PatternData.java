@@ -6,6 +6,7 @@ import java.util.List;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -110,7 +111,7 @@ public class PatternData {
                         for (int z = 0; z < 16; z++) {
                             BlockState st = f.getBlock(cx + x, cz + z, y);
                             //? >=1.21.5 {
-                            chunk.setBlockState(pos.set(x, y, z), st, 0);
+                            chunk.setBlockState(pos.set(x, y, z), st, Block.UPDATE_ALL);
                             //?} else {
                             chunk.setBlockState(pos.set(x, y, z), st, false);
                             //?}
@@ -125,7 +126,7 @@ public class PatternData {
                         for (int z = 0; z < 16; z++) {
                             BlockState st = c.getBlock(cx + x, cz + z, y);
                             //? >=1.21.5 {
-                            chunk.setBlockState(pos.set(x, y, z), st, 0);
+                            chunk.setBlockState(pos.set(x, y, z), st, Block.UPDATE_ALL);
                             //?} else {
                             chunk.setBlockState(pos.set(x, y, z), st, false);
                             //?}
