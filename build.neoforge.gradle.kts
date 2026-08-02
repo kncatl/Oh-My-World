@@ -48,6 +48,8 @@ sourceSets.getByName("main").resources {
     srcDir("src/generated/resources")
     exclude("**/*.bbmodel")
     exclude("src/generated/**/.cache")
+    // NeoForge 排除 Fabric 描述文件
+    exclude("fabric.mod.json")
 }
 
 repositories {

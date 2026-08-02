@@ -4,17 +4,25 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+//? if NEOFORGE {
 import net.neoforged.fml.common.Mod;
+//?}
 
 import com.kncatl.ohmyworld.platform.Platform;
+//? if NEOFORGE {
 import com.kncatl.ohmyworld.platform.neoforge.NeoForgePlatform;
+//?}
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
+//? if NEOFORGE {
 @Mod(FlatPattern.MODID)
+//?}
 public class FlatPattern {
     public static final String MODID = "ohmyworld";
     private static final Logger LOGGER = LogUtils.getLogger();
+
+    //? if NEOFORGE {
     private static boolean initialized;
 
     public FlatPattern() {
@@ -26,8 +34,9 @@ public class FlatPattern {
             WorldLoadHandler.register();
         }
     }
+    //?}
 
-    private static void copyGuideFiles() {
+    public static void copyGuideFiles() {
         try {
             Path dir = Platform.get().gameDir().resolve("ohmyworld");
             Files.createDirectories(dir);

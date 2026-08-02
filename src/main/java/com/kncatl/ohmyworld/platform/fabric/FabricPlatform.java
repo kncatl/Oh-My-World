@@ -1,34 +1,35 @@
-package com.kncatl.ohmyworld.platform.neoforge;
+package com.kncatl.ohmyworld.platform.fabric;
 
-//? if NEOFORGE {
+//? if FABRIC {
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.server.level.ServerLevel;
-import net.neoforged.fml.loading.FMLPaths;
 
 import com.kncatl.ohmyworld.platform.LevelLoadCallback;
 import com.kncatl.ohmyworld.platform.Platform;
 import com.kncatl.ohmyworld.platform.ScreenRenderCallback;
 
-public class NeoForgePlatform implements Platform {
+public class FabricPlatform implements Platform {
 
     private final List<LevelLoadCallback> levelCallbacks = new ArrayList<>();
     private final List<ScreenRenderCallback> screenCallbacks = new ArrayList<>();
 
-    public NeoForgePlatform() {
+    public FabricPlatform() {
         Platform.set(this);
     }
 
     @Override
     public Path gameDir() {
-        return FMLPaths.GAMEDIR.get();
+        return FabricLoader.getInstance().getGameDir();
     }
 
     @Override
     public Path configDir() {
-        return FMLPaths.CONFIGDIR.get();
+        return FabricLoader.getInstance().getConfigDir();
     }
 
     @Override
@@ -45,7 +46,7 @@ public class NeoForgePlatform implements Platform {
         for (LevelLoadCallback cb : levelCallbacks) cb.onLoad(level);
     }
 
-    void dispatchScreenRender(net.minecraft.client.gui.screens.Screen screen) {
+    void dispatchScreenRender(Screen screen) {
         for (ScreenRenderCallback cb : screenCallbacks) cb.onRender(screen);
     }
 }

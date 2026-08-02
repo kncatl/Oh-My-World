@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ohmyworld",
+  "version": "${mod_version}",
+  "name": "Oh My World",
+  "description": "Generate worlds using custom mathematical formulas.",
+  "authors": ["kncatl"],
+  "license": "MIT",
+  "icon": "logo.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.kncatl.ohmyworld.platform.fabric.OhMyWorldFabric"],
+    "client": ["com.kncatl.ohmyworld.platform.fabric.OhMyWorldFabricClient"]
+  },
+  "mixins": ["ohmyworld.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "fabric-api": "*",
+    "minecraft": ">=1.21.11",
+    "java": ">=21"
+  }
+}

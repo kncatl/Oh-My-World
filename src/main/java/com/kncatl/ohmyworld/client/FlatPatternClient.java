@@ -1,5 +1,6 @@
 package com.kncatl.ohmyworld.client;
 
+//? if NEOFORGE {
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 //? >=1.21.11 {
@@ -17,17 +18,9 @@ import net.neoforged.neoforge.client.event.RegisterPresetEditorsEvent;
 @EventBusSubscriber(modid = "ohmyworld", value = Dist.CLIENT)
 public class FlatPatternClient {
 
-    static final ResourceKey<WorldPreset> OUR_KEY =
-            ResourceKey.create(Registries.WORLD_PRESET,
-                    //? >=1.21.11 {
-                    Identifier.fromNamespaceAndPath("ohmyworld", "flat_plus"));
-                    //?} else {
-                    ResourceLocation.fromNamespaceAndPath("ohmyworld", "flat_plus"));
-                    //?}
-
     @SubscribeEvent
     public static void registerPresetEditors(RegisterPresetEditorsEvent event) {
-        event.register(OUR_KEY, CustomFlatScreen::new);
+        event.register(FlatPatternScreenEvents.OUR_KEY, CustomFlatScreen::new);
     }
 
     @SubscribeEvent
@@ -35,3 +28,4 @@ public class FlatPatternClient {
         FlatPatternScreenEvents.register();
     }
 }
+//?}

@@ -1,5 +1,6 @@
 package com.kncatl.ohmyworld.platform.neoforge;
 
+//? if NEOFORGE {
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -32,3 +33,4 @@ public class NeoForgeEvents {
         }
     }
 }
+//?}
