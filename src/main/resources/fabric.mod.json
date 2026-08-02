@@ -12,7 +12,7 @@
     "main": ["com.kncatl.ohmyworld.platform.fabric.OhMyWorldFabric"],
     "client": ["com.kncatl.ohmyworld.platform.fabric.OhMyWorldFabricClient"]
   },
-  "mixins": ["ohmyworld.mixins.json"],
+  "mixins": ["ohmyworld.fabric.mixins.json"],
   "depends": {
     "fabricloader": ">=0.18.1",
     "fabric-api": "*",

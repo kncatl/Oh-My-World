@@ -20,7 +20,7 @@ import com.kncatl.ohmyworld.platform.Platform;
 public final class FlatPatternScreenEvents {
 
     // ohmyworld:flat_plus 预设键（加载器通用）
-    static final ResourceKey<WorldPreset> OUR_KEY =
+    public static final ResourceKey<WorldPreset> OUR_KEY =
             ResourceKey.create(Registries.WORLD_PRESET,
                     //? >=1.21.11 {
                     Identifier.fromNamespaceAndPath("ohmyworld", "flat_plus"));
