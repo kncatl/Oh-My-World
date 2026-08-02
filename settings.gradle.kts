@@ -28,8 +28,8 @@ stonecutter {
         //   阶段 3  → 26.2-fabric
         //   阶段 4  → 1.21.4 / 1.21.11 rep 版本
         match("1.21.1", "neoforge")
+        match("1.21.11", "neoforge")
         // match("1.21.4", "neoforge", "fabric")
-        // match("1.21.11", "neoforge", "fabric")
         // match("26.2", "neoforge", "fabric")
 
         vcsVersion = "1.21.1-neoforge"

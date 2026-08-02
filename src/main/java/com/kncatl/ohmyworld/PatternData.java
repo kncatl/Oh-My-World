@@ -109,7 +109,11 @@ public class PatternData {
                     for (int x = 0; x < 16; x++) {
                         for (int z = 0; z < 16; z++) {
                             BlockState st = f.getBlock(cx + x, cz + z, y);
+                            //? >=1.21.5 {
+                            chunk.setBlockState(pos.set(x, y, z), st, 0);
+                            //?} else {
                             chunk.setBlockState(pos.set(x, y, z), st, false);
+                            //?}
                             h0.update(x, y, z, st);
                             h1.update(x, y, z, st);
                         }
@@ -120,7 +124,11 @@ public class PatternData {
                     for (int x = 0; x < 16; x++) {
                         for (int z = 0; z < 16; z++) {
                             BlockState st = c.getBlock(cx + x, cz + z, y);
+                            //? >=1.21.5 {
+                            chunk.setBlockState(pos.set(x, y, z), st, 0);
+                            //?} else {
                             chunk.setBlockState(pos.set(x, y, z), st, false);
+                            //?}
                             h0.update(x, y, z, st);
                             h1.update(x, y, z, st);
                         }

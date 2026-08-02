@@ -47,7 +47,11 @@ public class MixinFlatLevelSource {
         List<Object> layers = PatternData.get();
         if (layers == null || layers.isEmpty()) return;
 
+        //? >=1.21.5 {
+        int top = level.getMinY();
+        //?} else {
         int top = level.getMinBuildHeight();
+        //?}
         for (Object obj : layers) {
             int yEnd;
             if (obj instanceof FormulaLayerDef f) yEnd = f.yEnd();
@@ -65,7 +69,11 @@ public class MixinFlatLevelSource {
         List<Object> layers = PatternData.get();
         if (layers == null || layers.isEmpty()) return;
 
+        //? >=1.21.5 {
+        int minY = height.getMinY();
+        //?} else {
         int minY = height.getMinBuildHeight();
+        //?}
         int total = height.getHeight();
         BlockState[] column = new BlockState[total];
         Arrays.fill(column, Blocks.AIR.defaultBlockState());

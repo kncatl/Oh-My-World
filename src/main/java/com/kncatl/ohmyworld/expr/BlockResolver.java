@@ -1,7 +1,11 @@
 package com.kncatl.ohmyworld.expr;
 
 import net.minecraft.core.registries.BuiltInRegistries;
+//? >=1.21.11 {
+import net.minecraft.resources.Identifier;
+//?} else {
 import net.minecraft.resources.ResourceLocation;
+//?}
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -24,7 +28,11 @@ public class BlockResolver {
             case "minecraft:oak_planks" -> Blocks.OAK_PLANKS; case "minecraft:glass" -> Blocks.GLASS;
             case "minecraft:obsidian" -> Blocks.OBSIDIAN; case "minecraft:sand" -> Blocks.SAND;
             case "minecraft:gravel" -> Blocks.GRAVEL; case "minecraft:water" -> Blocks.WATER; case "minecraft:lava" -> Blocks.LAVA;
-            default -> { ResourceLocation loc = ResourceLocation.tryParse(blockId); yield loc != null ? BuiltInRegistries.BLOCK.get(loc) : null; }
+            //? >=1.21.11 {
+            default -> { Identifier loc = Identifier.tryParse(blockId); yield loc != null ? BuiltInRegistries.BLOCK.get(loc).map(h -> h.value()).orElse(null) : null; }
+            //?} else {
+            /*default -> { ResourceLocation loc = ResourceLocation.tryParse(blockId); yield loc != null ? BuiltInRegistries.BLOCK.get(loc) : null; }
+            *///?}
         };
         return b != null ? b.defaultBlockState() : Blocks.AIR.defaultBlockState();
     }

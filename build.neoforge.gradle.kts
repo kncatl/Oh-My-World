@@ -4,10 +4,27 @@ fun prop(name: String): String = property(name).toString()
 val mcVersion = stonecutter.current.version
 val loader = stonecutter.current.project.substringAfterLast('-')
 
+// MC 版本到 NeoForge / Parchment 的版本映射
+val neoVersion = when (mcVersion) {
+    "1.21.1" -> "21.1.234"
+    "1.21.11" -> "21.11.45"
+    else -> throw GradleException("Unsupported Minecraft version: $mcVersion (add it to build.neoforge.gradle.kts)")
+}
+val parchmentMc: String? = when (mcVersion) {
+    "1.21.1" -> "1.21.1"
+    else -> null
+}
+val parchmentVer: String? = when (mcVersion) {
+    "1.21.1" -> "2024.11.17"
+    else -> null
+}
+
 plugins {
     id("java-library")
     id("net.neoforged.moddev")
 }
+
+// 版本差异通过源码内的 Stonecutter 条件编译注释 /*? >=<ver> ... */ 处理
 
 // 产物名: oh-my-world-<mc>-<loader>-<modver>.jar
 version = prop("mod_version")
@@ -19,6 +36,11 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+// Stonecutter 处理后的源码替换默认 src/main/java
+sourceSets.getByName("main").java {
+    setSrcDirs(listOf(layout.buildDirectory.dir("generated/stonecutter/main/java").get().asFile))
+}
+
 sourceSets.getByName("main").resources {
     srcDir("src/generated/resources")
     exclude("**/*.bbmodel")
@@ -29,11 +51,11 @@ repositories {
 }
 
 neoForge {
-    version = prop("neo_version")
+    version = neoVersion
 
-    parchment {
-        mappingsVersion = prop("parchment_mappings_version")
-        minecraftVersion = prop("parchment_minecraft_version")
+    if (parchmentMc != null && parchmentVer != null) parchment {
+        mappingsVersion = parchmentVer
+        minecraftVersion = parchmentMc
     }
 
     runs {
@@ -73,10 +95,10 @@ neoForge {
 
 val generateModMetadata = tasks.register<ProcessResources>("generateModMetadata") {
     val replaceProperties = mapOf(
-        "minecraft_version" to prop("minecraft_version"),
-        "minecraft_version_range" to prop("minecraft_version_range"),
-        "neo_version" to prop("neo_version"),
-        "loader_version_range" to prop("loader_version_range"),
+        "minecraft_version" to mcVersion,
+        "minecraft_version_range" to "[$mcVersion]",
+        "neo_version" to neoVersion,
+        "loader_version_range" to "[$neoVersion,)",
         "mod_id" to prop("mod_id"),
         "mod_name" to prop("mod_name"),
         "mod_license" to prop("mod_license"),
@@ -92,4 +114,9 @@ neoForge.ideSyncTask(generateModMetadata)
 
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
+    dependsOn("stonecutterGenerate")
+}
+
+tasks.named("createMinecraftArtifacts") {
+    dependsOn("stonecutterGenerate")
 }
