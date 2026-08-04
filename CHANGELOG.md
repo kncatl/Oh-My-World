@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.1.1
 
 ### Fixed
 - Fixed client-only Fabric mixins being loaded on dedicated servers.
