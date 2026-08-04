@@ -88,6 +88,13 @@ versions** (`clean` wipes every version's build directory, including jars). Use
 `buildActive` to build a single version; after a successful build the console prints
 the full path of the produced jar.
 
+## Links
+
+- [GitHub Repository](https://github.com/kncatl/Oh-My-World)
+- [Issue Tracker](https://github.com/kncatl/Oh-My-World/issues)
+- [Releases](https://github.com/kncatl/Oh-My-World/releases)
+- [CurseForge](https://www.curseforge.com/minecraft/mc-mods/oh-my-world)
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.

@@ -86,6 +86,13 @@ cd Oh-My-World
 （clean 会清空所有版本的 build 目录，包括 jar）。只构建一个版本请用 `buildActive`，
 构建成功后控制台会直接打印 jar 的完整路径。
 
+## 项目链接
+
+- [GitHub 仓库](https://github.com/kncatl/Oh-My-World)
+- [问题反馈](https://github.com/kncatl/Oh-My-World/issues)
+- [版本发布](https://github.com/kncatl/Oh-My-World/releases)
+- [CurseForge](https://www.curseforge.com/minecraft/mc-mods/oh-my-world)
+
 ## 许可协议
 
 MIT License — 详见 [LICENSE](LICENSE)
