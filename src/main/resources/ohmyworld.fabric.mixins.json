@@ -2,7 +2,7 @@
     "required": true,
     "package": "com.kncatl.ohmyworld.mixin",
     "compatibilityLevel": "JAVA_21",
-    "mixins": ["MixinFlatLevelSource", "MixinWorldCreationUiState"],
-    "client": [],
+    "mixins": ["MixinFlatLevelSource"],
+    "client": ["MixinWorldCreationUiState", "MixinWorldOpenFlows"],
     "server": []
 }

@@ -6,17 +6,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
 import com.kncatl.ohmyworld.platform.LevelLoadCallback;
 import com.kncatl.ohmyworld.platform.Platform;
-import com.kncatl.ohmyworld.platform.ScreenRenderCallback;
+import com.kncatl.ohmyworld.platform.ServerTickCallback;
 
 public class FabricPlatform implements Platform {
 
     private final List<LevelLoadCallback> levelCallbacks = new ArrayList<>();
-    private final List<ScreenRenderCallback> screenCallbacks = new ArrayList<>();
+    private final List<ServerTickCallback> tickCallbacks = new ArrayList<>();
 
     public FabricPlatform() {
         Platform.set(this);
@@ -38,16 +38,16 @@ public class FabricPlatform implements Platform {
     }
 
     @Override
-    public void onScreenRenderPost(ScreenRenderCallback callback) {
-        screenCallbacks.add(callback);
+    public void onServerTick(ServerTickCallback callback) {
+        tickCallbacks.add(callback);
     }
 
     void dispatchLevelLoad(ServerLevel level) {
         for (LevelLoadCallback cb : levelCallbacks) cb.onLoad(level);
     }
 
-    void dispatchScreenRender(Screen screen) {
-        for (ScreenRenderCallback cb : screenCallbacks) cb.onRender(screen);
+    void dispatchServerTick(MinecraftServer server) {
+        for (ServerTickCallback cb : tickCallbacks) cb.onTick(server);
     }
 }
 //?}

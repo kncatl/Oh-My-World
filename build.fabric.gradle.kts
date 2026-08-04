@@ -33,6 +33,7 @@ sourceSets.getByName("main").java {
 // Fabric 排除 NeoForge 模板（fabric.mod.json 由 src/main/resources 提供）
 sourceSets.getByName("main").resources {
     exclude("META-INF/neoforge.mods.toml")
+    exclude("ohmyworld.mixins.json")
 }
 
 dependencies {
@@ -40,6 +41,9 @@ dependencies {
     mappings(loom.officialMojangMappings())
     modImplementation("net.fabricmc:fabric-loader:$fabricLoaderVersion")
     modImplementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.4")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
 }
 
 loom {
@@ -70,14 +74,35 @@ tasks.withType<JavaCompile>().configureEach {
     dependsOn("stonecutterGenerate")
 }
 
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    dependsOn("stonecutterGenerate")
+}
+
 // fabric.mod.json 占位符替换
 tasks.processResources {
+    from(rootProject.file("LICENSE"))
     val props = mapOf(
         "mod_version" to prop("mod_version"),
-        "mod_id" to prop("mod_id")
+        "mod_id" to prop("mod_id"),
+        "minecraft_version" to mcVersion,
+        "fabric_api_version" to fabricApiVersion
     )
     inputs.properties(props)
     filesMatching("fabric.mod.json") {
         expand(props)
+    }
+}
+
+// 构建结束后打印 jar 产物路径，避免“构建成功却找不到产物”
+tasks.named("build") {
+    doLast {
+        val libsDir = layout.buildDirectory.dir("libs").get().asFile
+        val jars = libsDir.listFiles { f -> f.isFile && f.name.endsWith(".jar") }?.sortedBy { it.name } ?: emptyList()
+        if (jars.isEmpty()) {
+            println("Oh My World: [$mcVersion-$loader] no jar found in ${libsDir.absolutePath}")
+        } else {
+            jars.forEach { println("Oh My World: [$mcVersion-$loader] jar -> ${it.absolutePath}") }
+        }
     }
 }

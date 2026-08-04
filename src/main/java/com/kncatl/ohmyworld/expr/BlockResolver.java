@@ -1,5 +1,8 @@
 package com.kncatl.ohmyworld.expr;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import net.minecraft.core.registries.BuiltInRegistries;
 //? >=1.21.11 {
 import net.minecraft.resources.Identifier;
@@ -12,8 +15,24 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public class BlockResolver {
 
+    /** 方块 ID → BlockState 缓存，避免每个方块位置重复注册表查询。 */
+    private static final Map<String, BlockState> CACHE = new ConcurrentHashMap<>();
+
     public static BlockState resolve(String blockId) {
-        Block b = switch (blockId) {
+        BlockState cached = CACHE.get(blockId);
+        if (cached != null) return cached;
+        Block b = find(blockId);
+        BlockState st = b != null ? b.defaultBlockState() : Blocks.AIR.defaultBlockState();
+        CACHE.putIfAbsent(blockId, st);
+        return st;
+    }
+
+    public static boolean exists(String blockId) {
+        return find(blockId) != null;
+    }
+
+    private static Block find(String blockId) {
+        return switch (blockId) {
             case "minecraft:stone" -> Blocks.STONE; case "minecraft:dirt" -> Blocks.DIRT;
             case "minecraft:grass_block" -> Blocks.GRASS_BLOCK; case "minecraft:bedrock" -> Blocks.BEDROCK;
             case "minecraft:white_concrete" -> Blocks.WHITE_CONCRETE; case "minecraft:gray_concrete" -> Blocks.GRAY_CONCRETE;
@@ -34,6 +53,5 @@ public class BlockResolver {
             /*default -> { ResourceLocation loc = ResourceLocation.tryParse(blockId); yield loc != null ? BuiltInRegistries.BLOCK.get(loc) : null; }
             *///?}
         };
-        return b != null ? b.defaultBlockState() : Blocks.AIR.defaultBlockState();
     }
 }

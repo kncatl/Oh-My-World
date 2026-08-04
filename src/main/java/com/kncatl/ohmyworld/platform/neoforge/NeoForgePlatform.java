@@ -5,17 +5,18 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.fml.loading.FMLPaths;
 
 import com.kncatl.ohmyworld.platform.LevelLoadCallback;
 import com.kncatl.ohmyworld.platform.Platform;
-import com.kncatl.ohmyworld.platform.ScreenRenderCallback;
+import com.kncatl.ohmyworld.platform.ServerTickCallback;
 
 public class NeoForgePlatform implements Platform {
 
     private final List<LevelLoadCallback> levelCallbacks = new ArrayList<>();
-    private final List<ScreenRenderCallback> screenCallbacks = new ArrayList<>();
+    private final List<ServerTickCallback> tickCallbacks = new ArrayList<>();
 
     public NeoForgePlatform() {
         Platform.set(this);
@@ -37,16 +38,16 @@ public class NeoForgePlatform implements Platform {
     }
 
     @Override
-    public void onScreenRenderPost(ScreenRenderCallback callback) {
-        screenCallbacks.add(callback);
+    public void onServerTick(ServerTickCallback callback) {
+        tickCallbacks.add(callback);
     }
 
     void dispatchLevelLoad(ServerLevel level) {
         for (LevelLoadCallback cb : levelCallbacks) cb.onLoad(level);
     }
 
-    void dispatchScreenRender(net.minecraft.client.gui.screens.Screen screen) {
-        for (ScreenRenderCallback cb : screenCallbacks) cb.onRender(screen);
+    void dispatchServerTick(MinecraftServer server) {
+        for (ServerTickCallback cb : tickCallbacks) cb.onTick(server);
     }
 }
 //?}

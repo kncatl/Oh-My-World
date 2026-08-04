@@ -1,27 +1,33 @@
 package com.kncatl.ohmyworld.expr;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class ExprParser {
+    private static final int MAX_RECURSION_DEPTH = 2048;
+
     private final List<Token> tokens;
     private int pos;
+    private int recursionDepth;
 
     public ExprParser(List<Token> tokens) { this.tokens = tokens; this.pos = 0; }
 
     public ExprNode parse() { ExprNode node = conditional(); expect(TokenType.EOF); return node; }
 
     private ExprNode conditional() {
-        ExprNode node = logicalOr();
-        while (match(TokenType.QUESTION)) {
-            ExprNode thenExpr = conditional();
-            expect(TokenType.COLON);
-            ExprNode elseExpr = conditional();
-            node = new ExprNode.ConditionalNode(node, thenExpr, elseExpr);
+        enterRecursion();
+        try {
+            ExprNode node = logicalOr();
+            while (match(TokenType.QUESTION)) {
+                ExprNode thenExpr = conditional();
+                expect(TokenType.COLON);
+                ExprNode elseExpr = conditional();
+                node = new ExprNode.ConditionalNode(node, thenExpr, elseExpr);
+            }
+            return node;
+        } finally {
+            recursionDepth--;
         }
-        return node;
     }
 
     private ExprNode logicalOr() {
@@ -72,13 +78,18 @@ public class ExprParser {
     }
 
     private ExprNode unary() {
-        if (match(TokenType.NOT)) return new ExprNode.UnaryNode(ExprNode.UnaryOp.NOT, unary());
-        if (match(TokenType.MINUS)) {
-            Token t = peek();
-            if (t != null && t.type() == TokenType.NUMBER) { advance(); return new ExprNode.NumberNode(-Double.parseDouble(t.text())); }
-            return new ExprNode.UnaryNode(ExprNode.UnaryOp.NEG, unary());
+        enterRecursion();
+        try {
+            if (match(TokenType.NOT)) return new ExprNode.UnaryNode(ExprNode.UnaryOp.NOT, unary());
+            if (match(TokenType.MINUS)) {
+                Token t = peek();
+                if (t != null && t.type() == TokenType.NUMBER) { advance(); return new ExprNode.NumberNode(-Double.parseDouble(t.text())); }
+                return new ExprNode.UnaryNode(ExprNode.UnaryOp.NEG, unary());
+            }
+            return primary();
+        } finally {
+            recursionDepth--;
         }
-        return primary();
     }
 
     private ExprNode primary() {
@@ -116,8 +127,6 @@ public class ExprParser {
 
     private ExprNode parseBlock() {
         List<ExprNode.LetBinding> bindings = new ArrayList<>();
-        Map<String, Integer> idx = new HashMap<>();
-        int nextIndex = 0;
         while (true) {
             if (check(TokenType.RBRACE)) break;
             if (check(TokenType.IDENTIFIER) && peek().text().equals("let")) {
@@ -125,52 +134,20 @@ public class ExprParser {
                 if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected variable name after 'let' at position " + (peek() != null ? peek().pos() : -1));
                 String name = previous().text();
                 expect(TokenType.ASSIGN);
-                ExprNode value = doInline(conditional(), idx);
+                ExprNode value = conditional();
                 match(TokenType.SEMI);
-                int absIndex = nextIndex++;
-                idx.put(name, absIndex);
-                bindings.add(new ExprNode.LetBinding(name, absIndex, value));
+                bindings.add(new ExprNode.LetBinding(name, value));
             } else {
-                ExprNode body = doInline(conditional(), idx);
-                return new ExprNode.BlockExprNode(bindings, body);
+                return new ExprNode.BlockExprNode(bindings, conditional());
             }
         }
         return new ExprNode.BlockExprNode(bindings, new ExprNode.NumberNode(0));
     }
 
-    private static ExprNode doInline(ExprNode node, Map<String, Integer> idx) {
-        return switch (node) {
-            case ExprNode.VariableNode v -> {
-                Integer i = idx.get(v.name());
-                yield i != null ? new ExprNode.IndexedVarNode(i) : node;
-            }
-            case ExprNode.BinaryNode b -> new ExprNode.BinaryNode(
-                    doInline(b.left(), idx), b.op(), doInline(b.right(), idx));
-            case ExprNode.UnaryNode u -> new ExprNode.UnaryNode(
-                    u.op(), doInline(u.operand(), idx));
-            case ExprNode.ConditionalNode c -> new ExprNode.ConditionalNode(
-                    doInline(c.condition(), idx),
-                    doInline(c.thenExpr(), idx),
-                    doInline(c.elseExpr(), idx));
-            case ExprNode.FuncCallNode f -> {
-                List<ExprNode> newArgs = new ArrayList<>();
-                for (ExprNode a : f.args()) newArgs.add(doInline(a, idx));
-                yield new ExprNode.FuncCallNode(f.name(), newArgs);
-            }
-            case ExprNode.BlockExprNode be -> {
-                Map<String, Integer> innerIdx = new HashMap<>(idx);
-                List<ExprNode.LetBinding> newBindings = new ArrayList<>();
-                int nextIndex = innerIdx.size();
-                for (ExprNode.LetBinding lb : be.bindings()) {
-                    ExprNode inlinedValue = doInline(lb.value(), innerIdx);
-                    int absIndex = nextIndex++;
-                    innerIdx.put(lb.name(), absIndex);
-                    newBindings.add(new ExprNode.LetBinding(lb.name(), absIndex, inlinedValue));
-                }
-                ExprNode newBody = doInline(be.body(), innerIdx);
-                yield new ExprNode.BlockExprNode(newBindings, newBody);
-            }
-            default -> node;
-        };
+    private void enterRecursion() {
+        if (++recursionDepth > MAX_RECURSION_DEPTH) {
+            recursionDepth--;
+            throw new IllegalArgumentException("Expression nesting exceeds " + MAX_RECURSION_DEPTH + " levels");
+        }
     }
 }

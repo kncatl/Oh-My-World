@@ -26,12 +26,12 @@ Separate layers with semicolons ";". Two formats are supported:
   in cycles until the entire range is filled.
 
   Example:
-  y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+  y=-64..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
 
   Cycle length = 3+2+1 = 6 layers. Pattern: 3×bedrock, 2×dirt, 1×checker, repeat...
 
 Default preset:
-  y=0: minecraft:bedrock;y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 2. Variables
@@ -98,39 +98,39 @@ Default preset:
 5. Expression Examples
 
   ▸ Uniform layer (same block everywhere):
-    y=0: minecraft:bedrock
+    y=-64: minecraft:bedrock
 
   ▸ 1x1 checkerboard (alternating blocks):
-    y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    y=-64..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ▸ 3x3 grid (large cells, no center swap):
-    y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    y=-64..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ▸ 3x3 grid + center swap:
-    y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0
+    y=-64..64: (floordiv(x,3)+floordiv(z,3))%2==0
       ? (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:gray_concrete : minecraft:white_concrete)
       : (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:white_concrete : minecraft:gray_concrete)
 
   ▸ Horizontal stripes (every 4 blocks along X):
-    y=1..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    y=-64..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ▸ Circle (radius 20):
-    y=1..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
+    y=-64..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ▸ Diamond region (absolute values):
-    y=1..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
+    y=-64..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ▸ Sine wave stripes:
-    y=1..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
+    y=-64..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ▸ Cyclic: 3 bedrock + 2 dirt + 1 checker (6-layer cycle):
-    y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+    y=-64..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
   ▸ Blacklist random (exclude stone, dirt, grass):
-    y=1..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
+    y=-64..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
 
 
   ▸ Volumetric model (using ly with air for hollow structures):
-    y=0..64: (x+z)%2==0 && ly<10 ? minecraft:white_concrete : minecraft:air
+    y=-64..64: (x+z)%2==0 && ly<10 ? minecraft:white_concrete : minecraft:air
 
     10-block-tall pillars only on checkerboard white positions, air elsewhere.
 
@@ -182,3 +182,11 @@ Other blocks are resolved via BuiltInRegistries.BLOCK.
 9. rand() is deterministic: same (x,z,y) always returns the same block.
 10. It is recommended to set "Generate Structures" to OFF when the top
     layer of your pattern is not a flat, continuous surface.
+
+8. Dedicated Servers
+
+Dedicated servers have no world-creation UI, so the formula marker cannot be
+written from the editor. Set server_mode: true in config/ohmyworld.json instead;
+the formula is then applied to all superflat worlds on the server (non-flat worlds
+are unaffected). With server_mode, config formula edits take effect in about
+5 seconds without restarting the server (newly generated chunks only).

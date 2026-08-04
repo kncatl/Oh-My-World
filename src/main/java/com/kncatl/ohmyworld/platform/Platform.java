@@ -10,7 +10,7 @@ public interface Platform {
 
     void onLevelLoad(LevelLoadCallback callback);
 
-    void onScreenRenderPost(ScreenRenderCallback callback);
+    void onServerTick(ServerTickCallback callback);
 
     final class Holder {
         private static Platform instance;

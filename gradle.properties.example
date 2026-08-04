@@ -1,5 +1,6 @@
 # === Oh My World Gradle Properties ===
-# Copy this file to gradle.properties and fill in your local settings.
+# Reference template for local settings. The repository already tracks gradle.properties;
+# keep machine-specific overrides in ~/.gradle/gradle.properties instead of overwriting it.
 
 # ---- Required: JDK 21 Path ----
 # Set the path to your JDK 21 installation. Example:
@@ -35,5 +36,5 @@ loader_version_range=[1,)
 mod_id=ohmyworld
 mod_name=Oh My World
 mod_license=MIT
-mod_version=1.0.0
-mod_group_id=io.github.kncatl.Oh-My-World
+mod_version=1.1.0
+mod_group_id=com.kncatl.ohmyworld

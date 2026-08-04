@@ -50,9 +50,11 @@ sourceSets.getByName("main").resources {
     exclude("src/generated/**/.cache")
     // NeoForge 排除 Fabric 描述文件
     exclude("fabric.mod.json")
+    exclude("ohmyworld.fabric.mixins.json")
 }
 
 repositories {
+    mavenCentral()
 }
 
 neoForge {
@@ -117,11 +119,39 @@ val generateModMetadata = tasks.register<ProcessResources>("generateModMetadata"
 sourceSets.getByName("main").resources.srcDir(generateModMetadata)
 neoForge.ideSyncTask(generateModMetadata)
 
+tasks.processResources {
+    from(rootProject.file("LICENSE"))
+}
+
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     dependsOn("stonecutterGenerate")
 }
 
+dependencies {
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.4")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    dependsOn("stonecutterGenerate")
+}
+
 tasks.named("createMinecraftArtifacts") {
     dependsOn("stonecutterGenerate")
+}
+
+// 构建结束后打印 jar 产物路径，避免“构建成功却找不到产物”
+tasks.named("build") {
+    doLast {
+        val libsDir = layout.buildDirectory.dir("libs").get().asFile
+        val jars = libsDir.listFiles { f -> f.isFile && f.name.endsWith(".jar") }?.sortedBy { it.name } ?: emptyList()
+        if (jars.isEmpty()) {
+            println("Oh My World: [$mcVersion-$loader] no jar found in ${libsDir.absolutePath}")
+        } else {
+            jars.forEach { println("Oh My World: [$mcVersion-$loader] jar -> ${it.absolutePath}") }
+        }
+    }
 }

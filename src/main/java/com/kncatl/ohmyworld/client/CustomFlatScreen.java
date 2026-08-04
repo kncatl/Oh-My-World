@@ -1,7 +1,10 @@
 package com.kncatl.ohmyworld.client;
 
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -26,6 +29,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private EditBox nameInput;
     private Button saveBtn;
     private Button loadBtn;
+    private Button doneBtn;
     private List<String> currentErrors = new ArrayList<>();
     private String pendingFormula;
     private String pendingName;
@@ -61,7 +65,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int fxH = 44;
 
         this.layersInput = new EditBox(this.font, centerX - boxW / 2 + 10, boxY + 20, boxW - 20, fxH, LAYERS_LABEL);
-        this.layersInput.setMaxLength(2000);
+        this.layersInput.setMaxLength(FormulaParser.MAX_INPUT_LENGTH);
         this.layersInput.setValue(pendingFormula != null ? pendingFormula : PatternData.getRawInput());
         this.layersInput.setResponder(t -> validate());
         this.addRenderableWidget(this.layersInput);
@@ -78,7 +82,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.addRenderableWidget(this.saveBtn);
         this.loadBtn = Button.builder(LOAD, b -> openLoadList()).bounds(centerX - boxW / 2 + 90, btnY, 80, 20).build();
         this.addRenderableWidget(this.loadBtn);
-        this.addRenderableWidget(Button.builder(DONE, b -> onDone()).bounds(centerX + boxW / 2 - 80, btnY, 80, 20).build());
+        this.doneBtn = Button.builder(DONE, b -> onDone()).bounds(centerX + boxW / 2 - 80, btnY, 80, 20).build();
+        this.addRenderableWidget(this.doneBtn);
         this.addRenderableWidget(Button.builder(CANCEL, b -> onCancel()).bounds(centerX - 40, btnY + 26, 80, 20).build());
 
         updateButtonState();
@@ -99,17 +104,27 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         boolean hasName = !this.nameInput.getValue().isBlank();
         boolean hasFormula = !this.layersInput.getValue().isBlank();
         this.saveBtn.active = hasName && hasFormula;
+        this.doneBtn.active = hasFormula && this.currentErrors.isEmpty();
     }
 
     private void onSave() {
-        String name = this.nameInput.getValue().trim();
+        String name = sanitizeFileName(this.nameInput.getValue());
         String formula = this.layersInput.getValue();
         if (name.isEmpty() || formula.isBlank()) return;
         try {
             Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
             Files.createDirectories(dir);
-            Files.writeString(dir.resolve(name + ".txt"), formula);
+            writeFormulaAtomically(dir.resolve(name + ".txt"), formula);
         } catch (Exception ignored) {}
+    }
+
+    /** 去除路径分隔符与目录穿越片段，防止保存/加载时写出 ohmyworld 目录。 */
+    private static String sanitizeFileName(String name) {
+        String s = name.trim().replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_");
+        while (s.contains("..")) s = s.replace("..", "_");
+        while (s.endsWith(".") || s.endsWith(" ")) s = s.substring(0, s.length() - 1);
+        if (s.isBlank() || s.equals(".")) s = "_";
+        return s;
     }
 
     private List<String> listSavedFormulas() {
@@ -119,6 +134,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             if (!Files.isDirectory(dir)) return names;
             try (Stream<Path> stream = Files.list(dir)) {
                 stream.filter(p -> p.toString().endsWith(".txt"))
+                        .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
                         .forEach(p -> {
                             String fn = p.getFileName().toString();
                             names.add(fn.substring(0, fn.length() - 4));
@@ -150,22 +166,42 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }
 
         this.minecraft.setScreen(new Screen(LOAD_TITLE) {
+            private int scrollOffset;
+            private int contentHeight;
+
             @Override
             protected void init() {
-                int y = 40;
                 int bw = 240;
+                int y = 40;
+                this.contentHeight = 0;
                 for (String name : saves) {
-                    String displayName = name.length() > 30 ? name.substring(0, 27) + "..." : name;
-                    this.addRenderableWidget(Button.builder(Component.literal(displayName), b -> {
-                        loadFormula(name);
-                        this.minecraft.setScreen(CustomFlatScreen.this);
-                    }).bounds(this.width / 2 - bw / 2, y, bw, 20).build());
+                    int btnY = y - this.scrollOffset;
+                    if (btnY >= 24 && btnY <= this.height - 44) {
+                        String displayName = name.length() > 30 ? name.substring(0, 27) + "..." : name;
+                        this.addRenderableWidget(Button.builder(Component.literal(displayName), b -> {
+                            loadFormula(name);
+                            this.minecraft.setScreen(CustomFlatScreen.this);
+                        }).bounds(this.width / 2 - bw / 2, btnY, bw, 20).build());
+                    }
                     y += 24;
-                    if (y > this.height - 40) break;
+                    this.contentHeight = y - 40;
                 }
                 this.addRenderableWidget(Button.builder(Component.translatable("gui.back"),
                         b -> this.minecraft.setScreen(CustomFlatScreen.this)).bounds(this.width / 2 - 40, this.height - 28, 80, 20).build());
             }
+
+            @Override
+            public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+                int maxScroll = Math.max(0, this.contentHeight - (this.height - 76));
+                int clamped = Math.max(0, Math.min(this.scrollOffset - (int) (verticalAmount * 24), maxScroll));
+                if (clamped != this.scrollOffset) {
+                    this.scrollOffset = clamped;
+                    this.clearWidgets();
+                    this.init();
+                }
+                return true;
+            }
+
             @Override
             public void onClose() { this.minecraft.setScreen(CustomFlatScreen.this); }
         });
@@ -173,7 +209,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     private void loadFormula(String name) {
         try {
-            Path file = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld").resolve(name + ".txt");
+            Path file = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld")
+                    .resolve(sanitizeFileName(name) + ".txt");
+            if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                    || Files.size(file) > FormulaParser.MAX_INPUT_LENGTH) return;
             String content = Files.readString(file);
             this.pendingFormula = content;
             this.pendingName = name;
@@ -183,13 +222,40 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private void onDone() {
         String input = this.layersInput.getValue();
         FormulaParser.ParseResult result = FormulaParser.parseWithErrors(input);
-        PatternData.set(result.layers(), input);
+        if (!result.errors().isEmpty()) {
+            // 存在解析/语义错误时禁止应用残缺地形
+            this.currentErrors = result.errors();
+            updateButtonState();
+            return;
+        }
+        if (!PatternData.setIfValid(result, input)) {
+            this.currentErrors = result.errors().isEmpty()
+                    ? List.of("Formula contains no valid layers") : result.errors();
+            updateButtonState();
+            return;
+        }
 
         if (!this.nameInput.getValue().isBlank()) onSave();
         this.minecraft.setScreen(this.parent);
     }
 
     private void onCancel() { this.minecraft.setScreen(this.parent); }
+
+    private static void writeFormulaAtomically(Path target, String formula) throws Exception {
+        if (Files.isSymbolicLink(target)) throw new IllegalStateException("symbolic-link target");
+        Path parent = target.toAbsolutePath().getParent();
+        Path temp = Files.createTempFile(parent, target.getFileName().toString(), ".tmp");
+        try {
+            Files.writeString(temp, formula);
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {

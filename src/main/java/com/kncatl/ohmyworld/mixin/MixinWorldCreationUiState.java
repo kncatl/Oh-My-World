@@ -5,8 +5,8 @@ import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.levelgen.presets.WorldPreset;
 
+import com.kncatl.ohmyworld.PresetKeys;
 import com.kncatl.ohmyworld.client.CustomFlatScreen;
-import com.kncatl.ohmyworld.client.FlatPatternScreenEvents;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -32,9 +32,9 @@ public class MixinWorldCreationUiState {
         Holder<WorldPreset> preset = holder.preset();
         if (preset == null) return;
         //? >=1.21.11 {
-        if (preset.unwrapKey().map(k -> k.identifier().equals(FlatPatternScreenEvents.OUR_KEY.identifier())).orElse(false)) {
+        if (preset.unwrapKey().map(k -> k.identifier().equals(PresetKeys.OUR_KEY.identifier())).orElse(false)) {
         //?} else {
-        if (preset.unwrapKey().map(k -> k.location().equals(FlatPatternScreenEvents.OUR_KEY.location())).orElse(false)) {
+        if (preset.unwrapKey().map(k -> k.location().equals(PresetKeys.OUR_KEY.location())).orElse(false)) {
         //?}
             cir.setReturnValue(CustomFlatScreen::new);
         }

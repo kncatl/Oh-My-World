@@ -12,9 +12,7 @@ public sealed interface ExprNode {
     record ConditionalNode(ExprNode condition, ExprNode thenExpr, ExprNode elseExpr) implements ExprNode {}
     record FuncCallNode(String name, List<ExprNode> args) implements ExprNode {}
     record BlockExprNode(List<LetBinding> bindings, ExprNode body) implements ExprNode {}
-    record IndexedVarNode(int index) implements ExprNode {}
-
-    record LetBinding(String name, int index, ExprNode value) {}
+    record LetBinding(String name, ExprNode value) {}
 
     enum BinaryOp { ADD, SUB, MUL, DIV, MOD, EQ, NE, LT, GT, LE, GE, AND, OR }
     enum UnaryOp { NOT, NEG }

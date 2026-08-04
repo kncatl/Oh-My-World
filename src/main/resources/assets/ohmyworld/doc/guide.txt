@@ -26,13 +26,13 @@
   组完一轮后从第一组重新开始，直到填满整个 y 范围。
 
   例：
-  y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+  y=-64..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
 
   效果：周期 6 层（3+2+1），从底到顶重复：3×基岩, 2×泥土, 1×棋盘格, 3×基岩... 直到 y=64。
 
 默认预设：
 
-  y=0: minecraft:bedrock;y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 二、变量
@@ -103,64 +103,64 @@
 
 ▸ 均匀层（所有坐标返回同一个块）：
 
-  y=0: minecraft:bedrock
+  y=-64: minecraft:bedrock
 
 
 ▸ 1×1 棋盘格（相邻方块交替）：
 
-  y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 ▸ 3×3 格子（大格子交替，无中心交换）：
 
-  y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   ★ 不能用 ((x/3)+(z/3))%2——负数除法向零截断，原点附近会形成 5×5 异常格子。
 
 
 ▸ 3×3 格子 + 中心交换（中心块取对面格子的颜色）：
 
-  y=1..64: (floordiv(x,3)+floordiv(z,3))%2==0
+  y=-64..64: (floordiv(x,3)+floordiv(z,3))%2==0
     ? (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:gray_concrete : minecraft:white_concrete)
     : (floormod(x,3)==1 && floormod(z,3)==1 ? minecraft:white_concrete : minecraft:gray_concrete)
 
 
 ▸ 沿 X 方向每 4 格换色（条纹）：
 
-  y=1..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: floordiv(x,4)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 ▸ 沿 Z 方向的单格条纹：
 
-  y=1..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   注：1×1 棋盘格用 + 即可，不涉及 / 或 % 大数，无需 floordiv。
 
 
 ▸ 半径 20 格以内的圆形，圆形区域放白色，以外放灰色：
 
-  y=1..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: (x*x+z*z)<=400 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 ▸ 多色棋盘格（4 种颜色，按 x,z 奇偶）：
 
-  y=1..64: x%2==0 ? (z%2==0 ? minecraft:white_concrete : minecraft:red_concrete)
+  y=-64..64: x%2==0 ? (z%2==0 ? minecraft:white_concrete : minecraft:red_concrete)
                    : (z%2==0 ? minecraft:blue_concrete  : minecraft:yellow_concrete)
 
 
 ▸ 正弦波条纹（灰度变化）：
 
-  y=1..64: (x+z*3)%6<3 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: (x+z*3)%6<3 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 ▸ 绝对值的图案（菱形区域）：
 
-  y=1..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: (abs(x)+abs(z))<=20 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 ▸ 正弦波条纹（连续灰度渐变，需搭配彩色块呈现）：
 
-  y=1..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: sin(torad(x*10))>0 ? minecraft:white_concrete : minecraft:gray_concrete
 
   每个周期约 36 格（360° / 10° = 36）。
 
@@ -170,17 +170,17 @@
 
 ▸ 圆形波纹（同心圆）：
 
-  y=1..64: sin(sqrt(x*x+z*z)*0.5)>0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64..64: sin(sqrt(x*x+z*z)*0.5)>0 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
 ▸ 循环层：3 层基岩 + 2 层泥土 + 1 层棋盘格交替（周期 6 层）：
 
-  y=0..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+  y=-64..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
 
 
 ▸ 循环层：1 层白混凝土 + 1 层灰混凝土交替（每层都换色）：
 
-  y=1..64: 1*[minecraft:white_concrete],1*[minecraft:gray_concrete]
+  y=-64..64: 1*[minecraft:white_concrete],1*[minecraft:gray_concrete]
 
   效果与 (x+z)%2 棋盘格不同——这里是水平方向统一颜色，逐层交替。
   棋盘格是同一层内方块交替。
@@ -188,35 +188,35 @@
 
 ▸ 循环层 + 普通层混用：
 
-  y=0: minecraft:bedrock
-  y=1..64: 2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+  y=-64: minecraft:bedrock
+  y=-63..64: 2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
 
-  第 0 层为基岩，第 1~64 层按 2 泥土 + 1 棋盘格循环。
+  第 -64 层为基岩，第 -63~64 层按 2 泥土 + 1 棋盘格循环。
 
 
 ▸ 指定池随机：棋盘格白色部分随机替换为 3 种方块之一：
 
-  y=1..64: (x+z)%2==0 ? rand(minecraft:white_concrete, minecraft:dirt, minecraft:bedrock) : minecraft:gray_concrete
+  y=-64..64: (x+z)%2==0 ? rand(minecraft:white_concrete, minecraft:dirt, minecraft:bedrock) : minecraft:gray_concrete
 
 
 ▸ 全方块随机（整个层从全部注册方块中随机抽取）：
 
-  y=1..64: rand()
+  y=-64..64: rand()
 
 
 ▸ 条件随机 + 不同随机池：
 
-  y=1..64: (floordiv(x,4)+floordiv(z,4))%2==0 ? rand(minecraft:stone, minecraft:cobblestone) : rand(minecraft:oak_planks, minecraft:glass)
+  y=-64..64: (floordiv(x,4)+floordiv(z,4))%2==0 ? rand(minecraft:stone, minecraft:cobblestone) : rand(minecraft:oak_planks, minecraft:glass)
 
 
 ▸ 黑名单随机：从全部方块中排除石头、泥土、草方块后随机：
 
-  y=1..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
+  y=-64..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
 
 
 ▸ 立体模型（ly 用于 y 方向，配合 air 可实现镂空）：
 
-  y=0..64: (x+z)%2==0 && ly<10 ? minecraft:white_concrete : minecraft:air
+  y=-64..64: (x+z)%2==0 && ly<10 ? minecraft:white_concrete : minecraft:air
 
   只在棋盘格的白色位置生成 10 层高的立柱，其余为空气。
 
@@ -263,16 +263,16 @@
 
 七、组合示例
 
-▸ 1 层基岩 + 10 层泥土 + 1 层草方块 + 54 层 3×3 棋盘格：
+▸ 1 层基岩 + 10 层泥土 + 1 层草方块 + 117 层 3×3 棋盘格：
 
-  y=0: minecraft:bedrock;y=1..10: minecraft:dirt;
-  y=11: minecraft:grass_block;
-  y=12..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+  y=-64: minecraft:bedrock;y=-63..-54: minecraft:dirt;
+  y=-53: minecraft:grass_block;
+  y=-52..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
-▸ 循环层：基岩底 + 64 层泥棋盘循环（3 泥土,1 棋盘格...4 泥土,1 棋盘格）：
+▸ 循环层：基岩底 + 泥棋盘循环铺满 -63~64（3 泥土,1 棋盘格...4 泥土,1 棋盘格）：
 
-  y=0: minecraft:bedrock;y=1..64: 3*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
+  y=-64: minecraft:bedrock;y=-63..64: 3*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]
 
 
 八、注意事项
@@ -289,3 +289,11 @@
 9. rand() 为伪随机——同一坐标永远返回同一方块，创建时确定，不会因进出
    世界而改变。rand() 的全池模式排除空气（minecraft:air）。
 10. 建议在生成顶层为非超平坦的地形时将“生成结构”一项设为“关”。
+
+
+九、专用服务器
+
+专用服务器没有创建世界界面，无法用编辑器写入公式标记。请在
+config/ohmyworld.json 中设置 server_mode: true，公式将应用于服务器上
+所有超平坦世界（非超平坦世界不受影响）。server_mode 下修改公式约 5 秒
+自动生效（仅影响之后新生成的区块），无需重启服务器。

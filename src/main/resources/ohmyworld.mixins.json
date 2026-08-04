@@ -3,6 +3,6 @@
     "package": "com.kncatl.ohmyworld.mixin",
     "compatibilityLevel": "JAVA_21",
     "mixins": ["MixinFlatLevelSource"],
-    "client": [],
+    "client": ["MixinWorldOpenFlows"],
     "server": []
 }

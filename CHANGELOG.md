@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Fixed client-only Fabric mixins being loaded on dedicated servers.
+- Fixed NeoForge preset-editor registration and repeated world-creation state.
+- Fixed nested `let` scope evaluation and rejected non-block layer results.
+- Fixed formula failures leaving partial chunks and incorrect base heights.
+
+### Changed
+- Formula snapshots are bound to individual flat generators.
+- Added high safety ceilings for input size and parser nesting without imposing a generation budget.
+
 ## v1.1.0
 
 ### New

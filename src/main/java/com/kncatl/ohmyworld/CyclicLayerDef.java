@@ -10,15 +10,15 @@ import com.kncatl.ohmyworld.expr.ExprNode;
 
 public class CyclicLayerDef {
     private final int yStart, yEnd;
-    private final int cycleLength;
+    private final long cycleLength;
     private final List<Entry> entries;
 
     public CyclicLayerDef(int yStart, int yEnd, List<Entry> entries) {
         this.yStart = yStart;
         this.yEnd = yEnd;
         this.entries = entries;
-        int sum = 0;
-        for (Entry e : entries) sum += e.thickness();
+        long sum = 0;
+        for (Entry e : entries) sum = Math.addExact(sum, e.thickness());
         this.cycleLength = sum;
     }
 
@@ -27,9 +27,9 @@ public class CyclicLayerDef {
 
     public BlockState getBlock(int worldX, int worldZ, int globalY) {
         if (cycleLength == 0) return Blocks.AIR.defaultBlockState();
-        int pos = (globalY - yStart) % cycleLength;
+        long pos = Math.floorMod((long) globalY - yStart, cycleLength);
         int layerY = globalY - yStart;
-        int acc = 0;
+        long acc = 0;
         for (Entry e : entries) {
             if (pos < acc + e.thickness()) {
                 return ExprEvaluator.evalToBlock(e.expression(), worldX, worldZ, layerY);
