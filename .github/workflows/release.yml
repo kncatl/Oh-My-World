@@ -91,8 +91,14 @@ jobs:
           for jar in dist/*.jar; do
             name="$(basename "$jar")"
             mc="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\1/')"
-            loader="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\2/')"
-            loader="$(printf '%s' "$loader" | sed -E 's/^(.)/\U\1/')"
+            raw_loader="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\2/')"
+            case "$raw_loader" in
+              neoforge) loader="NeoForge" ;;
+              fabric)   loader="Fabric" ;;
+              forge)    loader="Forge" ;;
+              quilt)    loader="Quilt" ;;
+              *)        loader="$raw_loader" ;;
+            esac
             printf '| %s | %s | `%s` |\n' "$mc" "$loader" "$name" >> dist/RELEASE_NOTES.md
           done
           printf '\nRequires **Java 21**.\n' >> dist/RELEASE_NOTES.md
