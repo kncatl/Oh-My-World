@@ -5,9 +5,22 @@ val mcVersion = stonecutter.current.version
 val loader = stonecutter.current.project.substringAfterLast('-')
 
 // MC 版本到 NeoForge / Parchment 的版本映射
+// neoVersion      = 构建所用的 NeoForge 版本（取该 MC 版本线的最新版）
+// neoVersionRange = mods.toml 中声明的最低兼容区间（Maven 区间语法）
+//
+// 注意区间语法：[x] 表示"精确等于 x"，[x,) 才是"x 及以上"。
+// 必须写成 [x,) —— 写成 [x] 会让新版加载器因依赖不满足而拒绝加载本模组
+// （表现为"加载器版本过新，需要回退版本"）。
 val neoVersion = when (mcVersion) {
-    "1.21.1" -> "21.1.234"
+    "1.21.1" -> "21.1.251"
     "1.21.11" -> "21.11.45"
+    else -> throw GradleException("Unsupported Minecraft version: $mcVersion (add it to build.neoforge.gradle.kts)")
+}
+// 21.1.x / 21.11.x 各自是同一 MC 版本线，线内向后兼容；
+// 下限取该线中本模组实际验证过的版本，好让用户不必被迫升级加载器。
+val neoVersionRange = when (mcVersion) {
+    "1.21.1" -> "[21.1.234,)"
+    "1.21.11" -> "[21.11.45,)"
     else -> throw GradleException("Unsupported Minecraft version: $mcVersion (add it to build.neoforge.gradle.kts)")
 }
 // javafml 语言提供器版本范围（与 FancyModLoader 主版本对齐，与 MC/NeoForge 版本无关）
@@ -58,7 +71,19 @@ repositories {
 }
 
 neoForge {
-    version = neoVersion
+    // MDG 的默认行为是：`CI` 环境变量为 "true" 时跳过反编译/重编译（见
+    // ModdingVersionSettings 的默认值），本地则完整跑一遍 NeoForm 流水线。
+    // 本地跑这一步既慢（数分钟）又容易 OOM——NeoForge 21.11.45 的反编译产物会
+    // 让 Vineflower 耗尽堆内存，报 "Vineflower ran out of memory during
+    // decompilation"。CI 从不受影响，因为它在源头就跳过了。
+    //
+    // 这里显式指定，让本地与 CI 使用同一条流水线：更快的构建、不再 OOM，且
+    // 依赖仍取自 NeoForge 发布的 artifacts（含 sources），调试体验不变。
+    // 若确需本地完整重编译以排查 NeoForge 补丁相关问题，把下面一行改为 false。
+    enable {
+        version = neoVersion
+        setDisableRecompilation(true)
+    }
 
     if (parchmentMc != null && parchmentVer != null) parchment {
         mappingsVersion = parchmentVer
@@ -105,6 +130,7 @@ val generateModMetadata = tasks.register<ProcessResources>("generateModMetadata"
         "minecraft_version" to mcVersion,
         "minecraft_version_range" to "[$mcVersion]",
         "neo_version" to neoVersion,
+        "neo_version_range" to neoVersionRange,
         "loader_version_range" to loaderVersionRange,
         "mod_id" to prop("mod_id"),
         "mod_name" to prop("mod_name"),

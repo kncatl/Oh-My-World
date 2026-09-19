@@ -21,12 +21,13 @@
 
 ## 环境要求
 
-| Minecraft | 加载器 |
-| --- | --- |
-| 1.21.1 | NeoForge |
-| 1.21.11 | NeoForge / Fabric |
+| Minecraft | 加载器 | 最低加载器版本 |
+| --- | --- | --- |
+| 1.21.1 | NeoForge | 21.1.234 |
+| 1.21.11 | NeoForge | 21.11.45 |
+| 1.21.11 | Fabric | （需 Fabric API） |
 
-需要 **Java 21**。
+需要 **Java 21**。同一 Minecraft 版本下更新的 NeoForge 版本也可正常使用。
 
 ## 安装
 

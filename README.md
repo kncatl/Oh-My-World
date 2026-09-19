@@ -21,12 +21,13 @@
 
 ## Requirements
 
-| Minecraft | Loader |
-| --- | --- |
-| 1.21.1 | NeoForge |
-| 1.21.11 | NeoForge / Fabric |
+| Minecraft | Loader | Minimum loader build |
+| --- | --- | --- |
+| 1.21.1 | NeoForge | 21.1.234 |
+| 1.21.11 | NeoForge | 21.11.45 |
+| 1.21.11 | Fabric | (with Fabric API) |
 
-Requires **Java 21**.
+Requires **Java 21**. Newer NeoForge builds on the same Minecraft version also work.
 
 ## Installation
 

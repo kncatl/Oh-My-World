@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.2
+
+### Fixed
+- Fixed newer NeoForge builds refusing to load the mod. The `neoforge` dependency was declared as an exact version (`[21.1.234]`) rather than a minimum, so any loader above 21.1.234 rejected it with a version error and users had to downgrade.
+- The dependency is now declared as `[21.1.234,)`, and the mod ships built against 21.1.251.
+
+### Compatibility
+- Loads on NeoForge 21.1.234 and every later 21.1.x build. No API changes were needed: the NeoForge and FancyModLoader classes this mod uses are unchanged across that range.
+
+### Changed
+- Dropped the explicit `bus = EventBusSubscriber.Bus.MOD` argument. FancyModLoader already routes each subscriber by its event's type (`IModBusEvent` → mod bus, otherwise the game bus), so the argument had no effect. It is deprecated for removal, and removing it now means no code change is needed when it is eventually deleted.
+
 ## v1.1.1
 
 ### Fixed
