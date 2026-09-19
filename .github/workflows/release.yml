@@ -86,6 +86,16 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          printf '## %s\n\n' "$tag" > dist/RELEASE_NOTES.md
+          printf '| Minecraft | Loader | File |\n| --- | --- | --- |\n' >> dist/RELEASE_NOTES.md
+          for jar in dist/*.jar; do
+            name="$(basename "$jar")"
+            mc="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\1/')"
+            loader="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\2/')"
+            loader="$(printf '%s' "$loader" | sed -E 's/^(.)/\U\1/')"
+            printf '| %s | %s | `%s` |\n' "$mc" "$loader" "$name" >> dist/RELEASE_NOTES.md
+          done
+          printf '\nRequires **Java 21**.\n' >> dist/RELEASE_NOTES.md
 
           # 从 CHANGELOG 中截取该 tag 对应的小节
           extract() {
@@ -97,16 +107,14 @@ jobs:
             ' "$1"
           }
 
-          : > dist/RELEASE_NOTES.md
-          extract CHANGELOG.md "$tag" >> dist/RELEASE_NOTES.md
+          en="$(extract CHANGELOG.md "$tag")"
+          if [ -n "$en" ]; then
+            printf '\n### What changed\n%s\n' "$en" >> dist/RELEASE_NOTES.md
+          fi
 
           zh="$(extract CHANGELOG_zh_cn.md "$tag")"
           if [ -n "$zh" ]; then
-            printf '\n---\n\n### 中文更新日志\n\n%s\n' "$zh" >> dist/RELEASE_NOTES.md
-          fi
-
-          if [ ! -s dist/RELEASE_NOTES.md ]; then
-            printf 'Release %s\n' "$tag" > dist/RELEASE_NOTES.md
+            printf '\n---\n\n### 中文更新日志\n%s\n' "$zh" >> dist/RELEASE_NOTES.md
           fi
 
           echo "----- release notes -----"
@@ -120,15 +128,16 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          title="Oh-My-World ${tag}"
 
           if gh release view "$tag" >/dev/null 2>&1; then
             # 允许重跑：已存在则更新说明并覆盖附件
             echo "Release $tag already exists, updating"
             gh release upload "$tag" dist/*.jar --clobber
-            gh release edit "$tag" --title "$tag" --notes-file dist/RELEASE_NOTES.md
+            gh release edit "$tag" --title "$title" --notes-file dist/RELEASE_NOTES.md
           else
             gh release create "$tag" dist/*.jar \
-              --title "$tag" \
+              --title "$title" \
               --notes-file dist/RELEASE_NOTES.md \
               --verify-tag
           fi
