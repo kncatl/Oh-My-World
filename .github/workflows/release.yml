@@ -119,7 +119,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" dist/*.jar \
-            --title "${GITHUB_REF_NAME}" \
-            --notes-file dist/RELEASE_NOTES.md \
-            --verify-tag
+          tag="${GITHUB_REF_NAME}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # 允许重跑：已存在则更新说明并覆盖附件
+            echo "Release $tag already exists, updating"
+            gh release upload "$tag" dist/*.jar --clobber
+            gh release edit "$tag" --title "$tag" --notes-file dist/RELEASE_NOTES.md
+          else
+            gh release create "$tag" dist/*.jar \
+              --title "$tag" \
+              --notes-file dist/RELEASE_NOTES.md \
+              --verify-tag
+          fi
