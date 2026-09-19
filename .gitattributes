@@ -1,3 +1,18 @@
+# Normalize line endings for a checkout shared between Windows and WSL:
+# store LF in the repository and check out LF on every platform.
+* text=auto eol=lf
+
+# Windows batch files must keep CRLF.
+*.bat text eol=crlf
+
+# Binary assets.
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ogg binary
+
 # Disable autocrlf on generated files, they always generate with LF
 # Add any extra files or paths here to make git stop saying they
 # are changed when only line endings change.
