@@ -1,5 +1,8 @@
 # Oh My World
 
+[![Build](https://github.com/kncatl/Oh-My-World/actions/workflows/build.yml/badge.svg)](https://github.com/kncatl/Oh-My-World/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/kncatl/Oh-My-World)](https://github.com/kncatl/Oh-My-World/releases/latest)
+
 **Oh My World** 是一个 Minecraft 模组（NeoForge / Fabric 双加载器）。通过数学表达式定义超平坦世界的地形图案——无需编程，使用算术、三角函数和随机函数即可生成无限种地形。
 
 [English Version](README.md)

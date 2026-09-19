@@ -1,5 +1,8 @@
 # Oh My World
 
+[![Build](https://github.com/kncatl/Oh-My-World/actions/workflows/build.yml/badge.svg)](https://github.com/kncatl/Oh-My-World/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/kncatl/Oh-My-World)](https://github.com/kncatl/Oh-My-World/releases/latest)
+
 **Oh My World** is a Minecraft mod (NeoForge / Fabric) that lets you create custom flat worlds with mathematical expressions. Define terrain patterns using arithmetic, trigonometry, and random functions — no coding required.
 
 [中文版本](README_zh_cn.md)
