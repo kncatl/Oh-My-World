@@ -1,25 +1,27 @@
 package com.kncatl.ohmyworld;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.stream.Stream;
+import java.util.zip.InflaterInputStream;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
@@ -29,22 +31,40 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * 世界等价性校验：逐区块比较两个世界目录的生成结果。
  *
- * <p>判定依据是区块里由生成逻辑决定的全部数据：
+ * <p>判定依据是区块里由生成逻辑决定的两个子树：
  * <ul>
- *   <li>{@code Heightmaps} 的每一个长整型数组（地表高度、运动阻挡高度等）</li>
- *   <li>每个区段的方块调色板（含顺序）与压缩后的方块数据数组</li>
+ *   <li>{@code Heightmaps} —— 地表高度、运动阻挡高度等</li>
+ *   <li>{@code sections} —— 每个区段的调色板、压缩方块数据、生物群系与光照</li>
  * </ul>
- * 时间相关字段（{@code LastUpdate}、{@code InhabitedTime} 等）不参与比较，
- * 因此不同时刻生成同一世界也能判定为等价。
+ * 时间相关字段（{@code LastUpdate}、{@code InhabitedTime} 等）位于区块顶层，
+ * 不在上述子树内，因此不同时刻生成同一世界也能判定为等价。
  *
- * <p>用 Minecraft 自带的 {@link NbtIo} 解析，避免手写 NBT 解析器的对齐问题。
- * 两个目录都不存在时自动跳过，不影响正常构建；可用系统属性
+ * <p><b>为什么用 {@code Tag.write} 而不是类型化 getter：</b>本项目通过 Stonecutter
+ * 面向多个 Minecraft 版本编译同一份测试源码，而 Minecraft 1.21.9 起重做了 NBT API
+ * ——{@code getAllKeys}/{@code getString} 被移除，{@code getCompound} 改为返回
+ * {@code Optional}。{@code get(String)} 与规范二进制序列化 {@code Tag.write} 是所有
+ * 目标版本都有的，且序列化无损，不受 getter 语义变化影响。
+ *
+ * <p>两个世界必须来自**同一个** Minecraft 版本，本项目正是如此。
+ *
+ * <p>用 {@link NbtIo} 解析，避免手写 NBT 解析器的对齐问题。两个目录都不存在时
+ * 自动跳过，不影响正常构建；可用系统属性
  * {@code -Dohmyworld.worldA=... -Dohmyworld.worldB=...} 指定目录。
  */
 class WorldCompareTest {
 
     private static final Path A = Path.of(System.getProperty("ohmyworld.worldA", "/tmp/world-old"));
     private static final Path B = Path.of(System.getProperty("ohmyworld.worldB", "/tmp/world-new"));
+
+    /** 参与比较的两个子树。 */
+    private static final String[] KEYS = {"Heightmaps", "sections"};
+
+    /** 解析失败时的占位前缀；它会让该区块被判定为「不同」而不是被忽略。 */
+    private static final String ERROR = "ERROR ";
+
+    private static String brief(String value) {
+        return value.length() <= 160 ? value : value.substring(0, 160) + "…";
+    }
 
     @Test
     void worldsAreEquivalent() throws IOException {
@@ -61,16 +81,25 @@ class WorldCompareTest {
 
         int same = 0;
         int diff = 0;
+        long totalBytes = 0;
         List<String> examples = new ArrayList<>();
         for (Map.Entry<String, String> entry : a.entrySet()) {
             String other = b.get(entry.getKey());
             if (other == null) continue;
-            if (entry.getValue().equals(other)) {
-                same++;
-            } else {
+            if (!entry.getValue().equals(other)) {
                 diff++;
-                if (examples.size() < 5) examples.add("    " + entry.getKey());
+                if (examples.size() < 8) examples.add("    " + entry.getKey() + "  A=" + brief(entry.getValue()) + "  B=" + brief(other));
+                continue;
             }
+            String value = entry.getValue();
+            if (value.startsWith(ERROR)) {
+                // 两边都解析失败也要暴露出来，不能悄悄算作相同
+                diff++;
+                if (examples.size() < 8) examples.add("    " + entry.getKey() + "  " + brief(value));
+                continue;
+            }
+            same++;
+            totalBytes += Long.parseLong(value.substring(0, value.indexOf(':')));
         }
 
         System.out.println();
@@ -78,6 +107,10 @@ class WorldCompareTest {
         System.out.println("  A = " + A + "  →  " + a.size() + " 区块");
         System.out.println("  B = " + B + "  →  " + b.size() + " 区块");
         System.out.println("  取交集后  内容相同: " + same + "     内容不同: " + diff);
+        if (same > 0) {
+            System.out.printf("  参与比对的序列化字节总数: %d（平均每区块 %d，确认确实比到了数据）%n",
+                    totalBytes, totalBytes / same);
+        }
         if (!onlyA.isEmpty()) System.out.println("  仅 A 有: " + onlyA.size() + "  例: " + head(onlyA));
         if (!onlyB.isEmpty()) System.out.println("  仅 B 有: " + onlyB.size() + "  例: " + head(onlyB));
         for (String example : examples) System.out.println(example);
@@ -115,11 +148,14 @@ class WorldCompareTest {
                     // 压缩类型 2 = zlib（区域文件默认）
                     if (data[start + 4] != 2 || length <= 1) continue;
 
-                    try (InputStream in = new ByteArrayInputStream(data, start + 5, length - 1)) {
-                        CompoundTag chunk = NbtIo.readCompressed(in, NbtAccounter.unlimitedHeap());
+                    // 区域文件里的区块是 zlib（压缩类型 2），不是 gzip。
+                    // 不能用 NbtIo.readCompressed——它固定按 GZIP 解压。
+                    try (DataInputStream in = new DataInputStream(
+                            new InflaterInputStream(new ByteArrayInputStream(data, start + 5, length - 1)))) {
+                        CompoundTag chunk = NbtIo.read(in, NbtAccounter.unlimitedHeap());
                         out.put(name + "[" + i + "]", describe(chunk));
                     } catch (Exception e) {
-                        out.put(name + "[" + i + "]", "PARSE-ERROR " + e);
+                        out.put(name + "[" + i + "]", ERROR + e);
                     }
                 }
             }
@@ -127,39 +163,41 @@ class WorldCompareTest {
         return out;
     }
 
-    /** 汇总区块内由生成逻辑决定的数据。 */
-    private static String describe(CompoundTag chunk) {
-        StringBuilder sb = new StringBuilder();
+    /**
+     * 汇总区块内由生成逻辑决定的数据。
+     *
+     * @return {@code 序列化字节数:sha256}，字节数一并返回是为了让「什么都没比到」
+     *         这种情况（例如某一版本文档结构变了）能被看见，而不是悄悄判为相等
+     */
+    private static String describe(CompoundTag chunk) throws IOException {
+        MessageDigest digest = sha256();
+        long total = 0;
 
-        Tag heightmaps = chunk.get("Heightmaps");
-        if (heightmaps instanceof CompoundTag hm) {
-            for (String key : new TreeSet<>(hm.getAllKeys())) {
-                if (hm.get(key) instanceof LongArrayTag array) {
-                    sb.append("HM:").append(key).append('=').append(Arrays.toString(array.getAsLongArray())).append(';');
-                }
+        for (String key : KEYS) {
+            Tag tag = chunk.get(key);
+            if (tag == null) {
+                digest.update((byte) 0xFF);
+                continue;
             }
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            try (DataOutputStream out = new DataOutputStream(buffer)) {
+                tag.write(out);
+            }
+            byte[] bytes = buffer.toByteArray();
+            total += bytes.length;
+            // 带上长度，避免不同长度的数据被拼成同一串
+            digest.update(ByteBuffer.allocate(4).putInt(bytes.length).array());
+            digest.update(bytes);
         }
 
-        Tag sections = chunk.get("sections");
-        if (sections instanceof ListTag list) {
-            for (int i = 0; i < list.size(); i++) {
-                CompoundTag section = list.getCompound(i);
-                sb.append("Y").append(section.getInt("Y")).append(':');
-                CompoundTag states = section.getCompound("block_states");
+        return total + ":" + HexFormat.of().formatHex(digest.digest());
+    }
 
-                ListTag palette = states.getList("palette", Tag.TAG_COMPOUND);
-                for (int k = 0; k < palette.size(); k++) {
-                    sb.append(palette.getCompound(k).getString("Name")).append(',');
-                }
-
-                // 压缩后的方块数据数组：同样的调色板也可能对应不同的方块摆放
-                if (states.get("data") instanceof LongArrayTag array) {
-                    sb.append('|').append(Arrays.toString(array.getAsLongArray()));
-                }
-                sb.append(';');
-            }
+    private static MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
         }
-
-        return sb.toString();
     }
 }
