@@ -209,11 +209,9 @@ public class PatternData {
 
         for (Object obj : layers) {
             if (obj instanceof FormulaLayerDef f) {
-                prepareRange(prepared, lo, height, cx, cz, f.yStart(), f.yEnd(), minY, maxY,
-                        (x, z, y) -> f.getBlock(x, z, y));
+                prepareFormulaLayer(prepared, lo, height, cx, cz, f, minY, maxY);
             } else if (obj instanceof CyclicLayerDef c) {
-                prepareRange(prepared, lo, height, cx, cz, c.yStart(), c.yEnd(), minY, maxY,
-                        (x, z, y) -> c.getBlock(x, z, y));
+                prepareCyclicLayer(prepared, lo, height, cx, cz, c, minY, maxY);
             }
         }
 
@@ -235,15 +233,83 @@ public class PatternData {
         }
     }
 
-    private static void prepareRange(BlockState[] prepared, int baseY, int height, int cx, int cz,
-                                     int yStart, int yEnd, int minY, int maxY, BlockGetter getter) {
-        int lo = Math.max(yStart, Math.max(minY, baseY));
-        int hi = Math.min(yEnd, Math.min(maxY - 1, baseY + height - 1));
+    /**
+     * 写入一个公式层。
+     *
+     * <p>若该层不引用 ly（{@link FormulaLayerDef#columnInvariant()}），同一列内所有 y
+     * 的结果必然相同：每列只求值一次，再用 {@code arraycopy} 铺满整段高度。
+     * 默认公式那类「只按 x/z 取色」的层因此可以少算 (层高 - 1) 倍的表达式。
+     */
+    private static void prepareFormulaLayer(BlockState[] prepared, int baseY, int height, int cx, int cz,
+                                            FormulaLayerDef f, int minY, int maxY) {
+        int lo = Math.max(f.yStart(), Math.max(minY, baseY));
+        int hi = Math.min(f.yEnd(), Math.min(maxY - 1, baseY + height - 1));
+        if (lo > hi) return;
+
+        if (f.columnInvariant()) {
+            BlockState[] column = new BlockState[16 * 16];
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    BlockState st = f.getBlock(cx + x, cz + z, lo);
+                    column[x * 16 + z] = st;
+                }
+            }
+            for (int y = lo; y <= hi; y++) {
+                System.arraycopy(column, 0, prepared, (y - baseY) * 16 * 16, column.length);
+            }
+            return;
+        }
+
         for (int y = lo; y <= hi; y++) {
             int yIndex = (y - baseY) * 16 * 16;
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
-                    prepared[yIndex + x * 16 + z] = getter.get(cx + x, cz + z, y);
+                    prepared[yIndex + x * 16 + z] = f.getBlock(cx + x, cz + z, y);
+                }
+            }
+        }
+    }
+
+    /**
+     * 写入一个循环层。
+     *
+     * <p>循环层即使各条目不引用 ly，整层也并非常量——结果按 pos 选取条目。但同一列
+     * 的结果以 cycleLength 为周期，因此每列只需算 min(层高, cycleLength) 次，
+     * 而不是逐格重算。
+     */
+    private static void prepareCyclicLayer(BlockState[] prepared, int baseY, int height, int cx, int cz,
+                                           CyclicLayerDef c, int minY, int maxY) {
+        int lo = Math.max(c.yStart(), Math.max(minY, baseY));
+        int hi = Math.min(c.yEnd(), Math.min(maxY - 1, baseY + height - 1));
+        if (lo > hi) return;
+
+        int rangeLen = hi - lo + 1;
+        int period = c.columnPeriod();
+        if (period == 0 || period > rangeLen) {
+            // 与 y 相关，或周期比层高还长：缓存没有收益，直接逐格求值
+            for (int y = lo; y <= hi; y++) {
+                int yIndex = (y - baseY) * 16 * 16;
+                for (int x = 0; x < 16; x++) {
+                    for (int z = 0; z < 16; z++) {
+                        prepared[yIndex + x * 16 + z] = c.getBlock(cx + x, cz + z, y);
+                    }
+                }
+            }
+            return;
+        }
+
+        // 条目都不引用 ly，因此 layerY 取任一值都等价
+        int layerY = lo - c.yStart();
+        BlockState[] cycle = new BlockState[period];
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int worldX = cx + x;
+                int worldZ = cz + z;
+                for (int pos = 0; pos < period; pos++) {
+                    cycle[pos] = c.getBlockForPos(worldX, worldZ, pos, layerY);
+                }
+                for (int y = lo; y <= hi; y++) {
+                    prepared[(y - baseY) * 16 * 16 + x * 16 + z] = cycle[c.posOf(y)];
                 }
             }
         }
@@ -341,11 +407,6 @@ public class PatternData {
         } finally {
             Files.deleteIfExists(temp);
         }
-    }
-
-    @FunctionalInterface
-    private interface BlockGetter {
-        BlockState get(int x, int z, int y);
     }
 
     private static String stripNewlines(String s) {

@@ -12,6 +12,8 @@ public class CyclicLayerDef {
     private final int yStart, yEnd;
     private final long cycleLength;
     private final List<Entry> entries;
+    /** 所有条目都不引用 ly，因此同一列的结果只取决于 pos（以 cycleLength 为周期）。 */
+    private final boolean columnInvariant;
 
     public CyclicLayerDef(int yStart, int yEnd, List<Entry> entries) {
         this.yStart = yStart;
@@ -20,15 +22,34 @@ public class CyclicLayerDef {
         long sum = 0;
         for (Entry e : entries) sum = Math.addExact(sum, e.thickness());
         this.cycleLength = sum;
+        boolean invariant = true;
+        for (Entry e : entries) {
+            if (ExprEvaluator.dependsOnLy(e.expression())) {
+                invariant = false;
+                break;
+            }
+        }
+        this.columnInvariant = invariant && sum <= Integer.MAX_VALUE;
     }
 
     public int yStart() { return yStart; }
     public int yEnd() { return yEnd; }
 
-    public BlockState getBlock(int worldX, int worldZ, int globalY) {
-        if (cycleLength == 0) return Blocks.AIR.defaultBlockState();
-        long pos = Math.floorMod((long) globalY - yStart, cycleLength);
-        int layerY = globalY - yStart;
+    /**
+     * 返回列的周期：结果只取决于 {@code posOf(y)}，取值 0 表示与 y 相关、无法按列缓存。
+     */
+    public int columnPeriod() {
+        return columnInvariant ? (int) cycleLength : 0;
+    }
+
+    /** globalY 在该列循环中的位置。 */
+    public int posOf(int globalY) {
+        if (cycleLength == 0) return 0;
+        return (int) Math.floorMod((long) globalY - yStart, cycleLength);
+    }
+
+    /** 按 pos 取方块（跳过重复的 floorMod 计算），供按列缓存时使用。 */
+    public BlockState getBlockForPos(int worldX, int worldZ, int pos, int layerY) {
         long acc = 0;
         for (Entry e : entries) {
             if (pos < acc + e.thickness()) {
@@ -37,6 +58,11 @@ public class CyclicLayerDef {
             acc += e.thickness();
         }
         return Blocks.AIR.defaultBlockState();
+    }
+
+    public BlockState getBlock(int worldX, int worldZ, int globalY) {
+        if (cycleLength == 0) return Blocks.AIR.defaultBlockState();
+        return getBlockForPos(worldX, worldZ, posOf(globalY), globalY - yStart);
     }
 
     public record Entry(int thickness, ExprNode expression) {}

@@ -4,9 +4,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Block;
@@ -51,12 +53,64 @@ public class ExprEvaluator {
         return switch (node) {
             case ExprNode.NumberNode n -> n.value();
             case ExprNode.VariableNode v -> context.lookup(v.name(), x, z, ly);
-            case ExprNode.BlockNode b -> com.kncatl.ohmyworld.expr.BlockResolver.resolve(b.blockId());
+            case ExprNode.BlockNode b -> resolveBlock(b);
             case ExprNode.BinaryNode b -> evalBinary(b, x, z, ly, context);
             case ExprNode.UnaryNode u -> evalUnary(u, x, z, ly, context);
             case ExprNode.ConditionalNode c -> evalConditional(c, x, z, ly, context);
             case ExprNode.FuncCallNode f -> evalFunc(f, x, z, ly, context);
             case ExprNode.BlockExprNode be -> evalBlockExpr(be, x, z, ly, context);
+        };
+    }
+
+    /** 方块字面量只解析一次；并发竞争时结果相同，最坏只是重复解析。 */
+    private static BlockState resolveBlock(ExprNode.BlockNode node) {
+        Object cached = node.resolved();
+        if (cached != null) return (BlockState) cached;
+        BlockState state = BlockResolver.resolve(node.blockId());
+        node.resolved(state);
+        return state;
+    }
+
+    /**
+     * 判断表达式的结果是否随纵坐标变化。
+     *
+     * <p>表达式里只有 {@code ly} 能引用 y；{@code rand}/{@code randexcept} 也要算作
+     * 与 y 相关，因为它们经 {@code pickIndex(x, z, ly, ...)} 隐式取用了 ly。
+     * {@code let} 绑定可以遮蔽 {@code ly}，因此需要沿途跟踪已绑定的名字。
+     *
+     * <p>判定为 false 时，同一列内所有 y 的结果必然相同，调用方可以只求值一次。
+     */
+    public static boolean dependsOnLy(ExprNode node) {
+        return dependsOnLy(node, Set.of());
+    }
+
+    private static boolean dependsOnLy(ExprNode node, Set<String> shadowed) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v -> v.name().equals("ly") && !shadowed.contains("ly");
+            case ExprNode.BinaryNode b -> dependsOnLy(b.left(), shadowed) || dependsOnLy(b.right(), shadowed);
+            case ExprNode.UnaryNode u -> dependsOnLy(u.operand(), shadowed);
+            case ExprNode.ConditionalNode c ->
+                    dependsOnLy(c.condition(), shadowed)
+                            || dependsOnLy(c.thenExpr(), shadowed)
+                            || dependsOnLy(c.elseExpr(), shadowed);
+            case ExprNode.FuncCallNode f -> {
+                if (f.name().equals("rand") || f.name().equals("randexcept")) yield true;
+                for (ExprNode arg : f.args()) {
+                    if (dependsOnLy(arg, shadowed)) yield true;
+                }
+                yield false;
+            }
+            case ExprNode.BlockExprNode be -> {
+                Set<String> inner = new HashSet<>(shadowed);
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    // 绑定值先于绑定名生效，因此顺序不能颠倒
+                    if (dependsOnLy(binding.value(), inner)) yield true;
+                    inner.add(binding.name());
+                }
+                yield dependsOnLy(be.body(), inner);
+            }
         };
     }
 

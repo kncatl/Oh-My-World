@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.3
+
+### Changed
+- World generation is much faster for layers that do not depend on height. These are now evaluated once per column and reused for the entire vertical range, instead of being recomputed for every single block. Measured reduction for such layers: roughly 50x to 90x fewer expression evaluations.
+- Block literals are resolved once instead of on every evaluation, removing tens of thousands of registry-cache lookups per chunk.
+
+### Compatibility
+- No formula syntax or behaviour changes. Every formula produces exactly the same terrain as before.
+
 ## v1.1.2
 
 ### Fixed
