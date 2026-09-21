@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.5
+
+### Changed
+- World generation is faster again for formulas that mix height-dependent and height-independent values. A `let` binding whose value does not depend on height is now evaluated once per column and reused for the whole vertical range, instead of being recomputed for every block. Only the height-dependent part of the formula is still evaluated per block.
+- Measured on the same 37-binding formula as v1.1.4: per-block expression evaluation is down from about 1.5 µs to about 1.1 µs, and spawn-area preparation from 17.4 s to 11.4 s (1.5x).
+
+### Compatibility
+- No formula syntax or behaviour changes. Verified by generating two worlds from the same seed and comparing 841 chunks chunk by chunk: heightmaps, block palettes, packed block data and biomes are byte-identical. (The light values saved in a chunk are light-engine state rather than world generation output, and can differ slightly between any two runs.)
+
 ## v1.1.4
 
 ### Changed
