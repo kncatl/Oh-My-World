@@ -69,12 +69,41 @@ public class ExprEvaluator {
 
     private static Object evalCompiledBlock(ExprNode.CompiledBlockNode block, int x, int z, int ly,
                                             EvalContext context) {
+        // 与 y 无关的绑定每列只需算一次：本节点在本列尚未预备时先补齐，
+        // 之后逐格求值只剩与 y 相关的绑定与 body。
+        if (!context.isPrepared(block.id(), x, z)) {
+            prepareHoisted(block, x, z, ly, context);
+        }
         int[] slots = block.slots();
         ExprNode[] values = block.values();
+        boolean[] hoisted = block.hoisted();
         for (int i = 0; i < values.length; i++) {
+            if (hoisted[i]) continue; // 已由 prepareHoisted 填入槽位
             context.setSlot(slots[i], eval(values[i], x, z, ly, context));
         }
         return eval(block.body(), x, z, ly, context);
+    }
+
+    /**
+     * 按绑定顺序求值一个块里与 y 无关的绑定并写入槽位，然后标记本列已预备。
+     *
+     * <p>绑定值只会引用更早的绑定，而与 y 无关的值只能引用同样与 y 无关的槽位
+     * （否则它自己就会与 y 相关），因此按顺序求值即可，无需拓扑排序。
+     *
+     * <p>正确性依赖两点：一是本节点的槽位只有本节点会读写；二是预备标记按
+     * (节点 id, x, z) 记录，且槽位跨表达式全局唯一（见 {@code ExprCompiler}），
+     * 别的表达式不会覆盖已预备的值。
+     */
+    private static void prepareHoisted(ExprNode.CompiledBlockNode block, int x, int z, int ly,
+                                       EvalContext context) {
+        int[] slots = block.slots();
+        ExprNode[] values = block.values();
+        boolean[] hoisted = block.hoisted();
+        for (int i = 0; i < values.length; i++) {
+            if (!hoisted[i]) continue;
+            context.setSlot(slots[i], eval(values[i], x, z, ly, context));
+        }
+        context.markPrepared(block.id(), x, z);
     }
 
     private static double builtinValue(int kind, int x, int z, int ly) {
@@ -98,6 +127,9 @@ public class ExprEvaluator {
      * {@code let} 绑定可以遮蔽 {@code ly}，因此需要沿途跟踪已绑定的名字。
      *
      * <p>判定为 false 时，同一列内所有 y 的结果必然相同，调用方可以只求值一次。
+     *
+     * <p>本方法工作于未编译的 AST，用于「整层/整个条目是否与 y 无关」这类决策。编译后的
+     * 节点由 {@code ExprCompiler} 在编译期逐个绑定判定，用于把单个绑定提升为每列一次。
      */
     public static boolean dependsOnLy(ExprNode node) {
         return dependsOnLy(node, Set.of());
@@ -375,9 +407,31 @@ public class ExprEvaluator {
         /** 编译后形式的 let 绑定槽位；按需增长，跨次求值复用。 */
         private Object[] slots = new Object[16];
 
+        // 编译块在本列是否已预备。列以 (x, z) 标识，块以节点 id 区分；
+        // reset() 刻意不清空——提升的绑定正是要跨同一列的多次逐格求值复用。
+        private boolean[] prepared = new boolean[8];
+        private int[] preparedX = new int[8];
+        private int[] preparedZ = new int[8];
+
         void reset() {
             bindings.clear();
             scopes.clear();
+        }
+
+        boolean isPrepared(int id, int x, int z) {
+            return id < prepared.length && prepared[id] && preparedX[id] == x && preparedZ[id] == z;
+        }
+
+        void markPrepared(int id, int x, int z) {
+            if (id >= prepared.length) {
+                int grown = Math.max(id + 1, prepared.length * 2);
+                prepared = Arrays.copyOf(prepared, grown);
+                preparedX = Arrays.copyOf(preparedX, grown);
+                preparedZ = Arrays.copyOf(preparedZ, grown);
+            }
+            prepared[id] = true;
+            preparedX[id] = x;
+            preparedZ[id] = z;
         }
 
         void setSlot(int slot, Object value) {

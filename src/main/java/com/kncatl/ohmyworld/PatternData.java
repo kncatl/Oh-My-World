@@ -265,11 +265,14 @@ public class PatternData {
             return;
         }
 
-        for (int y = lo; y <= hi; y++) {
-            int yIndex = (y - baseY) * 16 * 16;
-            for (int x = 0; x < 16; x++) {
-                for (int z = 0; z < 16; z++) {
-                    prepared[yIndex + x * 16 + z] = f.getBlock(cx + x, cz + z, y);
+        // 列外层遍历：与 y 无关的绑定由求值器在每列首次求值时预备，逐格只算剩下的部分。
+        // 若按 y 外层遍历，每个格子都是一列新的 (x, z)，预备会退化成逐格重算。
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int worldX = cx + x;
+                int worldZ = cz + z;
+                for (int y = lo; y <= hi; y++) {
+                    prepared[(y - baseY) * 16 * 16 + x * 16 + z] = f.getBlock(worldX, worldZ, y);
                 }
             }
         }
@@ -291,12 +294,14 @@ public class PatternData {
         int rangeLen = hi - lo + 1;
         int period = c.columnPeriod();
         if (period == 0 || period > rangeLen) {
-            // 与 y 相关，或周期比层高还长：缓存没有收益，直接逐格求值
-            for (int y = lo; y <= hi; y++) {
-                int yIndex = (y - baseY) * 16 * 16;
-                for (int x = 0; x < 16; x++) {
-                    for (int z = 0; z < 16; z++) {
-                        prepared[yIndex + x * 16 + z] = c.getBlock(cx + x, cz + z, y);
+            // 与 y 相关，或周期比层高还长：整层缓存没有收益，但仍按列遍历——
+            // 条目里与 y 无关的绑定可以每列只算一次（理由同公式层）。
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    int worldX = cx + x;
+                    int worldZ = cz + z;
+                    for (int y = lo; y <= hi; y++) {
+                        prepared[(y - baseY) * 16 * 16 + x * 16 + z] = c.getBlock(worldX, worldZ, y);
                     }
                 }
             }

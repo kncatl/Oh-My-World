@@ -73,6 +73,55 @@ class EvalBenchmarkTest {
         System.out.println();
 
         measureColumnHoisting();
+        measurePartialHoisting();
+    }
+
+    /**
+     * B3 部分提升：整层与 y 相关、但部分绑定与 y 无关时，
+     * y 外层遍历会让每个格子都换一列 (x, z)，列预备退化成逐格重算；
+     * 列外层遍历（{@code PatternData} 优化后的顺序）则每列只预备一次。
+     */
+    private static void measurePartialHoisting() {
+        System.out.println("--- 部分绑定提升：列外层 vs y 外层（1 层 = 256 列 x 128 高）---");
+        benchOrder("三角函数绑定 + ly 判定", ExprCompiler.compile(parse(
+                "{ let t = sin(x * 0.1) * cos(z * 0.1); let u = x * 2 + z * 3; let v = ly > 64 ? t + u : t - u; v }")));
+        benchOrder("多重绑定", ExprCompiler.compile(parse(
+                "{ let a = x * 7 + z; let b = a * a - z; let c = (ly % 16) * 3; a + b + c > 500 }")));
+        System.out.println();
+    }
+
+    private static void benchOrder(String label, ExprNode node) {
+        Object[] buffer = new Object[HEIGHT * COLUMNS];
+        for (int i = 0; i < 8; i++) { // 预热
+            fillPerCell(node, buffer);
+            fillColumnOuter(node, buffer);
+        }
+
+        long yOuter = Long.MAX_VALUE;
+        long columnOuter = Long.MAX_VALUE;
+        for (int i = 0; i < 7; i++) {
+            long t0 = System.nanoTime();
+            fillPerCell(node, buffer);
+            yOuter = Math.min(yOuter, System.nanoTime() - t0);
+
+            long t1 = System.nanoTime();
+            fillColumnOuter(node, buffer);
+            columnOuter = Math.min(columnOuter, System.nanoTime() - t1);
+        }
+
+        System.out.printf(Locale.ROOT,
+                "  %-30s y 外层 %7.3f ms  →  列外层 %7.3f ms   加速 %5.2f 倍%n",
+                label, yOuter / 1e6, columnOuter / 1e6, (double) yOuter / Math.max(1, columnOuter));
+    }
+
+    private static void fillColumnOuter(ExprNode node, Object[] buffer) {
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                for (int y = 0; y < HEIGHT; y++) {
+                    buffer[y * COLUMNS + x * 16 + z] = ExprEvaluator.eval(node, x, z, y);
+                }
+            }
+        }
     }
 
     /**

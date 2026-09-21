@@ -47,12 +47,25 @@ class PatternBenchTest {
         }
     }
 
-    /** 按 fillChunk 的顺序遍历：ly 外层、x/z 内层。 */
+    /** 旧的遍历顺序：ly 外层、x/z 内层（B3 之前 fillChunk 的顺序）。 */
     private static long run(ExprNode node) {
         long sink = 0;
         for (int ly = LY_START; ly <= LY_END; ly++) {
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
+                    sink += System.identityHashCode(ExprEvaluator.eval(node, x, z, ly));
+                }
+            }
+        }
+        return sink;
+    }
+
+    /** B3 之后的顺序：x/z 外层、ly 内层，同一列只预备一次。 */
+    private static long runByColumn(ExprNode node) {
+        long sink = 0;
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                for (int ly = LY_START; ly <= LY_END; ly++) {
                     sink += System.identityHashCode(ExprEvaluator.eval(node, x, z, ly));
                 }
             }
@@ -72,25 +85,30 @@ class PatternBenchTest {
         System.out.println();
         System.out.println("--- 巨构公式逐方块求值 ---");
         System.out.printf("  该层共 %d 格/区块%n", (LY_END - LY_START + 1) * 16 * 16);
-        measure("未编译（改造前）", raw);
-        measure("已编译（改造后）", compiled);
+        measure("未编译（对照）", raw, false);
+        measure("已编译 y 外层（旧路径）", compiled, false);
+        measure("已编译 列外层（B3 路径）", compiled, true);
         System.out.println();
     }
 
-    private static void measure(String label, ExprNode node) {
-        for (int i = 0; i < WARMUP; i++) run(node);
+    private static void measure(String label, ExprNode node, boolean byColumn) {
+        for (int i = 0; i < WARMUP; i++) {
+            if (byColumn) runByColumn(node);
+            else run(node);
+        }
 
         long[] samples = new long[SAMPLES];
         for (int i = 0; i < SAMPLES; i++) {
             long t0 = System.nanoTime();
-            run(node);
+            if (byColumn) runByColumn(node);
+            else run(node);
             samples[i] = System.nanoTime() - t0;
         }
         Arrays.sort(samples);
 
         long blocks = (long) (LY_END - LY_START + 1) * 16 * 16;
         System.out.printf(Locale.ROOT,
-                "  %-18s 单次 %8.1f ns   →  %7.1f ms/区块%n",
+                "  %-24s 单次 %8.1f ns   →  %7.1f ms/区块%n",
                 label, (double) samples[0] / blocks, samples[0] / 1e6);
     }
 }
