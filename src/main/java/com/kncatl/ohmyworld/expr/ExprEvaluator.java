@@ -2,6 +2,7 @@ package com.kncatl.ohmyworld.expr;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -59,7 +60,25 @@ public class ExprEvaluator {
             case ExprNode.ConditionalNode c -> evalConditional(c, x, z, ly, context);
             case ExprNode.FuncCallNode f -> evalFunc(f, x, z, ly, context);
             case ExprNode.BlockExprNode be -> evalBlockExpr(be, x, z, ly, context);
+            // 编译后的形态：变量读取变成数组下标，不再有任何 Map 操作
+            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly);
+            case ExprNode.SlotNode s -> context.slot(s.slot());
+            case ExprNode.CompiledBlockNode cb -> evalCompiledBlock(cb, x, z, ly, context);
         };
+    }
+
+    private static Object evalCompiledBlock(ExprNode.CompiledBlockNode block, int x, int z, int ly,
+                                            EvalContext context) {
+        int[] slots = block.slots();
+        ExprNode[] values = block.values();
+        for (int i = 0; i < values.length; i++) {
+            context.setSlot(slots[i], eval(values[i], x, z, ly, context));
+        }
+        return eval(block.body(), x, z, ly, context);
+    }
+
+    private static double builtinValue(int kind, int x, int z, int ly) {
+        return switch (kind) { case 0 -> x; case 1 -> z; case 2 -> ly; default -> 0; };
     }
 
     /** 方块字面量只解析一次；并发竞争时结果相同，最坏只是重复解析。 */
@@ -111,6 +130,11 @@ public class ExprEvaluator {
                 }
                 yield dependsOnLy(be.body(), inner);
             }
+            // 编译后的形态：槽位无法在此反查来源，保守视为与 y 相关。
+            // 实际调用发生在编译之前（见 FormulaParser），因此不影响优化生效。
+            case ExprNode.BuiltinNode b -> b.kind() == 2;
+            case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledBlockNode cb -> true;
         };
     }
 
@@ -132,19 +156,65 @@ public class ExprEvaluator {
 
     private static Object evalBinary(ExprNode.BinaryNode b, int x, int z, int ly, EvalContext context) {
         BinaryOp op = b.op();
+        // 逻辑与/或需要短路，相等比较要按运行时类型分派：这两类走通用路径
         if (op == BinaryOp.AND) return toBool(eval(b.left(), x, z, ly, context)) && toBool(eval(b.right(), x, z, ly, context));
         if (op == BinaryOp.OR) return toBool(eval(b.left(), x, z, ly, context)) || toBool(eval(b.right(), x, z, ly, context));
-        Object left = eval(b.left(), x, z, ly, context);
-        Object right = eval(b.right(), x, z, ly, context);
-        if (op == BinaryOp.EQ || op == BinaryOp.NE) return compEqNe(op, left, right);
-        if (op == BinaryOp.LT || op == BinaryOp.GT || op == BinaryOp.LE || op == BinaryOp.GE) {
-            double la = toDouble(left); double ra = toDouble(right);
-            return switch (op) { case LT -> la < ra; case GT -> la > ra; case LE -> la <= ra; case GE -> la >= ra; default -> false; };
+        if (op == BinaryOp.EQ || op == BinaryOp.NE) {
+            return compEqNe(op, eval(b.left(), x, z, ly, context), eval(b.right(), x, z, ly, context));
         }
-        double la = toDouble(left); double ra = toDouble(right);
+        double result = evalNumberBinary(b, x, z, ly, context);
+        // 比较结果保持 Boolean，与改造前的返回类型一致
         return switch (op) {
-            case ADD -> la + ra; case SUB -> la - ra; case MUL -> la * ra;
-            case DIV -> (ra == 0 ? 0 : la / ra); case MOD -> (ra == 0 ? 0 : la % ra); default -> 0d;
+            case LT, GT, LE, GE -> result != 0;
+            default -> result;
+        };
+    }
+
+    /**
+     * 数值子树的原语求值路径。
+     *
+     * <p>{@link #eval} 统一返回 Object，于是每一步算术都要把结果装箱成 Double，
+     * 而 Double 没有对象池——每次都是新对象。算术密集的公式一个区块可达数千万次
+     * 分配。本路径让中间结果停留在 double，只在整个表达式的结果处装箱。
+     *
+     * <p>遇到非数值子树（方块、变量槽位等）时回退到通用路径，语义完全一致。
+     */
+    private static double evalNumber(ExprNode node, int x, int z, int ly, EvalContext context) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> n.value();
+            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly);
+            case ExprNode.SlotNode s -> toDouble(context.slot(s.slot()));
+            case ExprNode.BinaryNode b -> evalNumberBinary(b, x, z, ly, context);
+            case ExprNode.UnaryNode u -> u.op() == ExprNode.UnaryOp.NEG
+                    ? -evalNumber(u.operand(), x, z, ly, context)
+                    : (toBool(eval(u, x, z, ly, context)) ? 0d : 1d);
+            case ExprNode.ConditionalNode c -> toBool(eval(c.condition(), x, z, ly, context))
+                    ? evalNumber(c.thenExpr(), x, z, ly, context)
+                    : evalNumber(c.elseExpr(), x, z, ly, context);
+            case ExprNode.FuncCallNode f -> evalNumberFunc(f, x, z, ly, context);
+            default -> toDouble(eval(node, x, z, ly, context));
+        };
+    }
+
+    private static double evalNumberBinary(ExprNode.BinaryNode b, int x, int z, int ly, EvalContext context) {
+        BinaryOp op = b.op();
+        if (op == BinaryOp.AND || op == BinaryOp.OR || op == BinaryOp.EQ || op == BinaryOp.NE) {
+            // 需要短路或按类型分派，回退到通用路径
+            return toDouble(evalBinary(b, x, z, ly, context));
+        }
+        double left = evalNumber(b.left(), x, z, ly, context);
+        double right = evalNumber(b.right(), x, z, ly, context);
+        return switch (op) {
+            case ADD -> left + right;
+            case SUB -> left - right;
+            case MUL -> left * right;
+            case DIV -> right == 0 ? 0 : left / right;
+            case MOD -> right == 0 ? 0 : left % right;
+            case LT -> left < right ? 1 : 0;
+            case GT -> left > right ? 1 : 0;
+            case LE -> left <= right ? 1 : 0;
+            case GE -> left >= right ? 1 : 0;
+            default -> 0;
         };
     }
 
@@ -163,8 +233,11 @@ public class ExprEvaluator {
     }
 
     private static Object evalUnary(ExprNode.UnaryNode u, int x, int z, int ly, EvalContext context) {
-        Object val = eval(u.operand(), x, z, ly, context);
-        return switch (u.op()) { case NOT -> !toBool(val); case NEG -> -toDouble(val); };
+        if (u.op() == ExprNode.UnaryOp.NEG) {
+            // 取负走原语路径，中间的算术结果不必装箱
+            return -evalNumber(u.operand(), x, z, ly, context);
+        }
+        return !toBool(eval(u.operand(), x, z, ly, context));
     }
 
     private static Object evalConditional(ExprNode.ConditionalNode c, int x, int z, int ly, EvalContext context) {
@@ -173,22 +246,54 @@ public class ExprEvaluator {
                 : eval(c.elseExpr(), x, z, ly, context);
     }
 
+    private static boolean isNumericFunction(String name) {
+        return !name.equals("rand") && !name.equals("randexcept") && FUNCTION_ARITY.containsKey(name);
+    }
+
     private static Object evalFunc(ExprNode.FuncCallNode f, int x, int z, int ly, EvalContext context) {
-        List<Object> raw = new ArrayList<>(f.args().size());
-        for (ExprNode arg : f.args()) raw.add(eval(arg, x, z, ly, context));
+        // 数值函数统一走原语实现，仅在此处装箱一次
+        if (isNumericFunction(f.name())) return evalNumberFunc(f, x, z, ly, context);
+        List<ExprNode> args = f.args();
         return switch (f.name()) {
-            case "floordiv" -> { int a = toInt(raw.get(0)); int b = toInt(raw.get(1)); yield (double)(b == 0 ? 0 : Math.floorDiv(a, b)); }
-            case "floormod" -> { int a = toInt(raw.get(0)); int b = toInt(raw.get(1)); yield (double)(b == 0 ? 0 : Math.floorMod(a, b)); }
-            case "abs"   -> Math.abs(toDouble(raw.get(0))); case "max" -> Math.max(toDouble(raw.get(0)), toDouble(raw.get(1))); case "min" -> Math.min(toDouble(raw.get(0)), toDouble(raw.get(1)));
-            case "floor" -> Math.floor(toDouble(raw.get(0))); case "ceil" -> Math.ceil(toDouble(raw.get(0))); case "round" -> (double)Math.round(toDouble(raw.get(0)));
-            case "sign"  -> (double)Math.signum(toDouble(raw.get(0))); case "sqrt" -> Math.sqrt(toDouble(raw.get(0)));
-            case "pow"   -> Math.pow(toDouble(raw.get(0)), toDouble(raw.get(1))); case "exp" -> Math.exp(toDouble(raw.get(0)));
-            case "log"   -> Math.log(toDouble(raw.get(0))); case "log10" -> Math.log10(toDouble(raw.get(0)));
-            case "sin"   -> Math.sin(toDouble(raw.get(0))); case "cos" -> Math.cos(toDouble(raw.get(0))); case "tan" -> Math.tan(toDouble(raw.get(0)));
-            case "asin"  -> Math.asin(toDouble(raw.get(0))); case "acos" -> Math.acos(toDouble(raw.get(0))); case "atan" -> Math.atan(toDouble(raw.get(0)));
-            case "todeg" -> Math.toDegrees(toDouble(raw.get(0))); case "torad" -> Math.toRadians(toDouble(raw.get(0)));
-            case "rand" -> evalRand(raw, x, z, ly); case "randexcept" -> evalRandExcept(raw, x, z, ly);
+            // rand/randexcept 是变参且返回方块，不属于数值路径
+            case "rand" -> evalRand(args, x, z, ly, context);
+            case "randexcept" -> evalRandExcept(args, x, z, ly, context);
             default -> throw new IllegalArgumentException("Unknown function: " + f.name());
+        };
+    }
+
+    /**
+     * 数值函数的原语实现，供 {@link #evalNumber} 与 {@link #evalFunc} 共用。
+     *
+     * <p>定参函数直接取参数求值，既不为每次调用构造参数列表，也不为函数结果装箱。
+     */
+    private static double evalNumberFunc(ExprNode.FuncCallNode f, int x, int z, int ly, EvalContext context) {
+        List<ExprNode> args = f.args();
+        return switch (f.name()) {
+            case "floordiv" -> { int a = (int) evalNumber(args.get(0), x, z, ly, context); int b = (int) evalNumber(args.get(1), x, z, ly, context); yield b == 0 ? 0 : Math.floorDiv(a, b); }
+            case "floormod" -> { int a = (int) evalNumber(args.get(0), x, z, ly, context); int b = (int) evalNumber(args.get(1), x, z, ly, context); yield b == 0 ? 0 : Math.floorMod(a, b); }
+            case "abs"   -> Math.abs(evalNumber(args.get(0), x, z, ly, context));
+            case "max"   -> Math.max(evalNumber(args.get(0), x, z, ly, context), evalNumber(args.get(1), x, z, ly, context));
+            case "min"   -> Math.min(evalNumber(args.get(0), x, z, ly, context), evalNumber(args.get(1), x, z, ly, context));
+            case "floor" -> Math.floor(evalNumber(args.get(0), x, z, ly, context));
+            case "ceil"  -> Math.ceil(evalNumber(args.get(0), x, z, ly, context));
+            case "round" -> Math.round(evalNumber(args.get(0), x, z, ly, context));
+            case "sign"  -> Math.signum(evalNumber(args.get(0), x, z, ly, context));
+            case "sqrt"  -> Math.sqrt(evalNumber(args.get(0), x, z, ly, context));
+            case "pow"   -> Math.pow(evalNumber(args.get(0), x, z, ly, context), evalNumber(args.get(1), x, z, ly, context));
+            case "exp"   -> Math.exp(evalNumber(args.get(0), x, z, ly, context));
+            case "log"   -> Math.log(evalNumber(args.get(0), x, z, ly, context));
+            case "log10" -> Math.log10(evalNumber(args.get(0), x, z, ly, context));
+            case "sin"   -> Math.sin(evalNumber(args.get(0), x, z, ly, context));
+            case "cos"   -> Math.cos(evalNumber(args.get(0), x, z, ly, context));
+            case "tan"   -> Math.tan(evalNumber(args.get(0), x, z, ly, context));
+            case "asin"  -> Math.asin(evalNumber(args.get(0), x, z, ly, context));
+            case "acos"  -> Math.acos(evalNumber(args.get(0), x, z, ly, context));
+            case "atan"  -> Math.atan(evalNumber(args.get(0), x, z, ly, context));
+            case "todeg" -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
+            case "torad" -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
+            // 非数值函数（rand/randexcept）返回方块，按数值语境取 0
+            default -> toDouble(evalFunc(f, x, z, ly, context));
         };
     }
 
@@ -199,13 +304,16 @@ public class ExprEvaluator {
         return Math.floorMod(h & 0x7FFFFFFF, bound);
     }
 
-    private static Object evalRand(List<Object> raw, int x, int z, int ly) {
-        if (raw.isEmpty()) {
+    private static Object evalRand(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        if (args.isEmpty()) {
             List<BlockState> all = getAllBlocks();
             return all.isEmpty() ? BlockResolver.resolve("minecraft:air") : all.get(pickIndex(x, z, ly, all.size()));
         }
-        List<BlockState> states = new ArrayList<>();
-        for (Object arg : raw) if (arg instanceof BlockState bs) states.add(bs);
+        List<BlockState> states = new ArrayList<>(args.size());
+        for (ExprNode arg : args) {
+            Object value = eval(arg, x, z, ly, context);
+            if (value instanceof BlockState bs) states.add(bs);
+        }
         if (states.isEmpty()) return BlockResolver.resolve("minecraft:air");
         return states.get(pickIndex(x, z, ly, states.size()));
     }
@@ -213,9 +321,12 @@ public class ExprEvaluator {
     private static final int RANDEXCEPT_CACHE_LIMIT = 64;
     private static final Map<List<BlockState>, List<BlockState>> RANDEXCEPT_CACHE = new LinkedHashMap<>(16, 0.75f, true);
 
-    private static Object evalRandExcept(List<Object> raw, int x, int z, int ly) {
+    private static Object evalRandExcept(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
         List<BlockState> excluded = new ArrayList<>();
-        for (Object arg : raw) if (arg instanceof BlockState bs) excluded.add(bs);
+        for (ExprNode arg : args) {
+            Object value = eval(arg, x, z, ly, context);
+            if (value instanceof BlockState bs) excluded.add(bs);
+        }
         List<BlockState> key = List.copyOf(excluded);
         List<BlockState> pool;
         synchronized (RANDEXCEPT_CACHE) {
@@ -254,7 +365,6 @@ public class ExprEvaluator {
     }
 
     private static double toDouble(Object o) { if (o instanceof Number n) return n.doubleValue(); if (o instanceof Boolean b) return b ? 1d : 0d; return 0d; }
-    private static int toInt(Object o) { if (o instanceof Number n) return n.intValue(); if (o instanceof Boolean b) return b ? 1 : 0; return 0; }
     private static boolean toBool(Object o) { if (o instanceof Boolean b) return b; if (o instanceof Number n) return n.doubleValue() != 0; return false; }
 
     private static final class EvalContext {
@@ -262,10 +372,25 @@ public class ExprEvaluator {
 
         private final Map<String, Object> bindings = new HashMap<>();
         private final ArrayDeque<Scope> scopes = new ArrayDeque<>();
+        /** 编译后形式的 let 绑定槽位；按需增长，跨次求值复用。 */
+        private Object[] slots = new Object[16];
 
         void reset() {
             bindings.clear();
             scopes.clear();
+        }
+
+        void setSlot(int slot, Object value) {
+            Object[] current = slots;
+            if (slot >= current.length) {
+                current = Arrays.copyOf(current, Math.max(slot + 1, current.length * 2));
+                slots = current;
+            }
+            current[slot] = value;
+        }
+
+        Object slot(int slot) {
+            return slots[slot];
         }
 
         void enterScope() { scopes.push(new Scope()); }

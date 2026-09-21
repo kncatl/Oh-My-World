@@ -44,3 +44,8 @@ repo/
 ### Sensitive local config ###
 # gradle.properties is tracked — see gradle.properties.example for guidance
 # Modify gradle.properties locally for your JDK path / proxy; do not commit those changes.
+
+### Local-only test fixtures ###
+# Benchmark input derived from the author's own formula. Deliberately kept out of
+# the repository; PatternBenchTest skips itself when this file is absent.
+src/test/resources/bench-mega-formula.txt

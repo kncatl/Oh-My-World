@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.4
+
+### Changed
+- World generation is substantially faster for complex formulas. Four changes, none of which alter the terrain that is produced:
+  - `let` bindings are compiled to array slots when the formula is parsed, instead of being looked up in a hash map for every single block.
+  - Function calls no longer allocate an argument list per call.
+  - Arithmetic on numeric subexpressions is carried out as primitive `double` values, so intermediate results are no longer boxed.
+  - Blocks that resolve to air are no longer written into the chunk. A freshly generated chunk is already air there, and for air written bottom-up the accompanying heightmap updates are no-ops.
+- Measured on a formula with 37 `let` bindings spanning 383 vertical levels: per-block expression evaluation dropped from roughly 3.3 µs to 1.5 µs, and spawn-area preparation from 45.0 s to 17.5 s (2.6x).
+
+### Compatibility
+- No formula syntax or behaviour changes. Verified by generating two worlds from the same seed with the old and new code and comparing them chunk by chunk: heightmaps, block palettes and packed block data are byte-identical.
+
 ## v1.1.3
 
 ### Changed

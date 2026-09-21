@@ -220,6 +220,11 @@ public class PatternData {
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
                     BlockState st = prepared[yIndex + x * 16 + z];
+                    // 新区块本就是空气，写入空气与对应的高度图更新都是空操作。
+                    // 自下而上写入时 i 只会因不透明方块前进到 y+1，重扫分支
+                    // （i-1 == y）不可能命中，因此跳过是语义等价的。
+                    // 对稀疏结构这一步能省掉绝大多数写入与高度图更新。
+                    if (st == AIR) continue;
                     //? >=1.21.5 {
                     // 与原版 FlatLevelSource 一致：无标志填充，避免生成期触发额外光照/方块更新开销
                     chunk.setBlockState(pos.set(x, y, z), st);

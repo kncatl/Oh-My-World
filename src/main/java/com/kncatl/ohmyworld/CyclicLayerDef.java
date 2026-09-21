@@ -24,7 +24,7 @@ public class CyclicLayerDef {
         this.cycleLength = sum;
         boolean invariant = true;
         for (Entry e : entries) {
-            if (ExprEvaluator.dependsOnLy(e.expression())) {
+            if (e.lyDependent()) {
                 invariant = false;
                 break;
             }
@@ -65,5 +65,9 @@ public class CyclicLayerDef {
         return getBlockForPos(worldX, worldZ, posOf(globalY), globalY - yStart);
     }
 
-    public record Entry(int thickness, ExprNode expression) {}
+    /**
+     * @param expression  已编译的条目表达式
+     * @param lyDependent 该条目是否引用 ly，需在编译前判定
+     */
+    public record Entry(int thickness, ExprNode expression, boolean lyDependent) {}
 }

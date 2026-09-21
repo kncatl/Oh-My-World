@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.kncatl.ohmyworld.expr.BlockResolver;
+import com.kncatl.ohmyworld.expr.ExprCompiler;
 import com.kncatl.ohmyworld.expr.ExprEvaluator;
 import com.kncatl.ohmyworld.expr.ExprLexer;
 import com.kncatl.ohmyworld.expr.ExprNode;
@@ -108,7 +109,10 @@ public class FormulaParser {
                         for (String ve : valErrors) errors.add(layerError(lineIdx, ve, line));
                         continue;
                     }
-                    layers.add(new FormulaLayerDef(yStart, yEnd, expr));
+                    // 「是否与 y 相关」必须在编译前判定：编译后变量变成槽位下标，
+                    // 无法再从名字反推来源。
+                    boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
+                    layers.add(new FormulaLayerDef(yStart, yEnd, ExprCompiler.compile(expr), !lyDependent));
                 }
             } catch (StackOverflowError e) {
                 errors.add(layerError(lineIdx, "expression nesting is too deep", line));
@@ -232,6 +236,11 @@ public class FormulaParser {
                 }
                 return validateNode(be.body(), errors, local);
             }
+            // 以下是编译后的形态。语义校验发生在编译之前（见本文件的处理顺序），
+            // 因此这几个分支实际不会走到；这里只是为了让 switch 穷尽。
+            case ExprNode.BuiltinNode b -> { return ExprEvaluator.ValueType.NUMBER; }
+            case ExprNode.SlotNode s -> { return ExprEvaluator.ValueType.UNKNOWN; }
+            case ExprNode.CompiledBlockNode cb -> { return ExprEvaluator.ValueType.UNKNOWN; }
         }
     }
 
@@ -284,7 +293,9 @@ public class FormulaParser {
             pos++;
 
             ExprNode expr = new ExprParser(ExprLexer.tokenize(inner)).parse();
-            entries.add(new CyclicLayerDef.Entry(t, expr));
+            // 与整层同理：依赖判定必须在编译前、且在未编译的 AST 上完成
+            boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
+            entries.add(new CyclicLayerDef.Entry(t, ExprCompiler.compile(expr), lyDependent));
         }
         return entries;
     }

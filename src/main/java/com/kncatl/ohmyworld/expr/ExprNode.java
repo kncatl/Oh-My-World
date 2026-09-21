@@ -36,6 +36,24 @@ public sealed interface ExprNode {
     record BlockExprNode(List<LetBinding> bindings, ExprNode body) implements ExprNode {}
     record LetBinding(String name, ExprNode value) {}
 
+    // --- 编译后的形态（由 ExprCompiler 生成）---------------------------------
+    //
+    // 求值器原本用 HashMap<String, Object> 保存 let 绑定，每次变量读取还要做
+    // containsKey + get。对绑定较多的公式，每格要执行数百次哈希查找，而区块
+    // 生成每区块要算近十万格。编译后变量访问变成定长数组的读写。
+
+    /** 内建坐标：0=x，1=z，2=ly。 */
+    record BuiltinNode(int kind) implements ExprNode {}
+
+    /** let 绑定的槽位引用。 */
+    record SlotNode(int slot) implements ExprNode {}
+
+    /**
+     * 编译后的 let 块：按顺序求值 {@code values} 并写入对应 {@code slots}，再求值
+     * {@code body}。槽位在编译期分配，因此无需作用域进出与名字查找。
+     */
+    record CompiledBlockNode(int[] slots, ExprNode[] values, ExprNode body) implements ExprNode {}
+
     enum BinaryOp { ADD, SUB, MUL, DIV, MOD, EQ, NE, LT, GT, LE, GE, AND, OR }
     enum UnaryOp { NOT, NEG }
 }

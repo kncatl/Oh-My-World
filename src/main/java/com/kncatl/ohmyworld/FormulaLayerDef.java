@@ -10,11 +10,16 @@ public class FormulaLayerDef {
     private final ExprNode expression;
     private final boolean columnInvariant;
 
-    public FormulaLayerDef(int yStart, int yEnd, ExprNode expression) {
+    /**
+     * @param expression      已编译的表达式（见 {@code ExprCompiler}）
+     * @param columnInvariant 表达式是否与 ly 无关；需在编译前用
+     *                        {@code ExprEvaluator.dependsOnLy} 判定后传入
+     */
+    public FormulaLayerDef(int yStart, int yEnd, ExprNode expression, boolean columnInvariant) {
         this.yStart = yStart;
         this.yEnd = yEnd;
         this.expression = expression;
-        this.columnInvariant = !ExprEvaluator.dependsOnLy(expression);
+        this.columnInvariant = columnInvariant;
     }
 
     public int yStart() { return yStart; }

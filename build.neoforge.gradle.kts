@@ -85,6 +85,11 @@ neoForge {
         setDisableRecompilation(true)
     }
 
+    // 测试源集需要 BlockState 等类：求值器在比较分支里会做 instanceof 检查。
+    // 注意类加载本身不触发注册表引导，因此不触碰 Blocks.* 的测试可以正常运行；
+    // 需要真实方块的测试请改用 NeoForge 的 testframework。
+    addModdingDependenciesTo(sourceSets["test"])
+
     if (parchmentMc != null && parchmentVer != null) parchment {
         mappingsVersion = parchmentVer
         minecraftVersion = parchmentMc
