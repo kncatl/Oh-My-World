@@ -46,7 +46,7 @@ class ExprCompilerTest {
             "floordiv(x, 3) + floormod(z, 5)",
             // 编译期会把函数名解析成 int 编号，覆盖面尽量宽
             "{ let a = max(abs(x), min(z, 5)); a + ly }",
-            "pow(x, 2) + sqrt(abs(z)) - log10(exp(1))",
+            "pow(x, 2) + sqrt(abs(z)) - log10(exp(1)) + log(abs(z) + 1) - atan(z * 0.1)",
             "todeg(torad(x)) + floor(z * 0.5) - ceil(z * 0.25)",
             "round(sign(x)) + tan(0) + asin(0) + acos(1)",
             "{ let ly = max(1, 2); ly + x }",
