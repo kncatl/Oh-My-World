@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.6
+
+### Changed
+- Function calls are resolved to integer ids when a formula is parsed, instead of comparing and hashing the function name on every call. Complex formulas evaluate roughly 15% faster per block.
+- Measured on the same 37-binding formula as v1.1.5: spawn-area preparation dropped from 11.4 s to 9.7 s.
+
+### Compatibility
+- No formula syntax or behaviour changes. Verified against the v1.1.5 build by generating a world from the same seed and comparing chunk by chunk: 841/841 chunks are byte-identical for heightmaps, block palettes, packed block data and biomes.
+
 ## v1.1.5
 
 ### Changed
