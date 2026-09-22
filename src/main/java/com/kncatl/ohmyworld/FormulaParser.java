@@ -240,6 +240,7 @@ public class FormulaParser {
             // 因此这几个分支实际不会走到；这里只是为了让 switch 穷尽。
             case ExprNode.BuiltinNode b -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.SlotNode s -> { return ExprEvaluator.ValueType.UNKNOWN; }
+            case ExprNode.CompiledFuncCallNode cf -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.CompiledBlockNode cb -> { return ExprEvaluator.ValueType.UNKNOWN; }
         }
     }

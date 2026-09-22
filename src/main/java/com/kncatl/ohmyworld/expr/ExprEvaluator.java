@@ -34,6 +34,50 @@ public class ExprEvaluator {
             Map.entry("todeg", 1), Map.entry("torad", 1),
             Map.entry("rand", -1), Map.entry("randexcept", -1));
 
+    // 编译后的函数编号。ExprCompiler 在编译期把函数名解析成这些常量，
+    // 运行期因此不再对函数名做字符串比较与哈希查找（每次调用都可观）。
+    public static final int FN_FLOORDIV = 0, FN_FLOORMOD = 1, FN_ABS = 2, FN_MAX = 3, FN_MIN = 4,
+            FN_FLOOR = 5, FN_CEIL = 6, FN_ROUND = 7, FN_SIGN = 8, FN_SQRT = 9, FN_POW = 10,
+            FN_EXP = 11, FN_LOG = 12, FN_LOG10 = 13, FN_SIN = 14, FN_COS = 15, FN_TAN = 16,
+            FN_ASIN = 17, FN_ACOS = 18, FN_ATAN = 19, FN_TODEG = 20, FN_TORAD = 21;
+    public static final int FN_RAND = 100, FN_RANDEXCEPT = 101;
+    /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
+    public static final int FN_UNKNOWN = -1;
+
+    /**
+     * 编译期把函数名解析成编号；未知函数返回 {@link #FN_UNKNOWN}。
+     * 每个调用点只在编译期解析一次，因此这里用字符串 switch 即可。
+     */
+    public static int functionId(String name) {
+        return switch (name) {
+            case "floordiv" -> FN_FLOORDIV;
+            case "floormod" -> FN_FLOORMOD;
+            case "abs" -> FN_ABS;
+            case "max" -> FN_MAX;
+            case "min" -> FN_MIN;
+            case "floor" -> FN_FLOOR;
+            case "ceil" -> FN_CEIL;
+            case "round" -> FN_ROUND;
+            case "sign" -> FN_SIGN;
+            case "sqrt" -> FN_SQRT;
+            case "pow" -> FN_POW;
+            case "exp" -> FN_EXP;
+            case "log" -> FN_LOG;
+            case "log10" -> FN_LOG10;
+            case "sin" -> FN_SIN;
+            case "cos" -> FN_COS;
+            case "tan" -> FN_TAN;
+            case "asin" -> FN_ASIN;
+            case "acos" -> FN_ACOS;
+            case "atan" -> FN_ATAN;
+            case "todeg" -> FN_TODEG;
+            case "torad" -> FN_TORAD;
+            case "rand" -> FN_RAND;
+            case "randexcept" -> FN_RANDEXCEPT;
+            default -> FN_UNKNOWN;
+        };
+    }
+
     /** 校验函数名与参数个数；合法时返回 null。arity 为 -1 表示可变参数。 */
     public static String validateFunction(String name, int argCount) {
         Integer arity = FUNCTION_ARITY.get(name);
@@ -63,6 +107,7 @@ public class ExprEvaluator {
             // 编译后的形态：变量读取变成数组下标，不再有任何 Map 操作
             case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly);
             case ExprNode.SlotNode s -> context.slot(s.slot());
+            case ExprNode.CompiledFuncCallNode f -> evalCompiledFunc(f, x, z, ly, context);
             case ExprNode.CompiledBlockNode cb -> evalCompiledBlock(cb, x, z, ly, context);
         };
     }
@@ -166,6 +211,7 @@ public class ExprEvaluator {
             // 实际调用发生在编译之前（见 FormulaParser），因此不影响优化生效。
             case ExprNode.BuiltinNode b -> b.kind() == 2;
             case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledFuncCallNode f -> true;
             case ExprNode.CompiledBlockNode cb -> true;
         };
     }
@@ -224,6 +270,7 @@ public class ExprEvaluator {
                     ? evalNumber(c.thenExpr(), x, z, ly, context)
                     : evalNumber(c.elseExpr(), x, z, ly, context);
             case ExprNode.FuncCallNode f -> evalNumberFunc(f, x, z, ly, context);
+            case ExprNode.CompiledFuncCallNode f -> evalCompiledNumberFunc(f, x, z, ly, context);
             default -> toDouble(eval(node, x, z, ly, context));
         };
     }
@@ -326,6 +373,56 @@ public class ExprEvaluator {
             case "torad" -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
             // 非数值函数（rand/randexcept）返回方块，按数值语境取 0
             default -> toDouble(evalFunc(f, x, z, ly, context));
+        };
+    }
+
+    /**
+     * 编译后的函数调用（通用路径）。
+     *
+     * <p>数值函数复用原语实现，只在这里装箱一次；rand/randexcept 返回方块，走原来的实现。
+     */
+    private static Object evalCompiledFunc(ExprNode.CompiledFuncCallNode f, int x, int z, int ly,
+                                           EvalContext context) {
+        if (f.id() == FN_RAND) return evalRand(f.args(), x, z, ly, context);
+        if (f.id() == FN_RANDEXCEPT) return evalRandExcept(f.args(), x, z, ly, context);
+        return evalCompiledNumberFunc(f, x, z, ly, context);
+    }
+
+    /**
+     * 编译后的数值函数原语实现：按 int 编号分派，语义与 {@link #evalNumberFunc} 逐项对应。
+     *
+     * <p>函数编号由 {@code ExprCompiler} 在编译期写入，运行期不再有
+     * {@code isNumericFunction} 的名字检查、{@code HashMap} 查找与字符串 switch。
+     */
+    private static double evalCompiledNumberFunc(ExprNode.CompiledFuncCallNode f, int x, int z, int ly,
+                                                 EvalContext context) {
+        List<ExprNode> args = f.args();
+        return switch (f.id()) {
+            case FN_FLOORDIV -> { int a = (int) evalNumber(args.get(0), x, z, ly, context); int b = (int) evalNumber(args.get(1), x, z, ly, context); yield b == 0 ? 0 : Math.floorDiv(a, b); }
+            case FN_FLOORMOD -> { int a = (int) evalNumber(args.get(0), x, z, ly, context); int b = (int) evalNumber(args.get(1), x, z, ly, context); yield b == 0 ? 0 : Math.floorMod(a, b); }
+            case FN_ABS   -> Math.abs(evalNumber(args.get(0), x, z, ly, context));
+            case FN_MAX   -> Math.max(evalNumber(args.get(0), x, z, ly, context), evalNumber(args.get(1), x, z, ly, context));
+            case FN_MIN   -> Math.min(evalNumber(args.get(0), x, z, ly, context), evalNumber(args.get(1), x, z, ly, context));
+            case FN_FLOOR -> Math.floor(evalNumber(args.get(0), x, z, ly, context));
+            case FN_CEIL  -> Math.ceil(evalNumber(args.get(0), x, z, ly, context));
+            case FN_ROUND -> Math.round(evalNumber(args.get(0), x, z, ly, context));
+            case FN_SIGN  -> Math.signum(evalNumber(args.get(0), x, z, ly, context));
+            case FN_SQRT  -> Math.sqrt(evalNumber(args.get(0), x, z, ly, context));
+            case FN_POW   -> Math.pow(evalNumber(args.get(0), x, z, ly, context), evalNumber(args.get(1), x, z, ly, context));
+            case FN_EXP   -> Math.exp(evalNumber(args.get(0), x, z, ly, context));
+            case FN_LOG   -> Math.log(evalNumber(args.get(0), x, z, ly, context));
+            case FN_LOG10 -> Math.log10(evalNumber(args.get(0), x, z, ly, context));
+            case FN_SIN   -> Math.sin(evalNumber(args.get(0), x, z, ly, context));
+            case FN_COS   -> Math.cos(evalNumber(args.get(0), x, z, ly, context));
+            case FN_TAN   -> Math.tan(evalNumber(args.get(0), x, z, ly, context));
+            case FN_ASIN  -> Math.asin(evalNumber(args.get(0), x, z, ly, context));
+            case FN_ACOS  -> Math.acos(evalNumber(args.get(0), x, z, ly, context));
+            case FN_ATAN  -> Math.atan(evalNumber(args.get(0), x, z, ly, context));
+            case FN_TODEG -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
+            case FN_TORAD -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
+            // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
+            case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
+            default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
         };
     }
 

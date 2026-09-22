@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -43,6 +44,12 @@ class ExprCompilerTest {
             "{ let a = x * 2; let b = z * 3; a > b ? a : b }",
             "sin(x * 0.1) * cos(z * 0.1) > 0",
             "floordiv(x, 3) + floormod(z, 5)",
+            // 编译期会把函数名解析成 int 编号，覆盖面尽量宽
+            "{ let a = max(abs(x), min(z, 5)); a + ly }",
+            "pow(x, 2) + sqrt(abs(z)) - log10(exp(1))",
+            "todeg(torad(x)) + floor(z * 0.5) - ceil(z * 0.25)",
+            "round(sign(x)) + tan(0) + asin(0) + acos(1)",
+            "{ let ly = max(1, 2); ly + x }",
     };
 
     private static String describe(Object value) {
@@ -172,6 +179,17 @@ class ExprCompilerTest {
         ExprEvaluator.eval(compiled, -4, 9, 8);
 
         assertEquals(first, describe(ExprEvaluator.eval(compiled, 11, -7, 3)));
+    }
+
+    @Test
+    void functionCallsCompileToIds() {
+        ExprNode.CompiledBlockNode root = rootBlock("{ let a = max(abs(x), sin(z)); a }");
+        assertInstanceOf(ExprNode.CompiledFuncCallNode.class, root.values()[0]);
+
+        // rand/randexcept 也解析成编号（走方块路径，不参与数值分派）
+        ExprNode.CompiledBlockNode rand = rootBlock("{ let r = randexcept(1); r }");
+        ExprNode.CompiledFuncCallNode call = (ExprNode.CompiledFuncCallNode) rand.values()[0];
+        assertEquals(ExprEvaluator.FN_RANDEXCEPT, call.id());
     }
 
     /** 编译后的 block 形态必须保留提升标记（嵌套块也不应退化为逐格重算）。 */

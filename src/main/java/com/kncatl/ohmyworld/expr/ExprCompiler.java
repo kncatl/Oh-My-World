@@ -90,7 +90,13 @@ public final class ExprCompiler {
                     args.add(compiled.node());
                     dependent |= compiled.lyDependent();
                 }
-                yield new Compiled(new ExprNode.FuncCallNode(f.name(), List.copyOf(args)), dependent);
+                List<ExprNode> compiledArgs = List.copyOf(args);
+                // 函数名在编译期解析成编号：运行期不再有字符串比较、哈希查找与字符串 switch
+                int id = ExprEvaluator.functionId(f.name());
+                ExprNode call = id == ExprEvaluator.FN_UNKNOWN
+                        ? new ExprNode.FuncCallNode(f.name(), compiledArgs)
+                        : new ExprNode.CompiledFuncCallNode(id, compiledArgs);
+                yield new Compiled(call, dependent);
             }
 
             case ExprNode.BlockExprNode be -> {
@@ -123,6 +129,7 @@ public final class ExprCompiler {
             // 已编译的形态原样返回
             case ExprNode.BuiltinNode b -> new Compiled(b, b.kind() == 2);
             case ExprNode.SlotNode s -> new Compiled(s, lyDependent(s));
+            case ExprNode.CompiledFuncCallNode cf -> new Compiled(cf, lyDependent(cf));
             // 已编译的块无法再反查槽位来源，保守视为与 y 相关：只放弃提升，不影响正确性
             case ExprNode.CompiledBlockNode cb -> new Compiled(cb, true);
         };
@@ -141,6 +148,13 @@ public final class ExprCompiler {
                     lyDependent(c.condition()) || lyDependent(c.thenExpr()) || lyDependent(c.elseExpr());
             case ExprNode.FuncCallNode f -> {
                 if (f.name().equals("rand") || f.name().equals("randexcept")) yield true;
+                for (ExprNode arg : f.args()) {
+                    if (lyDependent(arg)) yield true;
+                }
+                yield false;
+            }
+            case ExprNode.CompiledFuncCallNode f -> {
+                if (f.id() == ExprEvaluator.FN_RAND || f.id() == ExprEvaluator.FN_RANDEXCEPT) yield true;
                 for (ExprNode arg : f.args()) {
                     if (lyDependent(arg)) yield true;
                 }

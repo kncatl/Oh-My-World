@@ -49,6 +49,12 @@ public sealed interface ExprNode {
     record SlotNode(int slot) implements ExprNode {}
 
     /**
+     * 编译后的函数调用：{@code id} 是编译期解析出的函数编号（见
+     * {@code ExprEvaluator.functionId}）。运行期不再对函数名做字符串比较与哈希查找。
+     */
+    record CompiledFuncCallNode(int id, List<ExprNode> args) implements ExprNode {}
+
+    /**
      * 编译后的 let 块：按顺序求值 {@code values} 并写入对应 {@code slots}，再求值
      * {@code body}。槽位在编译期分配，因此无需作用域进出与名字查找。
      *
