@@ -24,6 +24,22 @@ mkdir -p "$RUN_DIR"
 if [ ! -f "$RUN_DIR/eula.txt" ]; then
     printf 'eula=true\n' > "$RUN_DIR/eula.txt"
 fi
+
+# 没有公式配置时写入一个最小的确定性公式（server_mode），
+# 让冒烟覆盖「配置 → 解析/编译 → 区块填充」全链路。
+# 已有配置（例如 1.21.1 的巨构公式）不会被覆盖。
+CONFIG="$RUN_DIR/config/ohmyworld.json"
+if [ ! -f "$CONFIG" ]; then
+    mkdir -p "$(dirname "$CONFIG")"
+    cat > "$CONFIG" <<'JSON'
+{
+  "server_mode": true,
+  "formula": "y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete"
+}
+JSON
+    echo "[smoke] 已写入冒烟公式配置: $CONFIG"
+fi
+
 rm -rf "$RUN_DIR/world"
 
 ./gradlew "$NODE:runServer" --console=plain > "$LOG" 2>&1 &

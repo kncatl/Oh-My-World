@@ -14,6 +14,26 @@
       "parchmentVersion": "2024.11.17"
     },
     {
+      "mc": "1.21.3",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 21,
+      "covers": ["1.21.3"],
+      "neoforgeVersion": "21.3.97",
+      "neoforgeRange": "[21.3.97,)",
+      "parchmentMc": null,
+      "parchmentVersion": null
+    },
+    {
+      "mc": "1.21.3",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 21,
+      "covers": ["1.21.3"],
+      "fabricLoader": "0.19.5",
+      "fabricApi": "0.114.1+1.21.3"
+    },
+    {
       "mc": "1.21.11",
       "loader": "neoforge",
       "enabled": true,

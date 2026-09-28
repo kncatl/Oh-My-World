@@ -11,9 +11,14 @@ import net.minecraft.world.level.block.Block;
 /**
  * 注册表查询的版本差异收敛层。
  *
- * <p>1.21.11 起 {@code Registry.get(...)} 返回 {@code Optional<Holder>} 而非直接
- * 返回值，同时 {@code ResourceLocation} 改名为 {@code Identifier}。
- * 业务代码统一走这里。
+ * <p>这里是<b>两个相互独立</b>的版本差异，必须分开判定：
+ * <ul>
+ *   <li>资源 ID 类型：1.21.11 起 {@code ResourceLocation} 改名为 {@code Identifier}
+ *       （1.21.3 仍然叫 ResourceLocation）；</li>
+ *   <li>查询返回类型：<b>1.21.3</b> 起 {@code Registry.get(...)} 返回
+ *       {@code Optional<Holder.Reference<T>>}；1.21.1 只有直接返回值的老签名。</li>
+ * </ul>
+ * 不要把两者合并成同一个门限。
  */
 public final class RegistryLookup {
 
@@ -23,10 +28,14 @@ public final class RegistryLookup {
     public static Block blockById(String blockId) {
         //? >=1.21.11 {
         Identifier loc = Identifier.tryParse(blockId);
-        return loc == null ? null : BuiltInRegistries.BLOCK.get(loc).map(h -> h.value()).orElse(null);
         //?} else {
         ResourceLocation loc = ResourceLocation.tryParse(blockId);
-        return loc == null ? null : BuiltInRegistries.BLOCK.get(loc);
+        //?}
+        if (loc == null) return null;
+        //? >=1.21.3 {
+        return BuiltInRegistries.BLOCK.get(loc).map(h -> h.value()).orElse(null);
+        //?} else {
+        return BuiltInRegistries.BLOCK.get(loc);
         //?}
     }
 }
