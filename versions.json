@@ -30,7 +30,7 @@
       "enabled": true,
       "java": 21,
       "covers": ["1.21.11"],
-      "fabricLoader": "0.18.1",
+      "fabricLoader": "0.19.5",
       "fabricApi": "0.141.6+1.21.11"
     }
   ]

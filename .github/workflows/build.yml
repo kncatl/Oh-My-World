@@ -52,11 +52,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up JDK ${{ matrix.java }}
+      # 编译工具链：1.21.x 用 21，26.x 用 25（versions.json 的 java 字段）
+      - name: Set up JDK ${{ matrix.java }} (compile toolchain)
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
+
+      # 构建 JVM：Loom 1.18+ 要求 Gradle 自身跑在 Java 25 上。
+      # 放在最后一步，使 JAVA_HOME 指向 25；上面的 JDK 通过
+      # JAVA_HOME_<ver>_<arch> 环境变量暴露，Gradle 依此发现工具链
+      # （见仓库 gradle.properties 的 org.gradle.java.installations.fromEnv）。
+      - name: Set up JDK 25 (Gradle JVM)
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
