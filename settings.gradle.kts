@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 pluginManagement {
     repositories {
         mavenCentral()
@@ -22,24 +24,27 @@ plugins {
     id("dev.kikugie.stonecutter") version "0.9.3"
 }
 
+// ---- 版本清单（单一来源）---------------------------------------------------
+// 节点列表与每个节点的 loader 版本、Java 版本都来自仓库根目录的 versions.json；
+// 构建脚本（build.neoforge/fabric.gradle.kts）与 CI 矩阵也从它读取，
+// 避免「settings / 构建脚本 / workflow」三处版本信息互相漂移。
+//
+// 版本策略：rep 版本 + 实测后声明兼容范围（细节见工作区 VERSION-ADAPTATION-PLAN.md）。
+// 中间小版本只在真实启动验证通过后才纳入声明范围。
+@Suppress("UNCHECKED_CAST")
+val versionNodes: List<Map<String, Any?>> =
+    (JsonSlurper().parse(file("versions.json")) as Map<String, Any?>)
+        .let { it["nodes"] as List<Map<String, Any?>> }
+
 stonecutter {
     create(rootProject) {
-        fun match(version: String, vararg loaders: String) =
-            loaders.forEach { version("$version-$it", version).buildscript = "build.$it.gradle.kts" }
-
-        // 版本策略：4 个 rep 版本覆盖全部中间小版本。
-        // 中间版本与相邻 rep 版本 API 一致时，源码零改动，仅通过
-        // NeoForge minecraft_version_range + 发布平台多版本标注声明兼容。
-        // 阶段启用顺序：
-        //   阶段 0  → 1.21.1-neoforge（基线）
-        //   阶段 2  → 26.2-neoforge（优先目标）
-        //   阶段 3  → 26.2-fabric
-        //   阶段 4  → 1.21.4 / 1.21.11 rep 版本
-        match("1.21.1", "neoforge")
-        match("1.21.11", "neoforge", "fabric")
-        // match("1.21.4", "neoforge", "fabric")
-        // match("26.2", "neoforge", "fabric")
-
+        versionNodes.forEach { node ->
+            if (node["enabled"] == true) {
+                val mc = node["mc"] as String
+                val loader = node["loader"] as String
+                version("$mc-$loader", mc).buildscript = "build.$loader.gradle.kts"
+            }
+        }
         vcsVersion = "1.21.1-neoforge"
     }
 }

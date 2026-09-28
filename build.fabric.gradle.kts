@@ -1,15 +1,22 @@
+import groovy.json.JsonSlurper
+
 fun prop(name: String): String = property(name).toString()
 
 // Stonecutter 注入的项目名形如 "1.21.11-fabric"
 val mcVersion = stonecutter.current.version
 val loader = stonecutter.current.project.substringAfterLast('-')
 
-// Fabric 版本映射
-val fabricLoaderVersion = "0.18.1"
-val fabricApiVersion = when (mcVersion) {
-    "1.21.11" -> "0.141.6+1.21.11"
-    else -> throw GradleException("Unsupported Minecraft version for Fabric: $mcVersion")
+// 版本映射来自仓库根目录的单一清单 versions.json（与 NeoForge 侧共用同一份清单）
+@Suppress("UNCHECKED_CAST")
+val nodeSpec: Map<String, Any?> = run {
+    val nodes = (JsonSlurper().parse(rootProject.file("versions.json")) as Map<String, Any?>)["nodes"]
+            as List<Map<String, Any?>>
+    nodes.firstOrNull { it["mc"] == mcVersion && it["loader"] == loader }
+        ?: throw GradleException("versions.json 中没有节点 $mcVersion-$loader —— 请先在那里登记")
 }
+val fabricLoaderVersion = nodeSpec["fabricLoader"] as String
+val fabricApiVersion = nodeSpec["fabricApi"] as String
+val javaVersion = (nodeSpec["java"] as Number).toInt()
 
 plugins {
     id("fabric-loom")
@@ -23,7 +30,7 @@ base {
     archivesName = "oh-my-world-$mcVersion-$loader"
 }
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+java.toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
 
 // Stonecutter 处理后的源码替换默认 src/main/java
 sourceSets.getByName("main").java {

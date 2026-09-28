@@ -13,31 +13,15 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: ${{ matrix.node }}
+  # 1) 校验 tag 与 mod_version 一致；2) 从单一版本清单生成构建矩阵
+  prepare:
+    name: Prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    strategy:
-      fail-fast: false
-      matrix:
-        node:
-          - 1.21.1-neoforge
-          - 1.21.11-neoforge
-          - 1.21.11-fabric
-
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
 
       - name: Verify tag matches mod_version
         run: |
@@ -49,6 +33,37 @@ jobs:
             exit 1
           fi
           echo "Releasing ${GITHUB_REF_NAME}"
+
+      - name: Build matrix from versions.json
+        id: matrix
+        run: |
+          set -euo pipefail
+          matrix="$(python3 tools/versions.py matrix)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          printf 'matrix = %s\n' "$matrix"
+
+  build:
+    name: ${{ matrix.node }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Build
         run: ./gradlew ${{ matrix.node }}:build --stacktrace
@@ -88,7 +103,8 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           printf '## %s\n\n' "$tag" > dist/RELEASE_NOTES.md
           printf '| Minecraft | Loader | File |\n| --- | --- | --- |\n' >> dist/RELEASE_NOTES.md
-          for jar in dist/*.jar; do
+          # 每个 jar 一行；MC 列优先显示 versions.json 里声明的覆盖范围（covers）
+          for jar in $(ls dist/*.jar | sort -V); do
             name="$(basename "$jar")"
             mc="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\1/')"
             raw_loader="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\2/')"
@@ -99,9 +115,11 @@ jobs:
               quilt)    loader="Quilt" ;;
               *)        loader="$raw_loader" ;;
             esac
-            printf '| %s | %s | `%s` |\n' "$mc" "$loader" "$name" >> dist/RELEASE_NOTES.md
+            covers="$(python3 tools/versions.py covers "$mc" "$raw_loader")"
+            printf '| %s | %s | `%s` |\n' "$covers" "$loader" "$name" >> dist/RELEASE_NOTES.md
           done
-          printf '\nRequires **Java 21**.\n' >> dist/RELEASE_NOTES.md
+          javas="$(python3 tools/versions.py javas)"
+          printf '\nRequires **Java %s**.\n' "$javas" >> dist/RELEASE_NOTES.md
 
           # 从 CHANGELOG 中截取该 tag 对应的小节
           extract() {

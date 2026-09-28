@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "_comment": "单一版本清单：Stonecutter 节点、构建脚本的 loader 版本映射与 CI 构建矩阵都从这里读取。新增 rep 版本时只改这个文件 + 提交说明。",
+  "nodes": [
+    {
+      "mc": "1.21.1",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 21,
+      "covers": ["1.21.1"],
+      "neoforgeVersion": "21.1.251",
+      "neoforgeRange": "[21.1.234,)",
+      "parchmentMc": "1.21.1",
+      "parchmentVersion": "2024.11.17"
+    },
+    {
+      "mc": "1.21.11",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 21,
+      "covers": ["1.21.11"],
+      "neoforgeVersion": "21.11.45",
+      "neoforgeRange": "[21.11.45,)",
+      "parchmentMc": null,
+      "parchmentVersion": null
+    },
+    {
+      "mc": "1.21.11",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 21,
+      "covers": ["1.21.11"],
+      "fabricLoader": "0.18.1",
+      "fabricApi": "0.141.6+1.21.11"
+    }
+  ]
+}

@@ -1,39 +1,35 @@
+import groovy.json.JsonSlurper
+
 fun prop(name: String): String = property(name).toString()
 
 // Stonecutter 注入的项目名形如 "1.21.1-neoforge"
 val mcVersion = stonecutter.current.version
 val loader = stonecutter.current.project.substringAfterLast('-')
 
-// MC 版本到 NeoForge / Parchment 的版本映射
-// neoVersion      = 构建所用的 NeoForge 版本（取该 MC 版本线的最新版）
-// neoVersionRange = mods.toml 中声明的最低兼容区间（Maven 区间语法）
+// 版本映射来自仓库根目录的单一清单 versions.json（新增 rep 版本只改那一个文件；
+// CI 构建矩阵也从它生成）。字段含义：
+//   neoforgeVersion = 构建所用的 NeoForge 版本（取该 MC 版本线的最新版）
+//   neoforgeRange   = mods.toml 中声明的最低兼容区间（Maven 区间语法）
+//   java            = 该节点的工具链版本（1.21.x → 21，26.x → 25）
 //
 // 注意区间语法：[x] 表示"精确等于 x"，[x,) 才是"x 及以上"。
 // 必须写成 [x,) —— 写成 [x] 会让新版加载器因依赖不满足而拒绝加载本模组
 // （表现为"加载器版本过新，需要回退版本"）。
-val neoVersion = when (mcVersion) {
-    "1.21.1" -> "21.1.251"
-    "1.21.11" -> "21.11.45"
-    else -> throw GradleException("Unsupported Minecraft version: $mcVersion (add it to build.neoforge.gradle.kts)")
+@Suppress("UNCHECKED_CAST")
+val nodeSpec: Map<String, Any?> = run {
+    val nodes = (JsonSlurper().parse(rootProject.file("versions.json")) as Map<String, Any?>)["nodes"]
+            as List<Map<String, Any?>>
+    nodes.firstOrNull { it["mc"] == mcVersion && it["loader"] == loader }
+        ?: throw GradleException("versions.json 中没有节点 $mcVersion-$loader —— 请先在那里登记")
 }
-// 21.1.x / 21.11.x 各自是同一 MC 版本线，线内向后兼容；
-// 下限取该线中本模组实际验证过的版本，好让用户不必被迫升级加载器。
-val neoVersionRange = when (mcVersion) {
-    "1.21.1" -> "[21.1.234,)"
-    "1.21.11" -> "[21.11.45,)"
-    else -> throw GradleException("Unsupported Minecraft version: $mcVersion (add it to build.neoforge.gradle.kts)")
-}
+val neoVersion = nodeSpec["neoforgeVersion"] as String
+// 下限取该版本线中本模组实际验证过的版本，好让用户不必被迫升级加载器。
+val neoVersionRange = nodeSpec["neoforgeRange"] as String
+val javaVersion = (nodeSpec["java"] as Number).toInt()
 // javafml 语言提供器版本范围（与 FancyModLoader 主版本对齐，与 MC/NeoForge 版本无关）
-// 1.21.x 系列使用 [1,)；后续版本如需可调整
 val loaderVersionRange = "[1,)"
-val parchmentMc: String? = when (mcVersion) {
-    "1.21.1" -> "1.21.1"
-    else -> null
-}
-val parchmentVer: String? = when (mcVersion) {
-    "1.21.1" -> "2024.11.17"
-    else -> null
-}
+val parchmentMc: String? = nodeSpec["parchmentMc"] as String?
+val parchmentVer: String? = nodeSpec["parchmentVersion"] as String?
 
 plugins {
     id("java-library")
@@ -50,7 +46,7 @@ base {
     archivesName = "oh-my-world-$mcVersion-$loader"
 }
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+java.toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
 
 // Stonecutter 处理后的源码替换默认 src/main/java
 sourceSets.getByName("main").java {
