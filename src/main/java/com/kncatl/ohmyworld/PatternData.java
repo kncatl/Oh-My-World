@@ -20,6 +20,8 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
 import net.minecraft.world.level.levelgen.Heightmap;
 
+import com.kncatl.ohmyworld.compat.ChunkWrites;
+import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
@@ -191,13 +193,8 @@ public class PatternData {
         Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int cx = chunk.getPos().getMinBlockX();
         int cz = chunk.getPos().getMinBlockZ();
-        //? >=1.21.5 {
-        int minY = chunk.getMinY();
-        int maxY = chunk.getMaxY();
-        //?} else {
-        int minY = chunk.getMinBuildHeight();
-        int maxY = chunk.getMaxBuildHeight();
-        //?}
+        int minY = LevelHeights.minY(chunk);
+        int maxY = LevelHeights.maxY(chunk);
 
         int lo = Math.max(minY, minLayerStart(layers));
         int hi = Math.min(maxY - 1, maxLayerEnd(layers));
@@ -225,12 +222,8 @@ public class PatternData {
                     // （i-1 == y）不可能命中，因此跳过是语义等价的。
                     // 对稀疏结构这一步能省掉绝大多数写入与高度图更新。
                     if (st == AIR) continue;
-                    //? >=1.21.5 {
                     // 与原版 FlatLevelSource 一致：无标志填充，避免生成期触发额外光照/方块更新开销
-                    chunk.setBlockState(pos.set(x, y, z), st);
-                    //?} else {
-                    chunk.setBlockState(pos.set(x, y, z), st, false);
-                    //?}
+                    ChunkWrites.setBlock(chunk, pos.set(x, y, z), st);
                     h0.update(x, y, z, st);
                     h1.update(x, y, z, st);
                 }

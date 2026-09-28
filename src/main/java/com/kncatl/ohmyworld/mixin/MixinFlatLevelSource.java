@@ -14,6 +14,7 @@ import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
 import com.kncatl.ohmyworld.PatternData;
+import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
@@ -55,15 +56,9 @@ public class MixinFlatLevelSource {
         if (snapshot == null) return;
         if (snapshot.layers().isEmpty()) return;
 
-        //? >=1.21.5 {
-        int minY = level.getMinY();
-        int maxY = level.getMaxY();
-        //?} else {
-        int minY = level.getMinBuildHeight();
-        int maxY = level.getMaxBuildHeight();
-        //?}
         try {
-            cir.setReturnValue(PatternData.getBaseHeight(snapshot, x, z, type, minY, maxY));
+            cir.setReturnValue(PatternData.getBaseHeight(snapshot, x, z, type,
+                    LevelHeights.minY(level), LevelHeights.maxY(level)));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-height evaluation failed, disabling pattern", e);
             PatternData.clearActive();
@@ -77,11 +72,7 @@ public class MixinFlatLevelSource {
         if (snapshot == null) return;
         if (snapshot.layers().isEmpty()) return;
 
-        //? >=1.21.5 {
-        int minY = height.getMinY();
-        //?} else {
-        int minY = height.getMinBuildHeight();
-        //?}
+        int minY = LevelHeights.minY(height);
         int total = height.getHeight();
         try {
             BlockState[] column = PatternData.buildColumn(snapshot, x, z, minY, total);

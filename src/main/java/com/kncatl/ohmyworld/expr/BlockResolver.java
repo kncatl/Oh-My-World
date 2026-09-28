@@ -3,15 +3,11 @@ package com.kncatl.ohmyworld.expr;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import net.minecraft.core.registries.BuiltInRegistries;
-//? >=1.21.11 {
-import net.minecraft.resources.Identifier;
-//?} else {
-import net.minecraft.resources.ResourceLocation;
-//?}
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+
+import com.kncatl.ohmyworld.compat.RegistryLookup;
 
 public class BlockResolver {
 
@@ -31,6 +27,10 @@ public class BlockResolver {
         return find(blockId) != null;
     }
 
+    /**
+     * 常用方块走硬编码快路径（避免注册表查询），其余交给
+     * {@link RegistryLookup}（其内部处理版本差异）。
+     */
     private static Block find(String blockId) {
         return switch (blockId) {
             case "minecraft:stone" -> Blocks.STONE; case "minecraft:dirt" -> Blocks.DIRT;
@@ -47,11 +47,7 @@ public class BlockResolver {
             case "minecraft:oak_planks" -> Blocks.OAK_PLANKS; case "minecraft:glass" -> Blocks.GLASS;
             case "minecraft:obsidian" -> Blocks.OBSIDIAN; case "minecraft:sand" -> Blocks.SAND;
             case "minecraft:gravel" -> Blocks.GRAVEL; case "minecraft:water" -> Blocks.WATER; case "minecraft:lava" -> Blocks.LAVA;
-            //? >=1.21.11 {
-            default -> { Identifier loc = Identifier.tryParse(blockId); yield loc != null ? BuiltInRegistries.BLOCK.get(loc).map(h -> h.value()).orElse(null) : null; }
-            //?} else {
-            /*default -> { ResourceLocation loc = ResourceLocation.tryParse(blockId); yield loc != null ? BuiltInRegistries.BLOCK.get(loc) : null; }
-            *///?}
+            default -> RegistryLookup.blockById(blockId);
         };
     }
 }
