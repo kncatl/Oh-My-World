@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.7
+
+### Added
+- Minecraft **1.21.1–1.21.11** and **26.1–26.3** are now supported on both NeoForge and Fabric (14 builds in total; previously only 1.21.1 and 1.21.11 were published). Every declared version range is covered by a build that was verified against a real server and a real client of that version.
+- 26.x requires **Java 25**; the 1.21.x line continues to use **Java 21**.
+
+### Compatibility
+- Version boundaries that needed code changes while widening support: 1.21.2, 1.21.5, 1.21.6, 1.21.11 (screen drawing API renames and a return-type change), 26.2 (`Minecraft.setScreen` removal, block colour collections) and 26.3 (terrain pipeline rework).
+- No formula syntax or behaviour changes: formula files saved with v1.1.6 and worlds created with it keep working unchanged.
+
 ## v1.1.6
 
 ### Changed
