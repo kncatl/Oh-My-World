@@ -26,6 +26,16 @@ val neoVersion = nodeSpec["neoforgeVersion"] as String
 // 下限取该版本线中本模组实际验证过的版本，好让用户不必被迫升级加载器。
 val neoVersionRange = nodeSpec["neoforgeRange"] as String
 val javaVersion = (nodeSpec["java"] as Number).toInt()
+
+// MC 覆盖范围：**只允许写经过「真 jar + 真服务器」验证过的版本**（验证工具见
+// tools/jar-server-smoke.sh）。省略 mcRange 表示只支持本节点自身的 MC 版本，
+// 生成精确区间 [x]；写了 toExclusive 则生成 [from,toExclusive)。
+@Suppress("UNCHECKED_CAST")
+val mcRangeSpec = nodeSpec["mcRange"] as? Map<String, Any?> ?: emptyMap()
+val mcRangeFrom = (mcRangeSpec["from"] as? String) ?: mcVersion
+val mcRangeToExclusive = mcRangeSpec["toExclusive"] as? String
+val minecraftVersionRange =
+    if (mcRangeToExclusive == null) "[$mcRangeFrom]" else "[$mcRangeFrom,$mcRangeToExclusive)"
 // javafml 语言提供器版本范围（与 FancyModLoader 主版本对齐，与 MC/NeoForge 版本无关）
 val loaderVersionRange = "[1,)"
 val parchmentMc: String? = nodeSpec["parchmentMc"] as String?
@@ -129,7 +139,7 @@ neoForge {
 val generateModMetadata = tasks.register<ProcessResources>("generateModMetadata") {
     val replaceProperties = mapOf(
         "minecraft_version" to mcVersion,
-        "minecraft_version_range" to "[$mcVersion]",
+        "minecraft_version_range" to minecraftVersionRange,
         "neo_version" to neoVersion,
         "neo_version_range" to neoVersionRange,
         "loader_version_range" to loaderVersionRange,

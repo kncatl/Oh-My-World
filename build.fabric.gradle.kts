@@ -18,6 +18,17 @@ val fabricLoaderVersion = nodeSpec["fabricLoader"] as String
 val fabricApiVersion = nodeSpec["fabricApi"] as String
 val javaVersion = (nodeSpec["java"] as Number).toInt()
 
+// MC 覆盖范围（与 NeoForge 侧同一份 versions.json 数据，语法换成 semver）：
+// **只写经过「真 jar + 真服务器」验证过的版本**；省略 mcRange 表示只支持本节点版本。
+@Suppress("UNCHECKED_CAST")
+val mcRangeSpec = nodeSpec["mcRange"] as? Map<String, Any?> ?: emptyMap()
+val mcRangeFrom = (mcRangeSpec["from"] as? String) ?: mcVersion
+val mcRangeToExclusive = mcRangeSpec["toExclusive"] as? String
+val minecraftRange = if (mcRangeToExclusive == null) mcRangeFrom else ">=$mcRangeFrom <$mcRangeToExclusive"
+// Fabric API 依赖：单版本用精确版本；跨版本时放宽为 >=（API 版本号随 MC 版本递增，
+// 用户会装上与其 MC 版本对应的那份）。
+val fabricApiRange = if (mcRangeToExclusive == null) fabricApiVersion else ">=$fabricApiVersion"
+
 plugins {
     id("fabric-loom")
 }
@@ -92,8 +103,8 @@ tasks.processResources {
     val props = mapOf(
         "mod_version" to prop("mod_version"),
         "mod_id" to prop("mod_id"),
-        "minecraft_version" to mcVersion,
-        "fabric_api_version" to fabricApiVersion
+        "minecraft_range" to minecraftRange,
+        "fabric_api_range" to fabricApiRange
     )
     inputs.properties(props)
     filesMatching("fabric.mod.json") {

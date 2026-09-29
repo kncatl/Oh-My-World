@@ -114,7 +114,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           printf '## %s\n\n' "$tag" > dist/RELEASE_NOTES.md
           printf '| Minecraft | Loader | File |\n| --- | --- | --- |\n' >> dist/RELEASE_NOTES.md
-          # 每个 jar 一行；MC 列优先显示 versions.json 里声明的覆盖范围（covers）
+          # 每个 jar 一行；MC 列显示 versions.json 里声明的覆盖范围（mcRange，只写验证过的范围）
           for jar in $(ls dist/*.jar | sort -V); do
             name="$(basename "$jar")"
             mc="$(printf '%s' "$name" | sed -E 's/^oh-my-world-(.+)-(neoforge|fabric|forge|quilt)-.*$/\1/')"
@@ -126,8 +126,8 @@ jobs:
               quilt)    loader="Quilt" ;;
               *)        loader="$raw_loader" ;;
             esac
-            covers="$(python3 tools/versions.py covers "$mc" "$raw_loader")"
-            printf '| %s | %s | `%s` |\n' "$covers" "$loader" "$name" >> dist/RELEASE_NOTES.md
+            mc_range="$(python3 tools/versions.py range "$mc" "$raw_loader")"
+            printf '| %s | %s | `%s` |\n' "$mc_range" "$loader" "$name" >> dist/RELEASE_NOTES.md
           done
           javas="$(python3 tools/versions.py javas)"
           printf '\nRequires **Java %s**.\n' "$javas" >> dist/RELEASE_NOTES.md

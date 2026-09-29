@@ -3,8 +3,15 @@
 
 子命令：
   matrix            输出 GitHub Actions 动态构建矩阵 JSON
-  covers MC LOADER  输出该节点声明覆盖的 MC 版本（逗号分隔；未登记则回退为 MC 本身）
+  range MC LOADER   输出该节点声明的 MC 覆盖范围（人类可读；未登记范围则返回 MC 本身）
+  maven MC LOADER   输出 NeoForge 用的 Maven 区间语法（如 [1.21.3] 或 [1.21.3,1.21.5)）
+  semver MC LOADER  输出 Fabric 用的 semver 区间语法（如 1.21.3 或 >=1.21.3 <1.21.5）
   javas             输出启用节点用到的 Java 版本集合（如 "21 / 25"）
+
+`mcRange` 结构（写在 versions.json 的节点里，省略表示只支持该节点自身的 MC 版本）：
+  "mcRange": { "from": "1.21.3", "toExclusive": "1.21.5" }
+
+范围只允许写**经过真 jar + 真服务器验证**的版本；验证工具见 tools/jar-server-smoke.sh。
 """
 
 import json
@@ -23,6 +30,16 @@ def enabled_nodes(data):
     return [n for n in data["nodes"] if n.get("enabled")]
 
 
+def node_range(node):
+    """返回 (from, toExclusive)；单版本时 toExclusive 为 None。"""
+    rng = node.get("mcRange") or {}
+    return rng.get("from", node["mc"]), rng.get("toExclusive")
+
+
+def find_node(mc, loader):
+    return next((n for n in load()["nodes"] if n["mc"] == mc and n["loader"] == loader), None)
+
+
 def cmd_matrix():
     include = [
         {"node": f"{n['mc']}-{n['loader']}", "java": str(n["java"])}
@@ -31,9 +48,25 @@ def cmd_matrix():
     print(json.dumps({"include": include}, separators=(",", ":")))
 
 
-def cmd_covers(mc, loader):
-    match = [n for n in load()["nodes"] if n["mc"] == mc and n["loader"] == loader]
-    print(", ".join(match[0].get("covers", [mc])) if match else mc)
+def cmd_range(mc, loader):
+    node = find_node(mc, loader)
+    if node is None:
+        print(mc)
+        return
+    start, end = node_range(node)
+    print(start if end is None else f">={start} <{end}")
+
+
+def cmd_maven(mc, loader):
+    node = find_node(mc, loader)
+    start, end = node_range(node) if node else (mc, None)
+    print(f"[{start}]" if end is None else f"[{start},{end})")
+
+
+def cmd_semver(mc, loader):
+    node = find_node(mc, loader)
+    start, end = node_range(node) if node else (mc, None)
+    print(start if end is None else f">={start} <{end}")
 
 
 def cmd_javas():
@@ -45,10 +78,10 @@ def main():
     command, args = sys.argv[1] if len(sys.argv) > 1 else "", sys.argv[2:]
     if command == "matrix":
         cmd_matrix()
-    elif command == "covers" and len(args) == 2:
-        cmd_covers(args[0], args[1])
     elif command == "javas":
         cmd_javas()
+    elif command in ("range", "maven", "semver") and len(args) == 2:
+        {"range": cmd_range, "maven": cmd_maven, "semver": cmd_semver}[command](args[0], args[1])
     else:
         print(__doc__)
         return 2

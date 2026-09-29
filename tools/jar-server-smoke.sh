@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# 用「真 jar + 真服务器」验证一个已构建的 jar 能否在目标 MC 版本上加载并生成世界。
+#
+# 用法: tools/jar-server-smoke.sh <jar> <目标MC> <neoforge|fabric> [等待秒数]
+# 例:   tools/jar-server-smoke.sh \
+#         versions/1.21.3-neoforge/build/libs/oh-my-world-1.21.3-neoforge-1.1.6.jar 1.21.4 neoforge
+#
+# 为什么需要它：开发服（runServer）按版本编译源码，只能证明「该版本的源码能跑」；
+# 要证明「为 A 版本构建的 jar 能否在 B 版本加载」只能用真服务器 + 真 jar。
+#
+# 工具会把 jar 清单里的 MC 范围改写成只接受目标版本（并把 neo/fabric-api 依赖
+# 对齐到服务器实际安装的版本），因此它验证的是「代码/ABI 兼容性」，与清单是否开放无关。
+# 一旦通过，就把目标版本写进 versions.json 的 mcRange，让构建真正开放该范围。
+#
+# 服务器与日志放在 ~/omw-verify/jar-smoke/<loader>-<mc>/（可重复使用）。
+set -euo pipefail
+
+JAR="${1:?用法: tools/jar-server-smoke.sh <jar> <目标MC> <neoforge|fabric> [等待秒数]}"
+TARGET_MC="${2:?缺少目标 MC 版本}"
+LOADER="${3:?缺少加载器（neoforge|fabric）}"
+SETTLE="${4:-15}"
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TOOLS="$ROOT/tools"
+WORK="$HOME/omw-verify/jar-smoke/$LOADER-$TARGET_MC"
+SRV="$WORK/server"
+LOG="$WORK/server.log"
+
+# JDK：1.21.x 用 21，26.x 用 25（与 versions.json 的约定一致）
+JDK21="${JAVA21:-$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2}"
+JDK25="${JAVA25:-$HOME/.gradle/jdks/eclipse_adoptium-25-amd64-linux.2}"
+if [[ "$TARGET_MC" == 26.* ]]; then JAVA_BIN="$JDK25/bin/java"; else JAVA_BIN="$JDK21/bin/java"; fi
+[[ -x "$JAVA_BIN" ]] || { echo "[jar-smoke] FAIL: 找不到 JDK: $JAVA_BIN"; exit 1; }
+
+JAR_ABS="$(cd "$(dirname "$JAR")" && pwd)/$(basename "$JAR")"
+[[ -f "$JAR_ABS" ]] || { echo "[jar-smoke] FAIL: jar 不存在: $JAR_ABS"; exit 1; }
+
+echo "[jar-smoke] jar=$JAR_ABS"
+echo "[jar-smoke] 目标: MC $TARGET_MC / $LOADER    工作目录: $WORK ($JAVA_BIN)"
+
+mkdir -p "$SRV/mods"
+
+# ---------- 1. 安装目标版本的服务器 ----------
+if [[ "$LOADER" == "neoforge" ]]; then
+    NEO_VER="${NEOFORGE_VERSION:-$(python3 "$TOOLS/resolve-loader.py" neoforge-version "$TARGET_MC")}"
+    echo "[jar-smoke] NeoForge $NEO_VER"
+    ARGS_FILE="$SRV/libraries/net/neoforged/neoforge/$NEO_VER/unix_args.txt"
+    if [[ ! -f "$ARGS_FILE" ]]; then
+        INSTALLER="$WORK/neoforge-$NEO_VER-installer.jar"
+        [[ -f "$INSTALLER" ]] || curl -fsSL --retry 3 --retry-delay 5 --max-time 900 -o "$INSTALLER" \
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/$NEO_VER/neoforge-$NEO_VER-installer.jar"
+        echo "[jar-smoke] 安装 NeoForge 服务端…"
+        # 安装器要下一大堆库，代理偶发断链：重试几次（交接文档记录的已知问题）
+        install_ok=0
+        for attempt in 1 2 3; do
+            if ( cd "$SRV" && "$JAVA_BIN" -jar "$INSTALLER" --installServer > "$WORK/install.log" 2>&1 ); then
+                install_ok=1
+                break
+            fi
+            echo "[jar-smoke] 安装失败（第 $attempt 次），5 秒后重试…"
+            sleep 5
+        done
+        [[ "$install_ok" == 1 ]] || { echo "[jar-smoke] FAIL: 服务端安装失败（已重试 3 次）"; tail -30 "$WORK/install.log"; exit 1; }
+    fi
+    [[ -f "$SRV/user_jvm_args.txt" ]] || : > "$SRV/user_jvm_args.txt"
+
+elif [[ "$LOADER" == "fabric" ]]; then
+    FABRIC_API_VER="${FABRIC_API_VERSION:-$(python3 "$TOOLS/resolve-loader.py" fabric-api "$TARGET_MC")}"
+    FABRIC_INSTALLER_VER="${FABRIC_INSTALLER_VERSION:-$(python3 "$TOOLS/resolve-loader.py" fabric-installer)}"
+    echo "[jar-smoke] Fabric API $FABRIC_API_VER（installer $FABRIC_INSTALLER_VER）"
+    if [[ ! -f "$SRV/fabric-server-launch.jar" ]]; then
+        INSTALLER="$WORK/fabric-installer-$FABRIC_INSTALLER_VER.jar"
+        [[ -f "$INSTALLER" ]] || curl -fsSL --retry 3 --retry-delay 5 --max-time 900 -o "$INSTALLER" \
+            "https://maven.fabricmc.net/net/fabricmc/fabric-installer/$FABRIC_INSTALLER_VER/fabric-installer-$FABRIC_INSTALLER_VER.jar"
+        echo "[jar-smoke] 安装 Fabric 服务端…"
+        install_ok=0
+        for attempt in 1 2 3; do
+            if ( cd "$SRV" && "$JAVA_BIN" -jar "$INSTALLER" server -dir "$SRV" -mcversion "$TARGET_MC" -downloadMinecraft > "$WORK/install.log" 2>&1 ); then
+                install_ok=1
+                break
+            fi
+            echo "[jar-smoke] 安装失败（第 $attempt 次），5 秒后重试…"
+            sleep 5
+        done
+        [[ "$install_ok" == 1 ]] || { echo "[jar-smoke] FAIL: 服务端安装失败（已重试 3 次）"; tail -30 "$WORK/install.log"; exit 1; }
+    fi
+    API_JAR="$SRV/mods/fabric-api-$FABRIC_API_VER.jar"
+    [[ -f "$API_JAR" ]] || curl -fsSL --retry 3 --retry-delay 5 --max-time 900 -o "$API_JAR" \
+        "https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/$FABRIC_API_VER/fabric-api-$FABRIC_API_VER.jar"
+
+else
+    echo "[jar-smoke] FAIL: 未知加载器 $LOADER（应为 neoforge|fabric）"
+    exit 1
+fi
+
+# ---------- 2. 改写 jar 清单，装入 mods/ ----------
+rm -f "$SRV/mods/ohmyworld-"*.jar
+PATCHED="$SRV/mods/ohmyworld-under-test.jar"
+python3 - "$JAR_ABS" "$PATCHED" "$LOADER" "$TARGET_MC" "${NEO_VER:-}" "${FABRIC_API_VER:-}" <<'PY'
+import json, re, sys, zipfile
+
+src, dst, loader, mc, neo_ver, fabric_api = sys.argv[1:7]
+with zipfile.ZipFile(src) as zin:
+    items = {name: zin.read(name) for name in zin.namelist()}
+
+if loader == "neoforge":
+    key = "META-INF/neoforge.mods.toml"
+    text = items[key].decode("utf-8")
+    blocks = re.split(r"(?=\[\[dependencies)", text)
+    for i, block in enumerate(blocks):
+        if 'modId="minecraft"' in block:
+            blocks[i] = re.sub(r'versionRange="[^"]*"', f'versionRange="[{mc}]"', block)
+        elif 'modId="neoforge"' in block and neo_ver:
+            blocks[i] = re.sub(r'versionRange="[^"]*"', f'versionRange="[{neo_ver},)"', block)
+    items[key] = "".join(blocks).encode("utf-8")
+else:
+    key = "fabric.mod.json"
+    meta = json.loads(items[key])
+    meta["depends"]["minecraft"] = mc
+    if fabric_api:
+        meta["depends"]["fabric-api"] = ">=" + fabric_api
+    items[key] = json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8")
+
+with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+    for name, data in items.items():
+        zout.writestr(name, data)
+print(f"[jar-smoke] 已改写清单 {key}: minecraft=[{mc}]")
+PY
+
+# ---------- 3. 冒烟配置 ----------
+printf 'eula=true\n' > "$SRV/eula.txt"
+mkdir -p "$SRV/config"
+cat > "$SRV/config/ohmyworld.json" <<'JSON'
+{
+  "server_mode": true,
+  "formula": "y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete"
+}
+JSON
+rm -rf "$SRV/world" "$SRV/logs"
+
+# ---------- 4. 启动、等待、停止 ----------
+: > "$LOG"
+if [[ "$LOADER" == "neoforge" ]]; then
+    ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G @user_jvm_args.txt @"libraries/net/neoforged/neoforge/$NEO_VER/unix_args.txt" nogui ) >>"$LOG" 2>&1 &
+else
+    ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G -jar fabric-server-launch.jar nogui ) >>"$LOG" 2>&1 &
+fi
+PID=$!
+
+started=0
+for _ in $(seq 1 180); do
+    if grep -q 'Done (' "$LOG"; then started=1; break; fi
+    if ! kill -0 "$PID" 2>/dev/null; then break; fi
+    sleep 2
+done
+[[ "$started" == 1 ]] && sleep "$SETTLE"
+
+kill -TERM "$PID" 2>/dev/null || true
+for _ in $(seq 1 30); do kill -0 "$PID" 2>/dev/null || break; sleep 2; done
+kill -KILL "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+
+# ---------- 5. 判定 ----------
+fail() {
+    echo "[jar-smoke] FAIL: $1"
+    echo "----- 日志尾部 -----"
+    tail -50 "$LOG"
+    exit 1
+}
+
+[[ "$started" == 1 ]] || fail "服务器未在限定时间内启动（没有 Done）"
+# 模组初始化的可靠证据：启动时会往游戏目录写指南与校验标记
+[[ -f "$SRV/ohmyworld/.guide_zh_cn.sha256" ]] \
+    || fail "模组未初始化（缺少 ohmyworld/ 指南标记）—— 很可能被加载器拒绝或初始化失败"
+grep -qE 'formula (chunk fill|base-height|base-column) failed' "$LOG" && fail "公式报错（图案已被禁用）"
+grep -qE 'Mixin apply|Exception in thread|Crash report' "$LOG" && fail "日志中出现 Mixin/异常/崩溃"
+
+CHUNKS=$(find "$SRV/world/region" -name '*.mca' 2>/dev/null | wc -l | tr -d ' ')
+[[ "$CHUNKS" -gt 0 ]] || fail "没有生成 region 文件"
+
+echo "[jar-smoke] OK: jar 在 MC $TARGET_MC / $LOADER 上加载并生成成功（region 文件 $CHUNKS 个）"
+grep -E 'Done \(' "$LOG" | tail -1
+echo "[jar-smoke] 若要把 $TARGET_MC 纳入覆盖范围，请把 versions.json 对应节点的 mcRange 扩展后再跑一次（构建产物会真正声明该范围）。"
