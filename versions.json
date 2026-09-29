@@ -92,10 +92,40 @@
       "parchmentVersion": null
     },
     {
+      "mc": "26.1",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 25,
+      "mcRange": {
+        "from": "26.1",
+        "toExclusive": "26.1.2"
+      },
+      "fabricLoader": "0.19.5",
+      "fabricApi": "0.145.1+26.1"
+    },
+    {
+      "mc": "26.1",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 25,
+      "mcRange": {
+        "from": "26.1",
+        "toExclusive": "26.1.2"
+      },
+      "neoforgeVersion": "26.1.0.19-beta",
+      "neoforgeRange": "[26.1.0.19-beta,)",
+      "parchmentMc": null,
+      "parchmentVersion": null
+    },
+    {
       "mc": "26.1.2",
       "loader": "fabric",
       "enabled": true,
       "java": 25,
+      "mcRange": {
+        "from": "26.1.2",
+        "toExclusive": "26.3"
+      },
       "fabricLoader": "0.19.5",
       "fabricApi": "0.155.3+26.1.2"
     },
@@ -104,8 +134,30 @@
       "loader": "neoforge",
       "enabled": true,
       "java": 25,
+      "mcRange": {
+        "from": "26.1.2",
+        "toExclusive": "26.3"
+      },
       "neoforgeVersion": "26.1.2.112",
       "neoforgeRange": "[26.1.2.112,)",
+      "parchmentMc": null,
+      "parchmentVersion": null
+    },
+    {
+      "mc": "26.3",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 25,
+      "fabricLoader": "0.19.5",
+      "fabricApi": "0.161.0+26.3"
+    },
+    {
+      "mc": "26.3",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 25,
+      "neoforgeVersion": "26.3.0.34-beta",
+      "neoforgeRange": "[26.3.0.34-beta,)",
       "parchmentMc": null,
       "parchmentVersion": null
     }
