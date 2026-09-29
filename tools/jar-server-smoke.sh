@@ -187,7 +187,11 @@ fi
 grep -qE 'formula (chunk fill|base-height|base-column) failed' "$LOG" && fail "公式报错（图案已被禁用）"
 grep -qE 'Mixin apply|Exception in thread|Crash report' "$LOG" && fail "日志中出现 Mixin/异常/崩溃"
 
-CHUNKS=$(find "$SRV/world/region" -name '*.mca' 2>/dev/null | wc -l | tr -d ' ')
+# 26.x 起区块文件挪到 world/dimensions/<ns>/<dim>/region/（1.21.x 的布局是
+# world/region、world/DIM1/region 等）；统一在 world/ 下按 */region/*.mca 找，兼容两代。
+# 命令替换里必须给出 || echo 0 —— set -e + pipefail 会让 find 失败直接终止脚本，
+# 从而跳过下面的 fail 诊断。
+CHUNKS=$(find "$SRV/world" -path '*/region/*.mca' 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 [[ "$CHUNKS" -gt 0 ]] || fail "没有生成 region 文件"
 # 世界里必须能找到冒烟公式的特征方块：证明「Mixin → fillChunk → 公式 → 注册表查方块」
 # 整条链路真的跑过（否则就是"服务器起来了但公式没生效"的假阳性）。

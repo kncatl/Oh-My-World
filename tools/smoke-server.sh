@@ -69,7 +69,11 @@ if grep -qE 'Exception in thread|Crash report|Failed to start|Mixin apply' "$LOG
     fail "日志中出现异常、崩溃或 Mixin 应用失败"
 fi
 
-CHUNKS=$(find "$RUN_DIR/world/region" -name '*.mca' 2>/dev/null | wc -l | tr -d ' ')
+# 26.x 起区块文件挪到 world/dimensions/<ns>/<dim>/region/（1.21.x 的布局是
+# world/region、world/DIM1/region 等）；统一在 world/ 下按 */region/*.mca 找，兼容两代。
+# 命令替换里必须给出 || echo 0 —— set -e + pipefail 会让 find 失败直接终止脚本，
+# 从而跳过下面的 fail 诊断（26.1.2 的第一次冒烟就是这样静默退出的）。
+CHUNKS=$(find "$RUN_DIR/world" -path '*/region/*.mca' 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 [ "$CHUNKS" -gt 0 ] || fail "没有生成任何 region 文件"
 
 # 若当前用的是我们写入的冒烟公式，则必须能在世界里找到特征方块——

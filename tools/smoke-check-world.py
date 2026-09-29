@@ -22,14 +22,18 @@ def main():
     if len(sys.argv) != 2:
         print(__doc__)
         return 2
-    region_dir = Path(sys.argv[1]) / "world" / "region"
-    if not region_dir.is_dir():
+    # 1.21.x 的布局：world/region、world/DIM1/region…；
+    # 26.x 起的布局：world/dimensions/<ns>/<dim>/region。
+    # 统一搜集 world/ 下所有名为 region 的目录，兼容两代。
+    world = Path(sys.argv[1]) / "world"
+    region_dirs = sorted(p for p in world.rglob("region") if p.is_dir())
+    if not region_dirs:
         print("[smoke-check] FAIL: 没有 region 目录")
         return 1
 
     found = set()
     chunks = 0
-    for region in sorted(region_dir.glob("*.mca")):
+    for region in sorted(p for d in region_dirs for p in d.glob("*.mca")):
         data = region.read_bytes()
         if len(data) < HEADER_SECTORS * 4096:
             continue
