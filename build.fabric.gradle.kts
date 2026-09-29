@@ -16,6 +16,9 @@ val nodeSpec: Map<String, Any?> = run {
 }
 val fabricLoaderVersion = nodeSpec["fabricLoader"] as String
 val fabricApiVersion = nodeSpec["fabricApi"] as String
+// 跨版本范围时，Fabric API 的下限取该范围覆盖的**最低** MC 版本对应的 API 版本
+// （可选字段 fabricApiMin；缺省用本节点的构建版本）
+val fabricApiMin = (nodeSpec["fabricApiMin"] as? String) ?: fabricApiVersion
 val javaVersion = (nodeSpec["java"] as Number).toInt()
 
 // MC 覆盖范围（与 NeoForge 侧同一份 versions.json 数据，语法换成 semver）：
@@ -27,7 +30,7 @@ val mcRangeToExclusive = mcRangeSpec["toExclusive"] as? String
 val minecraftRange = if (mcRangeToExclusive == null) mcRangeFrom else ">=$mcRangeFrom <$mcRangeToExclusive"
 // Fabric API 依赖：单版本用精确版本；跨版本时放宽为 >=（API 版本号随 MC 版本递增，
 // 用户会装上与其 MC 版本对应的那份）。
-val fabricApiRange = if (mcRangeToExclusive == null) fabricApiVersion else ">=$fabricApiVersion"
+val fabricApiRange = if (mcRangeToExclusive == null) fabricApiVersion else ">=$fabricApiMin"
 
 plugins {
     id("fabric-loom")

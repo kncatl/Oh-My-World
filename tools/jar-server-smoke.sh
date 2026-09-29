@@ -129,8 +129,8 @@ PY
 
 # ---------- 3. 冒烟配置 ----------
 # level-type=flat 必须显式设置：否则 Mixin 不触发、公式不会跑，验证会假阳性。
-# 端口按「目标版本 + 加载器」分配，避免并行验证互相抢端口。
-PORT=$(( 25700 + ( $(printf '%s' "$TARGET_MC-$LOADER" | cksum | cut -d' ' -f1) % 200 ) ))
+# 端口交给系统分配（并行验证不会撞端口）。
+PORT=auto
 python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" --force-formula
 rm -rf "$SRV/world" "$SRV/logs"
 
@@ -146,8 +146,13 @@ PID=$!
 started=0
 for _ in $(seq 1 180); do
     if grep -q 'Done (' "$LOG"; then started=1; break; fi
-    # 出现这些就是明确的兼容性断裂，不必等满超时
-    if grep -qE 'NoSuchMethodError|NoClassDefFoundError|ClassNotFoundException|formula chunk fill failed' "$LOG"; then
+    # 明确的兼容性断裂：不必等满超时。
+    # 判定要严格 —— 加载器自身会打无害的 ClassNotFoundException 警告（如 log4j
+    # context selector），把那些当成失败会误报；只有错误确实来自我们的模组才算。
+    if grep -q 'formula chunk fill failed' "$LOG"; then
+        break
+    fi
+    if grep -A3 -m1 -E 'NoSuchMethodError|NoClassDefFoundError' "$LOG" | grep -q 'ohmyworld'; then
         break
     fi
     if ! kill -0 "$PID" 2>/dev/null; then break; fi
@@ -169,7 +174,10 @@ fail() {
 }
 
 if [[ "$started" != 1 ]]; then
-    hint="$(grep -m1 -E 'NoSuchMethodError|NoClassDefFoundError|ClassNotFoundException|formula chunk fill failed' "$LOG" || true)"
+    hint="$(grep -B1 -A3 -m1 -E 'NoSuchMethodError|NoClassDefFoundError' "$LOG" | grep -m1 'ohmyworld' || true)"
+    if [ -z "$hint" ]; then
+        hint="$(grep -m1 'formula chunk fill failed' "$LOG" || true)"
+    fi
     [ -n "$hint" ] && echo "[jar-smoke] 根因提示: $hint"
     fail "服务器未完成启动（没有 Done）"
 fi

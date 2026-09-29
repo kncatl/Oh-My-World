@@ -21,10 +21,10 @@ LOG="$(mktemp -t "ohmyworld-smoke-${NODE}.XXXXXX.log")"
 echo "[smoke] 节点=$NODE  日志=$LOG"
 
 # 统一配置：level-type=flat（必须，否则 Mixin 不触发、公式不会跑）、固定种子、
-# 关结构、按节点分配独立端口（避免并行验证时端口冲突）。
+# 关结构、端口交给系统分配（并行验证不会撞端口）。
 # 冒烟公式刻意使用白名单之外的方块（触发 RegistryLookup）并用特征方块核验世界。
 mkdir -p "$RUN_DIR"
-PORT=$(( 25700 + ( $(printf '%s' "$NODE" | cksum | cut -d' ' -f1) % 200 ) ))
+PORT=auto
 CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT")"
 echo "$CONFIG_OUT" | grep -v '^SMOKE_FORMULA=' || true
 SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"

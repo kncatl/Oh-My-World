@@ -37,6 +37,14 @@ FORMULA = (
 )
 
 
+def free_port():
+    """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     force = "--force-formula" in sys.argv
@@ -44,7 +52,8 @@ def main():
         print(__doc__)
         return 2
     server = Path(args[0])
-    port = args[1]
+    # 端口传 "auto" 时由系统分配空闲端口
+    port = str(free_port()) if args[1] == "auto" else args[1]
     server.mkdir(parents=True, exist_ok=True)
 
     (server / "eula.txt").write_text("eula=true\n", encoding="utf-8")
