@@ -12,7 +12,15 @@ pluginManagement {
     }
     resolutionStrategy {
         eachPlugin {
-            if (requested.id.id == "fabric-loom") {
+            // Loom 的三个插件 ID 由同一个 artifact 提供（见其
+            // META-INF/gradle-plugins/）：fabric-loom（旧）、
+            // net.fabricmc.fabric-loom-remap（混淆版本）、
+            // net.fabricmc.fabric-loom（26.1+ 非混淆版本）。
+            if (requested.id.id in setOf(
+                    "fabric-loom",
+                    "net.fabricmc.fabric-loom",
+                    "net.fabricmc.fabric-loom-remap",
+                )) {
                 useModule("net.fabricmc:fabric-loom:${requested.version}")
             }
         }
@@ -36,13 +44,31 @@ val versionNodes: List<Map<String, Any?>> =
     (JsonSlurper().parse(file("versions.json")) as Map<String, Any?>)
         .let { it["nodes"] as List<Map<String, Any?>> }
 
+/** 版本号逐段数值比较（26.1.2 >= 26.1 → true）。 */
+fun atLeast(version: String, floor: String): Boolean {
+    val a = version.split(".", "-", "+").map { it.toIntOrNull() ?: 0 }
+    val b = floor.split(".", "-", "+").map { it.toIntOrNull() ?: 0 }
+    for (i in 0 until maxOf(a.size, b.size)) {
+        val x = a.getOrElse(i) { 0 }
+        val y = b.getOrElse(i) { 0 }
+        if (x != y) return x > y
+    }
+    return true
+}
+
 stonecutter {
     create(rootProject) {
         versionNodes.forEach { node ->
             if (node["enabled"] == true) {
                 val mc = node["mc"] as String
                 val loader = node["loader"] as String
-                version("$mc-$loader", mc).buildscript = "build.$loader.gradle.kts"
+                // 26.1 起 MC 不再混淆：Fabric 侧换成非重映射的 Loom 插件与构建脚本
+                val script = when {
+                    loader != "fabric" -> "build.$loader.gradle.kts"
+                    atLeast(mc, "26.1") -> "build.fabric26.gradle.kts"
+                    else -> "build.fabric.gradle.kts"
+                }
+                version("$mc-$loader", mc).buildscript = script
             }
         }
         vcsVersion = "1.21.1-neoforge"

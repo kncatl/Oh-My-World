@@ -10,7 +10,11 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import net.minecraft.client.Minecraft;
+//? >=26.1 {
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+//?} else {
 import net.minecraft.client.gui.GuiGraphics;
+//?}
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -21,6 +25,7 @@ import net.minecraft.network.chat.Component;
 
 import com.kncatl.ohmyworld.FormulaParser;
 import com.kncatl.ohmyworld.PatternData;
+import com.kncatl.ohmyworld.compat.GuiCompat;
 
 public class CustomFlatScreen extends Screen implements PresetEditor {
 
@@ -154,11 +159,19 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                     this.addRenderableWidget(Button.builder(Component.translatable("gui.back"),
                             b -> this.minecraft.setScreen(CustomFlatScreen.this)).bounds(this.width / 2 - 40, this.height / 2 + 10, 80, 20).build());
                 }
+                //? >=26.1 {
+                @Override
+                public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float pt) {
+                    super.extractRenderState(g, mx, my, pt);
+                    GuiCompat.of(g).centered(this.font, NO_SAVES, this.width / 2, this.height / 2 - 10, 0xFFFF5555);
+                }
+                //?} else {
                 @Override
                 public void render(GuiGraphics g, int mx, int my, float pt) {
                     super.render(g, mx, my, pt);
-                    g.drawCenteredString(this.font, NO_SAVES, this.width / 2, this.height / 2 - 10, 0xFFFF5555);
+                    GuiCompat.of(g).centered(this.font, NO_SAVES, this.width / 2, this.height / 2 - 10, 0xFFFF5555);
                 }
+                //?}
                 @Override
                 public void onClose() { this.minecraft.setScreen(CustomFlatScreen.this); }
             });
@@ -257,34 +270,46 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }
     }
 
+    //? >=26.1 {
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        drawScreen(GuiCompat.of(graphics));
+    }
+    //?} else {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(this.font, TITLE, this.width / 2, 18, 0xFFFFFFFF);
-        graphics.drawString(this.font, LAYERS_LABEL, this.width / 2 - 145, 47, 0xFFA0A0A0);
-        graphics.drawString(this.font, SAVE_NAME, this.width / 2 - 145, this.nameInput.getY() - 22, 0xFFA0A0A0);
-        graphics.drawString(this.font, SAVE_NAME2, this.width / 2 - 145, this.nameInput.getY() - 12, 0xFFA0A0A0);
+        drawScreen(GuiCompat.of(graphics));
+    }
+    //?}
+
+    /** 版本无关的绘制主体：只表达「画什么、画在哪」，不接触具体渲染 API。 */
+    private void drawScreen(GuiCompat.Text g) {
+        g.centered(this.font, TITLE, this.width / 2, 18, 0xFFFFFFFF);
+        g.text(this.font, LAYERS_LABEL, this.width / 2 - 145, 47, 0xFFA0A0A0);
+        g.text(this.font, SAVE_NAME, this.width / 2 - 145, this.nameInput.getY() - 22, 0xFFA0A0A0);
+        g.text(this.font, SAVE_NAME2, this.width / 2 - 145, this.nameInput.getY() - 12, 0xFFA0A0A0);
 
         int errorY = this.nameInput.getY() + 30 + 26 + 20 + 10;
         if (currentErrors.isEmpty()) {
             if (!this.layersInput.getValue().isBlank()) {
-                graphics.drawString(this.font, Component.translatable("ohmyworld.custom_screen.no_errors"),
+                g.text(this.font, Component.translatable("ohmyworld.custom_screen.no_errors"),
                         this.width / 2 - 145, errorY, OK_COLOR);
             }
         } else {
-            graphics.drawString(this.font, Component.translatable("ohmyworld.custom_screen.errors", currentErrors.size()),
+            g.text(this.font, Component.translatable("ohmyworld.custom_screen.errors", currentErrors.size()),
                     this.width / 2 - 145, errorY, ERROR_COLOR);
             int lineY = errorY + 12;
             int maxShow = Math.min(currentErrors.size(), 6);
             for (int i = 0; i < maxShow; i++) {
                 String msg = currentErrors.get(i);
                 String trimmed = this.font.plainSubstrByWidth(msg, 290);
-                graphics.drawString(this.font, Component.literal(trimmed), this.width / 2 - 145, lineY, ERROR_COLOR);
+                g.text(this.font, Component.literal(trimmed), this.width / 2 - 145, lineY, ERROR_COLOR);
                 lineY += 11;
             }
             if (currentErrors.size() > 6) {
-                graphics.drawString(this.font, Component.literal("..."),
-                        this.width / 2 - 145, lineY, ERROR_COLOR);
+                g.text(this.font, Component.literal("..."), this.width / 2 - 145, lineY, ERROR_COLOR);
             }
         }
     }

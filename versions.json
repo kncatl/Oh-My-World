@@ -90,6 +90,24 @@
       "neoforgeRange": "[21.11.45,)",
       "parchmentMc": null,
       "parchmentVersion": null
+    },
+    {
+      "mc": "26.1.2",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 25,
+      "fabricLoader": "0.19.5",
+      "fabricApi": "0.155.3+26.1.2"
+    },
+    {
+      "mc": "26.1.2",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 25,
+      "neoforgeVersion": "26.1.2.112",
+      "neoforgeRange": "[26.1.2.112,)",
+      "parchmentMc": null,
+      "parchmentVersion": null
     }
   ]
 }

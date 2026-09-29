@@ -1,8 +1,11 @@
+// Fabric 构建脚本 —— 用于 26.1 及更新的**未混淆** MC 版本。
+// 与 build.fabric.gradle.kts（1.21.11 及更早、混淆版本）保持同步：
+// 两处差异只有插件 ID（非重映射）与 mappings 依赖（不需要）。
 import groovy.json.JsonSlurper
 
 fun prop(name: String): String = property(name).toString()
 
-// Stonecutter 注入的项目名形如 "1.21.11-fabric"
+// Stonecutter 注入的项目名形如 "26.1.2-fabric"
 val mcVersion = stonecutter.current.version
 val loader = stonecutter.current.project.substringAfterLast('-')
 
@@ -33,9 +36,9 @@ val minecraftRange = if (mcRangeToExclusive == null) mcRangeFrom else ">=$mcRang
 val fabricApiRange = if (mcRangeToExclusive == null) fabricApiVersion else ">=$fabricApiMin"
 
 plugins {
-    // 混淆版本（1.21.11 及更早）：重映射版 Loom。
-    // 26.1+ 用非重映射版，见 build.fabric26.gradle.kts
-    id("net.fabricmc.fabric-loom-remap")
+    // 26.1 起 MC 不再混淆：使用非重映射版 Loom（由 settings.gradle.kts 按版本选择本脚本）。
+    // 对应 1.21.11 及更早的脚本是 build.fabric.gradle.kts
+    id("net.fabricmc.fabric-loom")
 }
 
 // 产物名: oh-my-world-<mc>-<loader>-<modver>.jar
@@ -61,9 +64,10 @@ sourceSets.getByName("main").resources {
 
 dependencies {
     minecraft("com.mojang:minecraft:$mcVersion")
-    mappings(loom.officialMojangMappings())
-    modImplementation("net.fabricmc:fabric-loader:$fabricLoaderVersion")
-    modImplementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
+    // 26.1+ 的 MC 是未混淆的（官方名 + 参数名），没有也不需要有 mappings 依赖
+    // 非混淆版本无需重映射：用普通依赖（重映射插件才有 modImplementation）
+    implementation("net.fabricmc:fabric-loader:$fabricLoaderVersion")
+    implementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.4")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")

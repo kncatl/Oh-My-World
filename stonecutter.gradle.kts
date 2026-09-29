@@ -3,7 +3,10 @@
 plugins {
     id("dev.kikugie.stonecutter")
     id("net.neoforged.moddev") version "2.0.147" apply false
-    id("fabric-loom") version "1.18.2" apply false
+    // 26.1 起 MC 不再混淆 → 用非重映射插件；1.21.11 及更早用重映射插件。
+    // 选择逻辑在 settings.gradle.kts（按节点的 MC 版本决定用哪个 build 脚本）。
+    id("net.fabricmc.fabric-loom") version "1.18.2" apply false
+    id("net.fabricmc.fabric-loom-remap") version "1.18.2" apply false
 }
 
 stonecutter active file(".sc_active_version")
