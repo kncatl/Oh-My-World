@@ -3,12 +3,10 @@ package com.kncatl.ohmyworld.expr;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
-import com.kncatl.ohmyworld.compat.ColoredBlocks;
 import com.kncatl.ohmyworld.compat.RegistryLookup;
 
 public class BlockResolver {
@@ -32,27 +30,16 @@ public class BlockResolver {
     /**
      * 常用方块走硬编码快路径（避免注册表查询），其余交给
      * {@link RegistryLookup}（其内部处理版本差异）。
+     *
+     * <p>混凝土 16 色刻意不进白名单：它们的常量在 26.2 被 MC 合并成
+     * {@code ColorCollection}（26.1.2 及更早又只有常量），没有任何编译期写法能同时
+     * 覆盖 26.1.2–26.3 的整个区间；注册表名称跨版本稳定，交给 RegistryLookup 即可
+     * （结果有 CACHE，重复解析不产生额外查询）。
      */
     private static Block find(String blockId) {
         return switch (blockId) {
             case "minecraft:stone" -> Blocks.STONE; case "minecraft:dirt" -> Blocks.DIRT;
             case "minecraft:grass_block" -> Blocks.GRASS_BLOCK; case "minecraft:bedrock" -> Blocks.BEDROCK;
-            case "minecraft:white_concrete" -> ColoredBlocks.concrete(DyeColor.WHITE);
-            case "minecraft:gray_concrete" -> ColoredBlocks.concrete(DyeColor.GRAY);
-            case "minecraft:black_concrete" -> ColoredBlocks.concrete(DyeColor.BLACK);
-            case "minecraft:red_concrete" -> ColoredBlocks.concrete(DyeColor.RED);
-            case "minecraft:blue_concrete" -> ColoredBlocks.concrete(DyeColor.BLUE);
-            case "minecraft:yellow_concrete" -> ColoredBlocks.concrete(DyeColor.YELLOW);
-            case "minecraft:green_concrete" -> ColoredBlocks.concrete(DyeColor.GREEN);
-            case "minecraft:orange_concrete" -> ColoredBlocks.concrete(DyeColor.ORANGE);
-            case "minecraft:purple_concrete" -> ColoredBlocks.concrete(DyeColor.PURPLE);
-            case "minecraft:light_gray_concrete" -> ColoredBlocks.concrete(DyeColor.LIGHT_GRAY);
-            case "minecraft:light_blue_concrete" -> ColoredBlocks.concrete(DyeColor.LIGHT_BLUE);
-            case "minecraft:magenta_concrete" -> ColoredBlocks.concrete(DyeColor.MAGENTA);
-            case "minecraft:lime_concrete" -> ColoredBlocks.concrete(DyeColor.LIME);
-            case "minecraft:pink_concrete" -> ColoredBlocks.concrete(DyeColor.PINK);
-            case "minecraft:cyan_concrete" -> ColoredBlocks.concrete(DyeColor.CYAN);
-            case "minecraft:brown_concrete" -> ColoredBlocks.concrete(DyeColor.BROWN);
             case "minecraft:air" -> Blocks.AIR; case "minecraft:cobblestone" -> Blocks.COBBLESTONE;
             case "minecraft:oak_planks" -> Blocks.OAK_PLANKS; case "minecraft:glass" -> Blocks.GLASS;
             case "minecraft:obsidian" -> Blocks.OBSIDIAN; case "minecraft:sand" -> Blocks.SAND;

@@ -51,14 +51,20 @@ public final class GuiCompat {
     //?} else {
     public static Text of(GuiGraphics graphics) {
         return new Text() {
+            // 注意：这里刻意不用 drawString —— 它的返回类型在 1.21.6 由 int 变成 void，
+            // JVM 方法描述符包含返回类型，因此 1.21.5 构建的 jar 在 1.21.6+ 上会因
+            // NoSuchMethodError 崩溃。drawCenteredString 自 1.21.1 起一直是 void，
+            // 且其实现就是「把 drawString 左移半个字宽」——反向平移同一个宽度即可得到
+            // 逐像素相同的左对齐绘制（同一 width 值，整数运算精确抵消）。
             @Override
             public void text(Font font, String value, int x, int y, int color) {
-                graphics.drawString(font, value, x, y, color);
+                graphics.drawCenteredString(font, value, x + font.width(value) / 2, y, color);
             }
 
             @Override
             public void text(Font font, Component value, int x, int y, int color) {
-                graphics.drawString(font, value, x, y, color);
+                graphics.drawCenteredString(font, value,
+                        x + font.width(value.getVisualOrderText()) / 2, y, color);
             }
 
             @Override
