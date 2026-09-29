@@ -25,6 +25,7 @@ import net.minecraft.network.chat.Component;
 
 import com.kncatl.ohmyworld.FormulaParser;
 import com.kncatl.ohmyworld.PatternData;
+import com.kncatl.ohmyworld.compat.ClientScreens;
 import com.kncatl.ohmyworld.compat.GuiCompat;
 
 public class CustomFlatScreen extends Screen implements PresetEditor {
@@ -153,11 +154,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private void openLoadList() {
         List<String> saves = listSavedFormulas();
         if (saves.isEmpty()) {
-            this.minecraft.setScreen(new Screen(Component.translatable("ohmyworld.custom_screen.load_title")) {
+            this.showScreen(new Screen(Component.translatable("ohmyworld.custom_screen.load_title")) {
                 @Override
                 protected void init() {
                     this.addRenderableWidget(Button.builder(Component.translatable("gui.back"),
-                            b -> this.minecraft.setScreen(CustomFlatScreen.this)).bounds(this.width / 2 - 40, this.height / 2 + 10, 80, 20).build());
+                            b -> CustomFlatScreen.this.showScreen(CustomFlatScreen.this)).bounds(this.width / 2 - 40, this.height / 2 + 10, 80, 20).build());
                 }
                 //? >=26.1 {
                 @Override
@@ -173,12 +174,12 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                 }
                 //?}
                 @Override
-                public void onClose() { this.minecraft.setScreen(CustomFlatScreen.this); }
+                public void onClose() { CustomFlatScreen.this.showScreen(CustomFlatScreen.this); }
             });
             return;
         }
 
-        this.minecraft.setScreen(new Screen(LOAD_TITLE) {
+        this.showScreen(new Screen(LOAD_TITLE) {
             private int scrollOffset;
             private int contentHeight;
 
@@ -193,14 +194,14 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                         String displayName = name.length() > 30 ? name.substring(0, 27) + "..." : name;
                         this.addRenderableWidget(Button.builder(Component.literal(displayName), b -> {
                             loadFormula(name);
-                            this.minecraft.setScreen(CustomFlatScreen.this);
+                            CustomFlatScreen.this.showScreen(CustomFlatScreen.this);
                         }).bounds(this.width / 2 - bw / 2, btnY, bw, 20).build());
                     }
                     y += 24;
                     this.contentHeight = y - 40;
                 }
                 this.addRenderableWidget(Button.builder(Component.translatable("gui.back"),
-                        b -> this.minecraft.setScreen(CustomFlatScreen.this)).bounds(this.width / 2 - 40, this.height - 28, 80, 20).build());
+                        b -> CustomFlatScreen.this.showScreen(CustomFlatScreen.this)).bounds(this.width / 2 - 40, this.height - 28, 80, 20).build());
             }
 
             @Override
@@ -216,7 +217,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             }
 
             @Override
-            public void onClose() { this.minecraft.setScreen(CustomFlatScreen.this); }
+            public void onClose() { CustomFlatScreen.this.showScreen(CustomFlatScreen.this); }
         });
     }
 
@@ -249,10 +250,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }
 
         if (!this.nameInput.getValue().isBlank()) onSave();
-        this.minecraft.setScreen(this.parent);
+        this.showScreen(this.parent);
     }
 
-    private void onCancel() { this.minecraft.setScreen(this.parent); }
+    private void onCancel() { this.showScreen(this.parent); }
 
     private static void writeFormulaAtomically(Path target, String formula) throws Exception {
         if (Files.isSymbolicLink(target)) throw new IllegalStateException("symbolic-link target");
@@ -283,6 +284,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         drawScreen(GuiCompat.of(graphics));
     }
     //?}
+
+    /** 版本无关的切换屏幕入口（setScreen / setScreenAndShow 的差异收敛在 compat 里）。 */
+    private void showScreen(Screen screen) {
+        ClientScreens.show(this.minecraft, screen);
+    }
 
     /** 版本无关的绘制主体：只表达「画什么、画在哪」，不接触具体渲染 API。 */
     private void drawScreen(GuiCompat.Text g) {
@@ -315,5 +321,5 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     @Override
-    public void onClose() { this.minecraft.setScreen(this.parent); }
+    public void onClose() { this.showScreen(this.parent); }
 }

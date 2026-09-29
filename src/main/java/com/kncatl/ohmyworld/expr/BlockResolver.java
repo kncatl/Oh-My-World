@@ -3,10 +3,12 @@ package com.kncatl.ohmyworld.expr;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
+import com.kncatl.ohmyworld.compat.ColoredBlocks;
 import com.kncatl.ohmyworld.compat.RegistryLookup;
 
 public class BlockResolver {
@@ -35,14 +37,22 @@ public class BlockResolver {
         return switch (blockId) {
             case "minecraft:stone" -> Blocks.STONE; case "minecraft:dirt" -> Blocks.DIRT;
             case "minecraft:grass_block" -> Blocks.GRASS_BLOCK; case "minecraft:bedrock" -> Blocks.BEDROCK;
-            case "minecraft:white_concrete" -> Blocks.WHITE_CONCRETE; case "minecraft:gray_concrete" -> Blocks.GRAY_CONCRETE;
-            case "minecraft:black_concrete" -> Blocks.BLACK_CONCRETE; case "minecraft:red_concrete" -> Blocks.RED_CONCRETE;
-            case "minecraft:blue_concrete" -> Blocks.BLUE_CONCRETE; case "minecraft:yellow_concrete" -> Blocks.YELLOW_CONCRETE;
-            case "minecraft:green_concrete" -> Blocks.GREEN_CONCRETE; case "minecraft:orange_concrete" -> Blocks.ORANGE_CONCRETE;
-            case "minecraft:purple_concrete" -> Blocks.PURPLE_CONCRETE; case "minecraft:light_gray_concrete" -> Blocks.LIGHT_GRAY_CONCRETE;
-            case "minecraft:light_blue_concrete" -> Blocks.LIGHT_BLUE_CONCRETE; case "minecraft:magenta_concrete" -> Blocks.MAGENTA_CONCRETE;
-            case "minecraft:lime_concrete" -> Blocks.LIME_CONCRETE; case "minecraft:pink_concrete" -> Blocks.PINK_CONCRETE;
-            case "minecraft:cyan_concrete" -> Blocks.CYAN_CONCRETE; case "minecraft:brown_concrete" -> Blocks.BROWN_CONCRETE;
+            case "minecraft:white_concrete" -> ColoredBlocks.concrete(DyeColor.WHITE);
+            case "minecraft:gray_concrete" -> ColoredBlocks.concrete(DyeColor.GRAY);
+            case "minecraft:black_concrete" -> ColoredBlocks.concrete(DyeColor.BLACK);
+            case "minecraft:red_concrete" -> ColoredBlocks.concrete(DyeColor.RED);
+            case "minecraft:blue_concrete" -> ColoredBlocks.concrete(DyeColor.BLUE);
+            case "minecraft:yellow_concrete" -> ColoredBlocks.concrete(DyeColor.YELLOW);
+            case "minecraft:green_concrete" -> ColoredBlocks.concrete(DyeColor.GREEN);
+            case "minecraft:orange_concrete" -> ColoredBlocks.concrete(DyeColor.ORANGE);
+            case "minecraft:purple_concrete" -> ColoredBlocks.concrete(DyeColor.PURPLE);
+            case "minecraft:light_gray_concrete" -> ColoredBlocks.concrete(DyeColor.LIGHT_GRAY);
+            case "minecraft:light_blue_concrete" -> ColoredBlocks.concrete(DyeColor.LIGHT_BLUE);
+            case "minecraft:magenta_concrete" -> ColoredBlocks.concrete(DyeColor.MAGENTA);
+            case "minecraft:lime_concrete" -> ColoredBlocks.concrete(DyeColor.LIME);
+            case "minecraft:pink_concrete" -> ColoredBlocks.concrete(DyeColor.PINK);
+            case "minecraft:cyan_concrete" -> ColoredBlocks.concrete(DyeColor.CYAN);
+            case "minecraft:brown_concrete" -> ColoredBlocks.concrete(DyeColor.BROWN);
             case "minecraft:air" -> Blocks.AIR; case "minecraft:cobblestone" -> Blocks.COBBLESTONE;
             case "minecraft:oak_planks" -> Blocks.OAK_PLANKS; case "minecraft:glass" -> Blocks.GLASS;
             case "minecraft:obsidian" -> Blocks.OBSIDIAN; case "minecraft:sand" -> Blocks.SAND;
