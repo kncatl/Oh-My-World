@@ -128,14 +128,10 @@ print(f"[jar-smoke] 已改写清单 {key}: minecraft=[{mc}]")
 PY
 
 # ---------- 3. 冒烟配置 ----------
-printf 'eula=true\n' > "$SRV/eula.txt"
-mkdir -p "$SRV/config"
-cat > "$SRV/config/ohmyworld.json" <<'JSON'
-{
-  "server_mode": true,
-  "formula": "y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete"
-}
-JSON
+# level-type=flat 必须显式设置：否则 Mixin 不触发、公式不会跑，验证会假阳性。
+# 端口按「目标版本 + 加载器」分配，避免并行验证互相抢端口。
+PORT=$(( 25700 + ( $(printf '%s' "$TARGET_MC-$LOADER" | cksum | cut -d' ' -f1) % 200 ) ))
+python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" --force-formula
 rm -rf "$SRV/world" "$SRV/logs"
 
 # ---------- 4. 启动、等待、停止 ----------
@@ -150,6 +146,10 @@ PID=$!
 started=0
 for _ in $(seq 1 180); do
     if grep -q 'Done (' "$LOG"; then started=1; break; fi
+    # 出现这些就是明确的兼容性断裂，不必等满超时
+    if grep -qE 'NoSuchMethodError|NoClassDefFoundError|ClassNotFoundException|formula chunk fill failed' "$LOG"; then
+        break
+    fi
     if ! kill -0 "$PID" 2>/dev/null; then break; fi
     sleep 2
 done
@@ -168,7 +168,11 @@ fail() {
     exit 1
 }
 
-[[ "$started" == 1 ]] || fail "服务器未在限定时间内启动（没有 Done）"
+if [[ "$started" != 1 ]]; then
+    hint="$(grep -m1 -E 'NoSuchMethodError|NoClassDefFoundError|ClassNotFoundException|formula chunk fill failed' "$LOG" || true)"
+    [ -n "$hint" ] && echo "[jar-smoke] 根因提示: $hint"
+    fail "服务器未完成启动（没有 Done）"
+fi
 # 模组初始化的可靠证据：启动时会往游戏目录写指南与校验标记
 [[ -f "$SRV/ohmyworld/.guide_zh_cn.sha256" ]] \
     || fail "模组未初始化（缺少 ohmyworld/ 指南标记）—— 很可能被加载器拒绝或初始化失败"
@@ -177,6 +181,9 @@ grep -qE 'Mixin apply|Exception in thread|Crash report' "$LOG" && fail "日志�
 
 CHUNKS=$(find "$SRV/world/region" -name '*.mca' 2>/dev/null | wc -l | tr -d ' ')
 [[ "$CHUNKS" -gt 0 ]] || fail "没有生成 region 文件"
+# 世界里必须能找到冒烟公式的特征方块：证明「Mixin → fillChunk → 公式 → 注册表查方块」
+# 整条链路真的跑过（否则就是"服务器起来了但公式没生效"的假阳性）。
+python3 "$TOOLS/smoke-check-world.py" "$SRV" || fail "世界里没有公式特征方块（公式没有生效）"
 
 echo "[jar-smoke] OK: jar 在 MC $TARGET_MC / $LOADER 上加载并生成成功（region 文件 $CHUNKS 个）"
 grep -E 'Done \(' "$LOG" | tail -1

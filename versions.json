@@ -4,10 +4,17 @@
   "nodes": [
     {
       "mc": "1.21.1",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 21,
+      "fabricLoader": "0.19.5",
+      "fabricApi": "0.116.17+1.21.1"
+    },
+    {
+      "mc": "1.21.1",
       "loader": "neoforge",
       "enabled": true,
       "java": 21,
-      "covers": ["1.21.1"],
       "neoforgeVersion": "21.1.251",
       "neoforgeRange": "[21.1.234,)",
       "parchmentMc": "1.21.1",
@@ -15,32 +22,45 @@
     },
     {
       "mc": "1.21.3",
+      "loader": "fabric",
+      "enabled": true,
+      "java": 21,
+      "mcRange": {
+        "from": "1.21.3",
+        "toExclusive": "1.21.5"
+      },
+      "fabricLoader": "0.19.5",
+      "fabricApi": "0.114.1+1.21.3"
+    },
+    {
+      "mc": "1.21.3",
       "loader": "neoforge",
       "enabled": true,
       "java": 21,
-      "covers": ["1.21.3"],
+      "mcRange": {
+        "from": "1.21.3",
+        "toExclusive": "1.21.5"
+      },
       "neoforgeVersion": "21.3.97",
       "neoforgeRange": "[21.3.97,)",
       "parchmentMc": null,
       "parchmentVersion": null
     },
     {
-      "mc": "1.21.3",
+      "mc": "1.21.5",
       "loader": "fabric",
       "enabled": true,
       "java": 21,
-      "covers": ["1.21.3"],
       "fabricLoader": "0.19.5",
-      "fabricApi": "0.114.1+1.21.3"
+      "fabricApi": "0.128.2+1.21.5"
     },
     {
-      "mc": "1.21.11",
+      "mc": "1.21.5",
       "loader": "neoforge",
       "enabled": true,
       "java": 21,
-      "covers": ["1.21.11"],
-      "neoforgeVersion": "21.11.45",
-      "neoforgeRange": "[21.11.45,)",
+      "neoforgeVersion": "21.5.98",
+      "neoforgeRange": "[21.5.98,)",
       "parchmentMc": null,
       "parchmentVersion": null
     },
@@ -49,9 +69,18 @@
       "loader": "fabric",
       "enabled": true,
       "java": 21,
-      "covers": ["1.21.11"],
       "fabricLoader": "0.19.5",
       "fabricApi": "0.141.6+1.21.11"
+    },
+    {
+      "mc": "1.21.11",
+      "loader": "neoforge",
+      "enabled": true,
+      "java": 21,
+      "neoforgeVersion": "21.11.45",
+      "neoforgeRange": "[21.11.45,)",
+      "parchmentMc": null,
+      "parchmentVersion": null
     }
   ]
 }

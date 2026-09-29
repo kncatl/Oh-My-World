@@ -15,7 +15,7 @@ import net.minecraft.world.level.block.Block;
  * <ul>
  *   <li>资源 ID 类型：1.21.11 起 {@code ResourceLocation} 改名为 {@code Identifier}
  *       （1.21.3 仍然叫 ResourceLocation）；</li>
- *   <li>查询返回类型：<b>1.21.3</b> 起 {@code Registry.get(...)} 返回
+ *   <li>查询返回类型：<b>1.21.2</b> 起 {@code Registry.get(...)} 返回
  *       {@code Optional<Holder.Reference<T>>}；1.21.1 只有直接返回值的老签名。</li>
  * </ul>
  * 不要把两者合并成同一个门限。
@@ -32,7 +32,7 @@ public final class RegistryLookup {
         ResourceLocation loc = ResourceLocation.tryParse(blockId);
         //?}
         if (loc == null) return null;
-        //? >=1.21.3 {
+        //? >=1.21.2 {
         return BuiltInRegistries.BLOCK.get(loc).map(h -> h.value()).orElse(null);
         //?} else {
         return BuiltInRegistries.BLOCK.get(loc);

@@ -20,25 +20,14 @@ RUN_DIR="versions/$NODE/run"
 LOG="$(mktemp -t "ohmyworld-smoke-${NODE}.XXXXXX.log")"
 echo "[smoke] 节点=$NODE  日志=$LOG"
 
+# 统一配置：level-type=flat（必须，否则 Mixin 不触发、公式不会跑）、固定种子、
+# 关结构、按节点分配独立端口（避免并行验证时端口冲突）。
+# 冒烟公式刻意使用白名单之外的方块（触发 RegistryLookup）并用特征方块核验世界。
 mkdir -p "$RUN_DIR"
-if [ ! -f "$RUN_DIR/eula.txt" ]; then
-    printf 'eula=true\n' > "$RUN_DIR/eula.txt"
-fi
-
-# 没有公式配置时写入一个最小的确定性公式（server_mode），
-# 让冒烟覆盖「配置 → 解析/编译 → 区块填充」全链路。
-# 已有配置（例如 1.21.1 的巨构公式）不会被覆盖。
-CONFIG="$RUN_DIR/config/ohmyworld.json"
-if [ ! -f "$CONFIG" ]; then
-    mkdir -p "$(dirname "$CONFIG")"
-    cat > "$CONFIG" <<'JSON'
-{
-  "server_mode": true,
-  "formula": "y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete"
-}
-JSON
-    echo "[smoke] 已写入冒烟公式配置: $CONFIG"
-fi
+PORT=$(( 25700 + ( $(printf '%s' "$NODE" | cksum | cut -d' ' -f1) % 200 ) ))
+CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT")"
+echo "$CONFIG_OUT" | grep -v '^SMOKE_FORMULA=' || true
+SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
 
 rm -rf "$RUN_DIR/world"
 
@@ -82,6 +71,12 @@ fi
 
 CHUNKS=$(find "$RUN_DIR/world/region" -name '*.mca' 2>/dev/null | wc -l | tr -d ' ')
 [ "$CHUNKS" -gt 0 ] || fail "没有生成任何 region 文件"
+
+# 若当前用的是我们写入的冒烟公式，则必须能在世界里找到特征方块——
+# 这证明「Mixin → fillChunk → 公式 → 注册表查方块」整条链路真的跑过。
+if [ "$SMOKE_FORMULA" = "1" ]; then
+    python3 "$ROOT/tools/smoke-check-world.py" "$RUN_DIR" || fail "世界里没有公式特征方块（公式没有生效）"
+fi
 
 echo "[smoke] OK: $NODE 出生点生成成功（region 文件 $CHUNKS 个）"
 grep -E 'Done \(' "$LOG" | tail -1
