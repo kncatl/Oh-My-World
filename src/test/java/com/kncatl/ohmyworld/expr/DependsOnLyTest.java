@@ -65,4 +65,15 @@ class DependsOnLyTest {
         // 出现在子表达式里同样要算作 y 相关
         assertTrue(depends("x > 0 ? rand(1, 2) : 3"));
     }
+
+    @Test
+    void seedAndSeedhashFollowTheirArguments() {
+        // seed 是世界级常量；seedhash 只有当参数引用 ly 时才与 y 相关
+        assertFalse(depends("seed"));
+        assertFalse(depends("seedhash()"));
+        assertFalse(depends("seedhash(x, z, 0)"));
+        assertFalse(depends("seed > 0 ? x : z"));
+        assertTrue(depends("seedhash(ly)"));
+        assertTrue(depends("seedhash(x) + ly"));
+    }
 }

@@ -39,6 +39,13 @@ Default preset:
   x    World X coordinate (integer, can be negative)
   z    World Z coordinate (integer, can be negative)
   ly   Relative y within the layer (0-based, ly = currentY - layerStartY)
+  seed World seed (integer; constant within a world, generally differs across worlds)
+
+       Use it to make the same formula produce different results in different
+       worlds. Note: the seed is stored as a 64-bit integer while formulas
+       compute in double precision (about 53 significant bits); seeds that
+       differ only in the low bits may yield the same value. Use seedhash()
+       when you need the full precision.
 
 
 3. Operators
@@ -94,6 +101,20 @@ Default preset:
   rand(b1, b2, ...)             Whitelist — random from the specified blocks
    randexcept(b1, b2, ...)       Blacklist — random from all blocks EXCEPT specified ones
 
+  ★ Note: rand() does NOT use the world seed — the same formula gives the same
+    result in every world. Use seedhash() below for per-world variation.
+
+  -- Seed hashing --
+  seedhash(a, b, ...)   Mixes the world seed with all arguments (zero or more)
+                        and returns a decimal in [0,1). Same world + same
+                        arguments always give the same value; different worlds
+                        generally differ. Ideal for seed-driven noise.
+
+  ★ Example: seedhash(x, z, 0) < 0.5 ? minecraft:stone : minecraft:dirt
+    (different worlds get different patterns; deterministic within a world)
+  ★ For grid noise, floordiv the coordinates first, e.g.
+    seedhash(floordiv(x,3), floordiv(z,3), 0).
+
 
 5. Expression Examples
 
@@ -134,15 +155,21 @@ Default preset:
 
     10-block-tall pillars only on checkerboard white positions, air elsewhere.
 
+  ▸ Seed-driven pattern (same formula, different worlds differ):
+
+    y=-64..64: seedhash(x, z, 0) < 0.5 ? minecraft:white_concrete : minecraft:gray_concrete
+
+    For grid noise, floordiv the coordinates first, e.g.
+    seedhash(floordiv(x,3), floordiv(z,3), 0) < 0.5 ? ... : ...
 
   ▸ let block — avoid recomputing sub-expressions for complex formulas:
 
     y=-64..319: {
       let cellX = floordiv(x, 192);
       let cellZ = floordiv(z, 192);
-      let seed = cellX*37.1 + cellZ*91.7;
-      let offX = sin(seed)*40;
-      let offZ = cos(seed*1.3)*40;
+      let cellSeed = cellX*37.1 + cellZ*91.7;
+      let offX = sin(cellSeed)*40;
+      let offZ = cos(cellSeed*1.3)*40;
       let dx = x - (cellX*192 + 96 + offX);
       let dz = z - (cellZ*192 + 96 + offZ);
       dx*dx + dz*dz < 400 ? minecraft:white_concrete : minecraft:air

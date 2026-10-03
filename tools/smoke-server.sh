@@ -4,15 +4,17 @@
 #   2) 没有公式求值/填充报错、没有异常或崩溃；
 #   3) 世界目录里生成了 region 文件。
 #
-# 用法: tools/smoke-server.sh <节点> [启动后额外等待秒数]
+# 用法: tools/smoke-server.sh <节点> [启动后额外等待秒数] [seed]
 # 例:   tools/smoke-server.sh 1.21.1-neoforge 20
+#       tools/smoke-server.sh 26.1.2-neoforge 15 seed   ← 种子专项（固定 level-seed 12345）
 #
 # 这是本地验证工具（CI 里跑整套 20+ 节点过重），配合 ~/omw-verify/run-e2e.sh
 # 的世界比对一起用：冒烟看"能不能正常跑"，比对看"生成结果对不对"。
 set -euo pipefail
 
-NODE="${1:?用法: tools/smoke-server.sh <节点> [等待秒数]}"
+NODE="${1:?用法: tools/smoke-server.sh <节点> [等待秒数] [seed]}"
 SETTLE="${2:-20}"
+MODE="${3:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -25,7 +27,11 @@ echo "[smoke] 节点=$NODE  日志=$LOG"
 # 冒烟公式刻意使用白名单之外的方块（触发 RegistryLookup）并用特征方块核验世界。
 mkdir -p "$RUN_DIR"
 PORT=auto
-CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT")"
+if [ "$MODE" = "seed" ]; then
+    CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT" --seed-formula)"
+else
+    CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT")"
+fi
 echo "$CONFIG_OUT" | grep -v '^SMOKE_FORMULA=' || true
 SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
 
@@ -78,8 +84,14 @@ CHUNKS=$(find "$RUN_DIR/world" -path '*/region/*.mca' 2>/dev/null | wc -l | tr -
 
 # 若当前用的是我们写入的冒烟公式，则必须能在世界里找到特征方块——
 # 这证明「Mixin → fillChunk → 公式 → 注册表查方块」整条链路真的跑过。
+# seed 模式额外要求两种特征方块都出现（seedhash 退化成常量时只剩一种，必须判失败）。
 if [ "$SMOKE_FORMULA" = "1" ]; then
-    python3 "$ROOT/tools/smoke-check-world.py" "$RUN_DIR" || fail "世界里没有公式特征方块（公式没有生效）"
+    if [ "$MODE" = "seed" ]; then
+        python3 "$ROOT/tools/smoke-check-world.py" --require-all "$RUN_DIR" \
+            || fail "世界里缺少公式特征方块（seed 或 seedhash 没有按预期生效）"
+    else
+        python3 "$ROOT/tools/smoke-check-world.py" "$RUN_DIR" || fail "世界里没有公式特征方块（公式没有生效）"
+    fi
 fi
 
 echo "[smoke] OK: $NODE 出生点生成成功（region 文件 $CHUNKS 个）"

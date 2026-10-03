@@ -22,6 +22,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 
 import com.kncatl.ohmyworld.compat.ChunkWrites;
 import com.kncatl.ohmyworld.compat.LevelHeights;
+import com.kncatl.ohmyworld.expr.ExprEvaluator;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
@@ -122,6 +123,14 @@ public class PatternData {
 
     public static boolean isPending() { return pending; }
     public static void clearPending() { pending = false; }
+
+    /**
+     * 把当前世界的种子转给求值器（公式内置变量 {@code seed} 与 {@code seedhash} 的来源）。
+     * 各维度同值；单元测试可直接调用 {@code ExprEvaluator.setWorldSeed}。
+     */
+    public static void setWorldSeed(long seed) {
+        ExprEvaluator.setWorldSeed(seed);
+    }
 
     public static void setCreated() { created = true; }
     public static boolean isCreated() { return created; }

@@ -22,6 +22,10 @@ public final class WorldLoadHandler {
     }
 
     private static void onLevelLoad(ServerLevel sl) {
+        // 世界种子：公式内置变量 seed 的来源。加载事件早于任何区块生成
+        // （主世界现有的公式绑定同样依赖这个时机）；各维度同值，先到先设。
+        PatternData.setWorldSeed(sl.getSeed());
+
         // 每次世界加载时重新读取配置文件
         OhMyWorldConfig config = OhMyWorldConfig.reload();
         FlatLevelSource generator = sl.getChunkSource().getGenerator() instanceof FlatLevelSource flat ? flat : null;

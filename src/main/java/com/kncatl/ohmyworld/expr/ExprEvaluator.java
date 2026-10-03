@@ -23,6 +23,15 @@ public class ExprEvaluator {
 
     private static final ThreadLocal<EvalContext> CONTEXT = ThreadLocal.withInitial(EvalContext::new);
 
+    /**
+     * 当前世界的种子；由 {@code WorldLoadHandler} 在世界加载时设置（各维度同值）。
+     * 公式里以内置变量 {@code seed} 读取，{@code seedhash(...)} 也以它为混合起点。
+     */
+    private static volatile long worldSeed;
+
+    /** 设置世界种子；除世界加载外，单元测试也可直接调用。 */
+    public static void setWorldSeed(long seed) { worldSeed = seed; }
+
     private static final Map<String, Integer> FUNCTION_ARITY = Map.ofEntries(
             Map.entry("floordiv", 2), Map.entry("floormod", 2),
             Map.entry("abs", 1), Map.entry("max", 2), Map.entry("min", 2),
@@ -32,6 +41,7 @@ public class ExprEvaluator {
             Map.entry("sin", 1), Map.entry("cos", 1), Map.entry("tan", 1),
             Map.entry("asin", 1), Map.entry("acos", 1), Map.entry("atan", 1),
             Map.entry("todeg", 1), Map.entry("torad", 1),
+            Map.entry("seedhash", -1),
             Map.entry("rand", -1), Map.entry("randexcept", -1));
 
     // 编译后的函数编号。ExprCompiler 在编译期把函数名解析成这些常量，
@@ -40,7 +50,7 @@ public class ExprEvaluator {
             FN_FLOOR = 5, FN_CEIL = 6, FN_ROUND = 7, FN_SIGN = 8, FN_SQRT = 9, FN_POW = 10,
             FN_EXP = 11, FN_LOG = 12, FN_LOG10 = 13, FN_SIN = 14, FN_COS = 15, FN_TAN = 16,
             FN_ASIN = 17, FN_ACOS = 18, FN_ATAN = 19, FN_TODEG = 20, FN_TORAD = 21;
-    public static final int FN_RAND = 100, FN_RANDEXCEPT = 101;
+    public static final int FN_RAND = 100, FN_RANDEXCEPT = 101, FN_SEEDHASH = 102;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -72,6 +82,7 @@ public class ExprEvaluator {
             case "atan" -> FN_ATAN;
             case "todeg" -> FN_TODEG;
             case "torad" -> FN_TORAD;
+            case "seedhash" -> FN_SEEDHASH;
             case "rand" -> FN_RAND;
             case "randexcept" -> FN_RANDEXCEPT;
             default -> FN_UNKNOWN;
@@ -152,7 +163,7 @@ public class ExprEvaluator {
     }
 
     private static double builtinValue(int kind, int x, int z, int ly) {
-        return switch (kind) { case 0 -> x; case 1 -> z; case 2 -> ly; default -> 0; };
+        return switch (kind) { case 0 -> x; case 1 -> z; case 2 -> ly; case 3 -> (double) worldSeed; default -> 0; };
     }
 
     /** 方块字面量只解析一次；并发竞争时结果相同，最坏只是重复解析。 */
@@ -229,7 +240,7 @@ public class ExprEvaluator {
     }
 
     private static double builtinValue(String name, int x, int z, int ly) {
-        return switch (name) { case "x" -> x; case "z" -> z; case "ly" -> ly; default -> 0; };
+        return switch (name) { case "x" -> x; case "z" -> z; case "ly" -> ly; case "seed" -> (double) worldSeed; default -> 0; };
     }
 
     private static Object evalBinary(ExprNode.BinaryNode b, int x, int z, int ly, EvalContext context) {
@@ -371,6 +382,7 @@ public class ExprEvaluator {
             case "atan"  -> Math.atan(evalNumber(args.get(0), x, z, ly, context));
             case "todeg" -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
             case "torad" -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
+            case "seedhash" -> seedhash(args, x, z, ly, context);
             // 非数值函数（rand/randexcept）返回方块，按数值语境取 0
             default -> toDouble(evalFunc(f, x, z, ly, context));
         };
@@ -420,6 +432,7 @@ public class ExprEvaluator {
             case FN_ATAN  -> Math.atan(evalNumber(args.get(0), x, z, ly, context));
             case FN_TODEG -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
             case FN_TORAD -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
+            case FN_SEEDHASH -> seedhash(args, x, z, ly, context);
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -431,6 +444,33 @@ public class ExprEvaluator {
         int h = (x * 374761393) ^ (z * 668265263) ^ (y * 997307);
         h = h ^ (h >>> 16);
         return Math.floorMod(h & 0x7FFFFFFF, bound);
+    }
+
+    /**
+     * {@code seedhash(a, b, ...)}：把世界种子与全部实参做 SplitMix64 混合，返回 [0,1)。
+     *
+     * <p>与 {@code rand}/{@code randexcept} 不同，本函数使用**完整的 64 位**种子与实参的
+     * 位模式，因此适合做"随世界种子变化"的噪声原语：
+     * {@code seedhash(x, z, 0) < 0.5 ? A : B}；同一世界、同一参数永远得到同一结果。
+     *
+     * <p><b>算法是兼容性契约，一经发布不得更改</b>——与 {@link #pickIndex} 同等对待，
+     * 否则同一公式与种子会在不同版本间生成不同地形。
+     */
+    private static double seedhash(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        long h = worldSeed;
+        for (ExprNode arg : args) {
+            h = mix64(h + 0x9E3779B97F4A7C15L
+                    + Double.doubleToRawLongBits(evalNumber(arg, x, z, ly, context)));
+        }
+        // 取高 53 位，乘以 2^-53 得到 [0,1)
+        return (mix64(h) >>> 11) * 0x1.0p-53;
+    }
+
+    /** SplitMix64 的混淆函数。 */
+    private static long mix64(long z) {
+        z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
+        z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
+        return z ^ (z >>> 31);
     }
 
     private static Object evalRand(List<ExprNode> args, int x, int z, int ly, EvalContext context) {

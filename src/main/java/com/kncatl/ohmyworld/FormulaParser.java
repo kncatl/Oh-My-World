@@ -14,7 +14,7 @@ import com.kncatl.ohmyworld.expr.ExprParser;
 
 public class FormulaParser {
 
-    private static final List<String> KNOWN_VARS = List.of("x", "z", "ly");
+    private static final List<String> KNOWN_VARS = List.of("x", "z", "ly", "seed");
     // These are deliberately high safety ceilings, not a formula complexity budget.
     public static final int MAX_INPUT_LENGTH = 1_048_576;
     private static final int MAX_LAYERS = 65_536;
@@ -150,7 +150,7 @@ public class FormulaParser {
             case ExprNode.VariableNode v -> {
                 if (variables.containsKey(v.name())) return variables.get(v.name());
                 if (KNOWN_VARS.contains(v.name())) return ExprEvaluator.ValueType.NUMBER;
-                errors.add("Unknown variable: " + v.name() + " (available: x, z, ly)");
+                errors.add("Unknown variable: " + v.name() + " (available: x, z, ly, seed)");
                 return ExprEvaluator.ValueType.UNKNOWN;
             }
             case ExprNode.BlockNode b -> {

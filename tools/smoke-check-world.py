@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """核验冒烟世界确实由本模组的公式生成（而不是原版地形）。
 
-用法: smoke-check-world.py <服务端目录>
+用法: smoke-check-world.py [--require-all] <服务端目录>
 
 做法：解压 region 文件里的区块数据（zlib），在方块调色板里找冒烟公式的特征方块
 （minecraft:sea_lantern / minecraft:polished_blackstone_bricks）。原版平坦世界只会有
 bedrock/dirt/grass 之类，找不到它们 —— 因此这能证明「Mixin → fillChunk → 公式」这条
 链路真的跑过，避免「服务器起来了但公式没生效」的假阳性。
+
+--require-all：要求全部特征方块都出现（seed 冒烟用：seedhash 若退化成常量，
+只会出现其中一种，必须判失败）。
 """
 
 import sys
@@ -19,13 +22,15 @@ HEADER_SECTORS = 2  # 前 8KB：4KB 偏移表 + 4KB 时间戳表
 
 
 def main():
-    if len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    require_all = "--require-all" in sys.argv
+    if len(args) != 1:
         print(__doc__)
         return 2
     # 1.21.x 的布局：world/region、world/DIM1/region…；
     # 26.x 起的布局：world/dimensions/<ns>/<dim>/region。
     # 统一搜集 world/ 下所有名为 region 的目录，兼容两代。
-    world = Path(sys.argv[1]) / "world"
+    world = Path(args[0]) / "world"
     region_dirs = sorted(p for p in world.rglob("region") if p.is_dir())
     if not region_dirs:
         print("[smoke-check] FAIL: 没有 region 目录")
@@ -57,8 +62,11 @@ def main():
                 if marker in raw:
                     found.add(marker.decode())
 
-    if not found:
-        print(f"[smoke-check] FAIL: 在 {chunks} 个区块里没有找到公式特征方块 —— 公式很可能没有生效")
+    missing = [m.decode() for m in MARKERS if m.decode() not in found]
+    if not found or (require_all and missing):
+        extra = f"，缺少 {missing}" if missing else ""
+        print(f"[smoke-check] FAIL: 在 {chunks} 个区块里特征方块不满足要求"
+              f"（找到 {sorted(found)}{extra}）—— 公式很可能没有生效")
         return 1
     print(f"[smoke-check] OK: 在 {chunks} 个区块里找到 {', '.join(sorted(found))}")
     return 0

@@ -50,6 +50,15 @@ class ExprCompilerTest {
             "todeg(torad(x)) + floor(z * 0.5) - ceil(z * 0.25)",
             "round(sign(x)) + tan(0) + asin(0) + acos(1)",
             "{ let ly = max(1, 2); ly + x }",
+            // seed 变量与 seedhash 函数
+            "seed",
+            "{ let seed = 7; seed + x }",
+            "{ let a = seed + 1; a * 2 }",
+            "seedhash()",
+            "seedhash(x)",
+            "seedhash(x, z, 0)",
+            "seedhash(x + 0.5, z, -3)",
+            "{ let h = seedhash(x, z, 1); h > 0.5 ? h : 1 - h }",
     };
 
     private static String describe(Object value) {
@@ -61,6 +70,9 @@ class ExprCompilerTest {
     @Test
     void compiledEvaluationMatchesUncompiled() {
         int checks = 0;
+        // 编译前后一致性不取决于种子的具体值，但这里用一个"所有 64 位都参与"的
+        // 非零种子，确保 seed/seedhash 走的是真实路径而不是恒 0。
+        ExprEvaluator.setWorldSeed(-7138994955873085613L);
         for (String source : EXPRESSIONS) {
             ExprNode raw = new ExprParser(ExprLexer.tokenize(source)).parse();
             ExprNode compiled = ExprCompiler.compile(raw);
@@ -118,6 +130,13 @@ class ExprCompilerTest {
                 rootBlock("{ let a = x; let b = a > 0 ? ly : 0; b }").hoisted());
         assertArrayEquals(new boolean[]{false},
                 rootBlock("{ let a = sin(ly); a }").hoisted());
+        // seed 与不含 ly 参数的 seedhash 都是列无关的；参数含 ly 的则不是
+        assertArrayEquals(new boolean[]{true},
+                rootBlock("{ let s = seed; s + x }").hoisted());
+        assertArrayEquals(new boolean[]{true, false},
+                rootBlock("{ let a = seedhash(x, z, 0); let b = a + ly; b }").hoisted());
+        assertArrayEquals(new boolean[]{false},
+                rootBlock("{ let a = seedhash(ly); a }").hoisted());
     }
 
     @Test
@@ -190,6 +209,11 @@ class ExprCompilerTest {
         ExprNode.CompiledBlockNode rand = rootBlock("{ let r = randexcept(1); r }");
         ExprNode.CompiledFuncCallNode call = (ExprNode.CompiledFuncCallNode) rand.values()[0];
         assertEquals(ExprEvaluator.FN_RANDEXCEPT, call.id());
+
+        // seedhash 同样编译成编号（数值路径，含变参数）
+        ExprNode.CompiledBlockNode seedhash = rootBlock("{ let h = seedhash(x, z, 0); h }");
+        assertEquals(ExprEvaluator.FN_SEEDHASH,
+                ((ExprNode.CompiledFuncCallNode) seedhash.values()[0]).id());
     }
 
     /** 编译后的 block 形态必须保留提升标记（嵌套块也不应退化为逐格重算）。 */
