@@ -5,6 +5,8 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -99,6 +101,14 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final Component EXAMPLES_BTN = Component.translatable("ohmyworld.custom_screen.examples");
     private static final Component EXAMPLES_TITLE = Component.translatable("ohmyworld.custom_screen.examples_title");
     private static final Component PREVIEW_SWITCH = Component.translatable("ohmyworld.custom_screen.preview_switch");
+    private static final Component EXPAND = Component.translatable("ohmyworld.custom_screen.expand");
+    private static final Component RENAME = Component.translatable("ohmyworld.custom_screen.rename");
+    private static final Component DELETE = Component.translatable("ohmyworld.custom_screen.delete");
+    private static final Component RENAME_TITLE = Component.translatable("ohmyworld.custom_screen.rename_title");
+    private static final Component RENAME_HINT = Component.translatable("ohmyworld.custom_screen.rename_hint");
+    private static final Component RENAME_EXISTS = Component.translatable("ohmyworld.custom_screen.rename_exists");
+    private static final Component RENAME_INVALID = Component.translatable("ohmyworld.custom_screen.rename_invalid");
+    private static final Component DELETE_TITLE = Component.translatable("ohmyworld.custom_screen.delete_title");
     private static final Component DONE = Component.translatable("ohmyworld.custom_screen.done");
     private static final Component CANCEL = Component.translatable("ohmyworld.custom_screen.cancel");
     private static final Component SAVE = Component.translatable("ohmyworld.custom_screen.save");
@@ -157,6 +167,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }
 
         int right = this.cardX + this.cardW - 16;
+        this.addRenderableWidget(Button.builder(EXPAND, b -> openFullscreen())
+                .bounds(fx + 26, this.formulaY - 18, 56, 16).build());
         this.addRenderableWidget(Button.builder(OPEN_GUIDE, b -> openGuide())
                 .bounds(right - 76, this.cardY + 26, 76, 20).build());
         this.addRenderableWidget(Button.builder(EXAMPLES_BTN, b -> openExamples())
@@ -372,17 +384,24 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
             @Override
             protected void init() {
-                int bw = 240;
+                int nameW = 190;
+                int smallW = 46;
+                int gap = 4;
+                int rowW = nameW + 2 * (gap + smallW);
+                int x = this.width / 2 - rowW / 2;
                 int y = 40;
                 this.contentHeight = 0;
                 for (String name : saves) {
-                    int btnY = y - this.scrollOffset;
-                    if (btnY >= 24 && btnY <= this.height - 44) {
-                        String displayName = name.length() > 30 ? name.substring(0, 27) + "..." : name;
-                        this.addRenderableWidget(Button.builder(Component.literal(displayName), b -> {
+                    int rowY = y - this.scrollOffset;
+                    if (rowY >= 24 && rowY <= this.height - 44) {
+                        this.addRenderableWidget(Button.builder(Component.literal(displaySaveLabel(name)), b -> {
                             loadFormula(name);
                             CustomFlatScreen.this.showScreen(CustomFlatScreen.this);
-                        }).bounds(this.width / 2 - bw / 2, btnY, bw, 20).build());
+                        }).bounds(x, rowY, nameW, 20).build());
+                        this.addRenderableWidget(Button.builder(RENAME, b -> openRename(name))
+                                .bounds(x + nameW + gap, rowY, smallW, 20).build());
+                        this.addRenderableWidget(Button.builder(DELETE, b -> confirmDelete(name))
+                                .bounds(x + nameW + gap + smallW + gap, rowY, smallW, 20).build());
                     }
                     y += 24;
                     this.contentHeight = y - 40;
@@ -408,10 +427,146 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         });
     }
 
+    private Path formulaFile(String name) {
+        return Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld")
+                .resolve(sanitizeFileName(name) + ".txt");
+    }
+
+    /** 保存条目的显示名：名称 + 修改时间（名称按需截断）。 */
+    private String displaySaveLabel(String name) {
+        String time = "";
+        try {
+            time = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                    .format(Files.getLastModifiedTime(formulaFile(name), LinkOption.NOFOLLOW_LINKS)
+                            .toInstant().atZone(ZoneId.systemDefault()));
+        } catch (Exception ignored) {}
+        String suffix = time.isEmpty() ? "" : "  " + time;
+        int maxName = 182 - this.font.width(suffix);
+        String trimmed = name;
+        if (maxName < 12) {
+            trimmed = "…";
+        } else if (this.font.width(trimmed) > maxName) {
+            trimmed = this.font.plainSubstrByWidth(trimmed, maxName - 6) + "…";
+        }
+        return trimmed + suffix;
+    }
+
+    /** 重命名已保存的公式（非法名/重名会提示，不改动原文件）。 */
+    private void openRename(String oldName) {
+        this.showScreen(new Screen(RENAME_TITLE) {
+            private EditBox input;
+            private Component error;
+
+            @Override
+            protected void init() {
+                this.input = new EditBox(this.font, this.width / 2 - 100, this.height / 2 - 10, 200, 20, RENAME_HINT);
+                this.input.setMaxLength(64);
+                this.input.setValue(oldName);
+                this.addRenderableWidget(this.input);
+                this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> apply())
+                        .bounds(this.width / 2 - 104, this.height / 2 + 16, 100, 20).build());
+                this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> back())
+                        .bounds(this.width / 2 + 4, this.height / 2 + 16, 100, 20).build());
+            }
+
+            private void apply() {
+                String newName = sanitizeFileName(this.input.getValue());
+                if (newName.isBlank() || newName.equals("_")) {
+                    this.error = RENAME_INVALID;
+                    return;
+                }
+                if (newName.equals(oldName)) {
+                    back();
+                    return;
+                }
+                try {
+                    Path from = formulaFile(oldName);
+                    Path to = formulaFile(newName);
+                    if (Files.isSymbolicLink(from) || !Files.isRegularFile(from, LinkOption.NOFOLLOW_LINKS)) {
+                        back();
+                        return;
+                    }
+                    if (Files.exists(to, LinkOption.NOFOLLOW_LINKS)) {
+                        this.error = RENAME_EXISTS;
+                        return;
+                    }
+                    Files.move(from, to);
+                    back();
+                } catch (Exception e) {
+                    this.error = Component.literal(String.valueOf(e.getMessage()));
+                }
+            }
+
+            private void back() {
+                CustomFlatScreen.this.openLoadList();
+            }
+
+            //? >=26.1 {
+            @Override
+            public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float pt) {
+                super.extractRenderState(g, mx, my, pt);
+                if (this.error != null) {
+                    GuiCompat.of(g).centered(this.font, this.error, this.width / 2, this.height / 2 - 28, 0xFFFF5555);
+                }
+            }
+            //?} else {
+            @Override
+            public void render(GuiGraphics g, int mx, int my, float pt) {
+                super.render(g, mx, my, pt);
+                if (this.error != null) {
+                    GuiCompat.of(g).centered(this.font, this.error, this.width / 2, this.height / 2 - 28, 0xFFFF5555);
+                }
+            }
+            //?}
+
+            @Override
+            public void onClose() { back(); }
+        });
+    }
+
+    /** 删除已保存的公式（确认后删除；拒绝符号链接）。 */
+    private void confirmDelete(String name) {
+        this.showScreen(new Screen(DELETE_TITLE) {
+            @Override
+            protected void init() {
+                this.addRenderableWidget(Button.builder(Component.translatable("gui.yes"), b -> {
+                    try {
+                        Path file = formulaFile(name);
+                        if (!Files.isSymbolicLink(file)) Files.deleteIfExists(file);
+                    } catch (Exception ignored) {}
+                    CustomFlatScreen.this.openLoadList();
+                }).bounds(this.width / 2 - 104, this.height / 2 + 4, 100, 20).build());
+                this.addRenderableWidget(Button.builder(Component.translatable("gui.no"),
+                        b -> CustomFlatScreen.this.openLoadList())
+                        .bounds(this.width / 2 + 4, this.height / 2 + 4, 100, 20).build());
+            }
+
+            //? >=26.1 {
+            @Override
+            public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float pt) {
+                super.extractRenderState(g, mx, my, pt);
+                GuiCompat.of(g).centered(this.font,
+                        Component.translatable("ohmyworld.custom_screen.delete_confirm", name),
+                        this.width / 2, this.height / 2 - 24, 0xFFFFAA00);
+            }
+            //?} else {
+            @Override
+            public void render(GuiGraphics g, int mx, int my, float pt) {
+                super.render(g, mx, my, pt);
+                GuiCompat.of(g).centered(this.font,
+                        Component.translatable("ohmyworld.custom_screen.delete_confirm", name),
+                        this.width / 2, this.height / 2 - 24, 0xFFFFAA00);
+            }
+            //?}
+
+            @Override
+            public void onClose() { CustomFlatScreen.this.openLoadList(); }
+        });
+    }
+
     private void loadFormula(String name) {
         try {
-            Path file = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld")
-                    .resolve(sanitizeFileName(name) + ".txt");
+            Path file = formulaFile(name);
             if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
                     || Files.size(file) > FormulaParser.MAX_INPUT_LENGTH) return;
             String content = Files.readString(file);
@@ -438,6 +593,16 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     private void onCancel() { this.showScreen(this.parent); }
+
+    /** 打开全屏公式编辑器（完成后经 {@link #setPendingFormula} 写回）。 */
+    private void openFullscreen() {
+        this.showScreen(new FullFormulaScreen(this, this.formulaBox.value()));
+    }
+
+    /** 全屏编辑器的「完成」写回入口：写入后来源界面 init 时会重新读取并校验。 */
+    void setPendingFormula(String text) {
+        this.pendingFormula = text;
+    }
 
     private static void writeFormulaAtomically(Path target, String formula) throws Exception {
         if (Files.isSymbolicLink(target)) throw new IllegalStateException("symbolic-link target");
@@ -625,8 +790,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }
     }
 
-    /** 「已识别 N 个维度 · 主世界 12 层 · 下界 5 层」。 */
-    private static Component summaryLine(FormulaParser.DimensionParseResult result) {
+    /** 「已识别 N 个维度 · 主世界 12 层 · 下界 5 层」（主界面与全屏编辑共用）。 */
+    static Component summaryLine(FormulaParser.DimensionParseResult result) {
         List<String> parts = new ArrayList<>();
         // Map.copyOf 不保证顺序：按固定维度顺序展示
         for (String dim : List.of(FormulaParser.DIM_OVERWORLD, FormulaParser.DIM_NETHER, FormulaParser.DIM_END)) {
