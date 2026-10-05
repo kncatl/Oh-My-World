@@ -14,6 +14,7 @@
 - **Formula Generator** world type in the Create World screen
 - **Expression engine** with 25 built-in functions: arithmetic, trigonometry (`sin`, `cos`, `tan`), integer math (`floordiv`, `floormod`), pseudo-random (`rand`, `randexcept`), seed hashing (`seedhash`)
 - **Multi-dimension formulas** — customise the Nether and the End with `{overworld=...}{the_nether=...}{the_end=...}` sections; dimensions you do not write stay vanilla, and a dimension can reuse another one's formula (`{the_end=overworld}`)
+- **Dimension directives** — each dimension's formula may start with `[structure:...]` (all/none/whitelist/blacklist), `[biome:...]` (vanilla biome distribution or a single fixed biome) and `[features:...]` (decoration feature switch); all optional, and omitting them keeps the old behaviour exactly
 - **World-seed driven patterns** — `seed` and `seedhash(...)` let the same formula produce different terrain in different worlds
 - **Vanilla Overworld option** — a formula without an `overworld` section creates a normal vanilla Overworld, with formulas only in the dimensions you wrote
 - **Cyclic layer patterns** — define repeating sequences within a y-range

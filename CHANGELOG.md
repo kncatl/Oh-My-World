@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.1-beta.1
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Dimension directives**: each dimension's formula content may start with optional `[structure:...]`, `[biome:...]` and `[features:...]` directives (any order, all optional; omitting them keeps the old behaviour exactly).
+- **Structure control `[structure:all|none|only=a,b|except=a,b]`**: per-dimension on/off/whitelist/blacklist for natural structures. Entries may be structure set names (`villages`, `strongholds`, `mineshafts`, `nether_complexes`, `end_cities`, ...) or individual structure names (`village_plains`, `fortress`, ...), mixed freely; custom/modded structures use `namespace:name`. Worlds newly created with this version have all structures on by default (the preset's structure override list is gone); for older worlds the list is baked into the save, so `[structure:...]` can only remove, not add. `/locate` and eyes of ender still use the vanilla theoretical positions.
+- **Biome control `[biome:vanilla|<biome id>]`**: `vanilla` uses that dimension's vanilla biome distribution (the Nether/End already do); `[biome:minecraft:desert]` etc. fixes the whole dimension to one biome. Biomes are distributed by coordinate, independent of your terrain; biome-specific structures, mob spawning, weather and water colour follow them, and decoration features (trees, flowers, ores, ...) generate with the new biomes as usual (the flat Overworld base grows vanilla vegetation too once its biomes change); only newly generated chunks are affected (existing chunks keep their biomes).
+- **Decoration feature switch `[features:all|none]`**: per-dimension on/off for biome decoration features (trees, flowers, ores, glowstone, basalt patches and columns, ...; on/off only, not per-feature). Default `all`: with a `[biome:...]` rule decoration follows the new biomes; without one each dimension keeps its natural behaviour (Nether/End keep theirs, the flat Overworld base has no decoration anyway). `none` disables all decoration.
+
+### Compatibility
+- Formulas without directives behave exactly as before; `rand`/`randexcept` are unchanged.
+- Directives are stored together with the formula in the world marker and in `config/ohmyworld.json`; both the server_mode path and the create-world path support them.
+- Biome/feature swapping happens at runtime and is not written to the save — on existing worlds, enable server_mode and put a directive-carrying formula in the config.
+
 ## v1.2.0-beta.1
 
 > Beta release — please report any issue on GitHub.
