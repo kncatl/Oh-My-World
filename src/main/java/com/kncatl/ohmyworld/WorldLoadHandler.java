@@ -9,6 +9,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
 
+import com.kncatl.ohmyworld.compat.ResourceIds;
 import com.kncatl.ohmyworld.platform.Platform;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
@@ -43,6 +44,7 @@ public final class WorldLoadHandler {
             // 主世界额外覆写 marker，保证之后关闭 server_mode 时世界恢复的是配置公式。
             PatternData.bindGenerator(dimension, generator);
             if (dimension == Level.OVERWORLD) PatternData.markActive(sl, true);
+            logDecision(sl, "server_mode", generator);
             return;
         }
 
@@ -59,12 +61,14 @@ public final class WorldLoadHandler {
             }
             PatternData.clearPending();
             PatternData.bindGenerator(dimension, generator);
+            logDecision(sl, "created", generator);
             return;
         }
 
         if (PatternData.restoreFromMarker(sl)) {
             // 已有世界 + marker = 本模组世界：按该维度是否写了公式决定是否接管
             PatternData.bindGenerator(dimension, generator);
+            logDecision(sl, "marker", generator);
             return;
         }
 
@@ -73,11 +77,14 @@ public final class WorldLoadHandler {
             PatternData.markActive(sl);
             PatternData.clearPending();
             PatternData.bindGenerator(dimension, generator);
+            logDecision(sl, "pending", generator);
             return;
         }
 
         // 不是本模组的世界（无 marker、无 pending）：不接管任何维度
         PatternData.clearGenerator(generator);
+        LOGGER.debug("ohmyworld: level {} ignored (no marker); generator={}",
+                ResourceIds.keyId(dimension), generator.getClass().getSimpleName());
         if (dimension == Level.OVERWORLD && generator instanceof FlatLevelSource) {
             // 超平坦世界但没有公式 marker：无 UI 的专用服务器无法写入 marker，
             // 需要在 config/ohmyworld.json 开启 server_mode
@@ -85,6 +92,13 @@ public final class WorldLoadHandler {
                     + "on dedicated servers enable server_mode in config/ohmyworld.json to apply a formula",
                     sl.getServer().getWorldData().getLevelName());
         }
+    }
+
+    /** 调试/支持用：记录某个维度加载时“是否被公式接管”的决定。 */
+    private static void logDecision(ServerLevel sl, String source, ChunkGenerator generator) {
+        LOGGER.info("ohmyworld: level {} ({}) generator={}, formula for this dimension={}, bound={}",
+                ResourceIds.keyId(sl.dimension()), source, generator.getClass().getSimpleName(),
+                PatternData.hasFormulaFor(sl.dimension()), PatternData.snapshotFor(generator) != null);
     }
 
     /** 运行中热加载：server_mode 下每 5 秒检查一次配置文件，变化时立即应用新公式。 */

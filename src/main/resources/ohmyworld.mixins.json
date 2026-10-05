@@ -3,6 +3,6 @@
     "package": "com.kncatl.ohmyworld.mixin",
     "compatibilityLevel": "JAVA_21",
     "mixins": ["MixinFlatLevelSource", "MixinNoiseBasedChunkGenerator"],
-    "client": ["MixinWorldOpenFlows"],
+    "client": ["MixinWorldOpenFlows", "MixinCreateWorldScreen"],
     "server": []
 }

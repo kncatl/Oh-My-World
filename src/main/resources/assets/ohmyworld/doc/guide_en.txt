@@ -77,6 +77,9 @@ Default preset:
   * The new syntax (sections / seed) is a parse error on older mod
     versions (the pattern is disabled): worlds created with a newer version
     are not meant to be opened with an older one.
+  * "Formula Generator" worlds created before v1.2.0 have no Nether/End
+    dimensions (a long-standing bug, portals do nothing): upgrading does not
+    add them to existing worlds; create a new world to get them.
 
 
 2. Variables

@@ -226,7 +226,9 @@ public class PatternData {
             Path marker = markerPath(level);
             if (overwrite || !Files.exists(marker)) {
                 Files.createDirectories(marker.getParent());
-                writeAtomically(marker, getRawInput());
+                String raw = getRawInput();
+                writeAtomically(marker, raw);
+                LOGGER.info("ohmyworld: wrote formula marker ({} chars)", raw.length());
             }
         } catch (Exception e) {
             LOGGER.warn("markActive failed", e);
@@ -258,6 +260,8 @@ public class PatternData {
                     }
                     if (!setDimensions(result, raw)) return false;
                     pending = false;
+                    LOGGER.info("ohmyworld: restored formula from marker ({} dimension(s))",
+                            result.dimensions().size());
                     return true;
                 }
             }
