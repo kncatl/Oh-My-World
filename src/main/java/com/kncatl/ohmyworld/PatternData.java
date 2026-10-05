@@ -13,11 +13,13 @@ import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.levelgen.FlatLevelSource;
+import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 import com.kncatl.ohmyworld.compat.ChunkWrites;
@@ -34,7 +36,19 @@ public class PatternData {
     private static volatile PatternSnapshot currentSnapshot;
     private static final AtomicLong SNAPSHOT_VERSION = new AtomicLong();
     private static final Map<HeightKey, Integer> HEIGHT_CACHE = new LinkedHashMap<>(256, 0.75f, true);
-    private static final Map<FlatLevelSource, PatternSnapshot> GENERATOR_PATTERNS = new WeakHashMap<>();
+
+    /**
+     * 生成器 → 公式绑定。binding 里带上了维度键：P3 起热加载会按维度重新解析公式，
+     * 非主世界的公式接管也依赖它。WeakHashMap：生成器被回收后绑定自动消失。
+     */
+    private static final Map<ChunkGenerator, GeneratorBinding> GENERATOR_PATTERNS = new WeakHashMap<>();
+
+    /** 绑定表是否非空；未绑定任何生成器时让 {@link #snapshotFor} 走零开销快路径。 */
+    private static volatile boolean anyGeneratorBound;
+
+    /** 一条绑定：该生成器属于哪个维度、生效哪份公式。 */
+    public record GeneratorBinding(ResourceKey<Level> dimension, PatternSnapshot snapshot) {}
+
     private static volatile boolean active;
     private static volatile boolean pending;
     /** 客户端刚通过创建界面新建了世界（createFreshLevel 已触发且选中 flat_plus） */
@@ -84,11 +98,16 @@ public class PatternData {
 
     public static void clearActive() { active = false; }
 
-    /** 将当前快照绑定到具体 FlatLevelSource，避免不同维度的 generator 互相污染。 */
-    public static void bindGenerator(FlatLevelSource generator) {
+    /**
+     * 将当前快照绑定到具体生成器（同时记录所属维度），避免不同维度的 generator
+     * 互相污染。P2 起绑定表对任何生成器类型通用（超平坦或噪声）；
+     * 没有分节语法之前，调用方只会绑定主世界的超平坦生成器。
+     */
+    public static void bindGenerator(ResourceKey<Level> dimension, ChunkGenerator generator) {
         if (generator == null || !active) return;
         synchronized (GENERATOR_PATTERNS) {
-            GENERATOR_PATTERNS.put(generator, snapshot());
+            GENERATOR_PATTERNS.put(generator, new GeneratorBinding(dimension, snapshot()));
+            anyGeneratorBound = true;
         }
     }
 
@@ -96,26 +115,32 @@ public class PatternData {
         if (!active) return;
         PatternSnapshot snapshot = snapshot();
         synchronized (GENERATOR_PATTERNS) {
-            GENERATOR_PATTERNS.replaceAll((generator, ignored) -> snapshot);
+            GENERATOR_PATTERNS.replaceAll((generator, binding) ->
+                    new GeneratorBinding(binding.dimension(), snapshot));
+            anyGeneratorBound = !GENERATOR_PATTERNS.isEmpty();
         }
     }
 
-    public static PatternSnapshot snapshotFor(FlatLevelSource generator) {
+    public static PatternSnapshot snapshotFor(ChunkGenerator generator) {
+        if (!anyGeneratorBound) return null;
         synchronized (GENERATOR_PATTERNS) {
-            return GENERATOR_PATTERNS.get(generator);
+            GeneratorBinding binding = GENERATOR_PATTERNS.get(generator);
+            return binding == null ? null : binding.snapshot();
         }
     }
 
-    public static void clearGenerator(FlatLevelSource generator) {
+    public static void clearGenerator(ChunkGenerator generator) {
         if (generator == null) return;
         synchronized (GENERATOR_PATTERNS) {
             GENERATOR_PATTERNS.remove(generator);
+            anyGeneratorBound = !GENERATOR_PATTERNS.isEmpty();
         }
     }
 
     public static void clearAllGenerators() {
         synchronized (GENERATOR_PATTERNS) {
             GENERATOR_PATTERNS.clear();
+            anyGeneratorBound = false;
         }
     }
 

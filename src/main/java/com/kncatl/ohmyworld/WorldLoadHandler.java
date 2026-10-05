@@ -28,7 +28,7 @@ public final class WorldLoadHandler {
 
         // 每次世界加载时重新读取配置文件
         OhMyWorldConfig config = OhMyWorldConfig.reload();
-        FlatLevelSource generator = sl.getChunkSource().getGenerator() instanceof FlatLevelSource flat ? flat : null;
+        FlatLevelSource flatGenerator = sl.getChunkSource().getGenerator() instanceof FlatLevelSource flat ? flat : null;
 
         if (config.serverMode()) {
             if (!applyConfigFormula(config)) {
@@ -36,13 +36,18 @@ public final class WorldLoadHandler {
                 PatternData.clearAllGenerators();
                 return;
             }
-            if (generator != null) PatternData.bindGenerator(generator);
+            // server_mode 的配置公式语义上属于主世界：目前只绑定超平坦生成器。
+            // P3 起配置支持分节语法，届时按维度各自绑定。
+            if (flatGenerator != null) PatternData.bindGenerator(sl.dimension(), flatGenerator);
             // server_mode 下强制覆写主世界 marker，保证之后关闭 server_mode 时世界恢复的是配置公式
             if (sl.dimension() == Level.OVERWORLD) PatternData.markActive(sl, true);
             return;
         }
 
-        if (generator == null) return;
+        // 只有主世界的超平坦生成器参与 marker/created/pending 状态机。下界/末地
+        // （以及其它世界）都从这里直接返回、零开销；P3 的分节语法会为其它维度
+        // 引入"按维度查公式"的接管路径（绑定表本身已支持任意生成器）。
+        if (flatGenerator == null) return;
 
         // 客户端刚通过创建界面以 flat_plus 预设新建的世界：写入/恢复 marker。
         // （created 仅在 createFreshLevel 且 flat_plus 选中时置位；
@@ -52,16 +57,16 @@ public final class WorldLoadHandler {
             if (!PatternData.restoreFromMarker(sl)) {
                 PatternData.markActive(sl);
             }
-            PatternData.bindGenerator(generator);
+            PatternData.bindGenerator(sl.dimension(), flatGenerator);
             return;
         }
 
         if (!PatternData.restoreFromMarker(sl)) {
             if (PatternData.isPending()) {
                 PatternData.markActive(sl);
-                PatternData.bindGenerator(generator);
+                PatternData.bindGenerator(sl.dimension(), flatGenerator);
             } else {
-                PatternData.clearGenerator(generator);
+                PatternData.clearGenerator(flatGenerator);
                 if (sl.getChunkSource().getGenerator() instanceof FlatLevelSource) {
                     // 超平坦世界但没有公式 marker：无 UI 的专用服务器无法写入 marker，
                     // 需要在 config/ohmyworld.json 开启 server_mode
@@ -71,7 +76,7 @@ public final class WorldLoadHandler {
                 }
             }
         } else {
-            PatternData.bindGenerator(generator);
+            PatternData.bindGenerator(sl.dimension(), flatGenerator);
         }
         PatternData.clearPending();
     }
