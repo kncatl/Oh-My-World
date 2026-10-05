@@ -73,7 +73,7 @@ class FormulaParserTest {
         assertTrue(result.sectioned(), result.errors().toString());
         assertTrue(result.errors().isEmpty(), result.errors().toString());
         assertEquals(List.of(FormulaParser.DIM_OVERWORLD), List.copyOf(result.dimensions().keySet()));
-        assertEquals(1, result.dimensions().get(FormulaParser.DIM_OVERWORLD).size());
+        assertEquals(1, result.dimensions().get(FormulaParser.DIM_OVERWORLD).layers().size());
     }
 
     /** 名称：简写（nether/end）与 minecraft: 前缀都归一到规范名。 */
@@ -173,6 +173,121 @@ class FormulaParserTest {
                 "{overworld=y=0: { let a = 1; a > 0 ? rand() : rand() }}");
         assertTrue(result.errors().isEmpty(), result.errors().toString());
         assertEquals(1, result.dimensions().size());
-        assertEquals(1, result.dimensions().get(FormulaParser.DIM_OVERWORLD).size());
+        assertEquals(1, result.dimensions().get(FormulaParser.DIM_OVERWORLD).layers().size());
+    }
+
+    // ── 维度指令（P4：[structure:...] / [biome:...]） ─────────────────────────
+
+    /** 结构指令：none / only / except / all 解析，名称规范化（去 minecraft: 前缀）。 */
+    @Test
+    void structureDirectivesParse() {
+        FormulaParser.DimensionParseResult none = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=[structure:none] y=0: rand()}");
+        assertTrue(none.errors().isEmpty(), none.errors().toString());
+        assertSame(DimensionRules.StructureRule.Mode.NONE,
+                none.dimensions().get(FormulaParser.DIM_NETHER).structure().mode());
+
+        FormulaParser.DimensionParseResult only = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:only=minecraft:villages,strongholds] y=0: rand()}");
+        assertTrue(only.errors().isEmpty(), only.errors().toString());
+        DimensionRules.StructureRule rule = only.dimensions().get(FormulaParser.DIM_OVERWORLD).structure();
+        assertEquals(DimensionRules.StructureRule.Mode.ONLY, rule.mode());
+        assertEquals(List.of("villages", "strongholds"), rule.names());
+
+        FormulaParser.DimensionParseResult except = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:except=mineshafts] y=0: rand()}");
+        assertTrue(except.errors().isEmpty(), except.errors().toString());
+        assertSame(DimensionRules.StructureRule.Mode.EXCEPT,
+                except.dimensions().get(FormulaParser.DIM_OVERWORLD).structure().mode());
+
+        FormulaParser.DimensionParseResult all = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:all] y=0: rand()}");
+        assertTrue(all.errors().isEmpty(), all.errors().toString());
+        assertTrue(all.dimensions().get(FormulaParser.DIM_OVERWORLD).structure().isDefault());
+    }
+
+    /** 结构规则匹配：组名与成员名都能命中；ONLY / EXCEPT / ALL / NONE 语义。 */
+    @Test
+    void structureRuleMatching() {
+        DimensionRules.StructureRule onlySet = new DimensionRules.StructureRule(
+                DimensionRules.StructureRule.Mode.ONLY, List.of("villages"));
+        assertTrue(onlySet.allows("villages", List.of("village_plains")));
+        assertFalse(onlySet.allows("mineshafts", List.of("mineshaft")));
+
+        DimensionRules.StructureRule onlyMember = new DimensionRules.StructureRule(
+                DimensionRules.StructureRule.Mode.ONLY, List.of("village_plains"));
+        assertTrue(onlyMember.allows("villages", List.of("village_plains")));
+        assertFalse(onlyMember.allows("mineshafts", List.of("mineshaft")));
+
+        DimensionRules.StructureRule except = new DimensionRules.StructureRule(
+                DimensionRules.StructureRule.Mode.EXCEPT, List.of("strongholds"));
+        assertFalse(except.allows("strongholds", List.of("stronghold")));
+        assertTrue(except.allows("villages", List.of("village_plains")));
+
+        assertTrue(DimensionRules.StructureRule.ALL.allows("strongholds", List.of("stronghold")));
+        assertFalse(new DimensionRules.StructureRule(
+                DimensionRules.StructureRule.Mode.NONE, List.of()).allows("villages", List.of()));
+    }
+
+    /** 结构指令错误：未知名（无命名空间）/ 自定义命名空间放行 / 重复指令 / 空名单。 */
+    @Test
+    void structureDirectiveErrors() {
+        FormulaParser.DimensionParseResult unknown = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:only=village] y=0: rand()}");
+        assertTrue(unknown.errors().stream().anyMatch(e -> e.contains("unknown structure")),
+                unknown.errors().toString());
+
+        FormulaParser.DimensionParseResult custom = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:only=mymod:tower] y=0: rand()}");
+        assertTrue(custom.errors().isEmpty(), custom.errors().toString());
+
+        FormulaParser.DimensionParseResult duplicate = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:all][structure:none] y=0: rand()}");
+        assertTrue(duplicate.errors().stream().anyMatch(e -> e.contains("duplicate structure directive")),
+                duplicate.errors().toString());
+
+        FormulaParser.DimensionParseResult empty = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:only=] y=0: rand()}");
+        assertTrue(empty.errors().stream().anyMatch(e -> e.contains("empty name in structure list")),
+                empty.errors().toString());
+    }
+
+    /** 群系指令：vanilla / 单群系 / 未知群系 / 未知指令。 */
+    @Test
+    void biomeDirectivesParse() {
+        FormulaParser.DimensionParseResult vanilla = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:vanilla] y=0: rand()}");
+        assertTrue(vanilla.errors().isEmpty(), vanilla.errors().toString());
+        assertTrue(vanilla.dimensions().get(FormulaParser.DIM_OVERWORLD).biome().vanilla());
+
+        FormulaParser.DimensionParseResult single = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:minecraft:desert] y=0: rand()}");
+        assertTrue(single.errors().isEmpty(), single.errors().toString());
+        assertEquals("desert", single.dimensions().get(FormulaParser.DIM_OVERWORLD).biome().singleBiomeId());
+
+        FormulaParser.DimensionParseResult unknown = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:not_a_biome] y=0: rand()}");
+        assertTrue(unknown.errors().stream().anyMatch(e -> e.contains("unknown biome")),
+                unknown.errors().toString());
+
+        FormulaParser.DimensionParseResult badDirective = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[foo:bar] y=0: rand()}");
+        assertTrue(badDirective.errors().stream().anyMatch(e -> e.contains("unknown directive")),
+                badDirective.errors().toString());
+    }
+
+    /** 指令与别名共存：别名共享目标的指令与层表。 */
+    @Test
+    void directivesCombineWithAliases() {
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[structure:only=villages] [biome:vanilla] y=0: { let a = 1; a > 0 ? rand() : rand() }}"
+                        + "{the_end=overworld}");
+        assertTrue(result.errors().isEmpty(), result.errors().toString());
+        assertEquals(2, result.dimensions().size());
+        assertSame(result.dimensions().get(FormulaParser.DIM_OVERWORLD),
+                result.dimensions().get(FormulaParser.DIM_END));
+        assertSame(DimensionRules.StructureRule.Mode.ONLY,
+                result.dimensions().get(FormulaParser.DIM_END).structure().mode());
+        assertTrue(result.dimensions().get(FormulaParser.DIM_END).biome().vanilla());
     }
 }

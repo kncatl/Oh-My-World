@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.kncatl.ohmyworld.expr.BlockResolver;
 import com.kncatl.ohmyworld.expr.ExprCompiler;
@@ -28,12 +29,54 @@ public class FormulaParser {
     public static final String DIM_NETHER = "the_nether";
     public static final String DIM_END = "the_end";
 
+    /** 解析出的单个维度：层表 + 可选指令（别名与目标共享同一实例）。 */
+    public record ParsedDimension(List<Object> layers, DimensionRules.StructureRule structure,
+                                  DimensionRules.BiomeRule biome) {}
+
     /**
-     * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的层表
-     * （别名与目标共享同一个列表实例）；{@code sectioned} 表示输入是否用了 {} 分节语法。
+     * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
+     * {@link ParsedDimension}（别名与目标共享同一个实例）；{@code sectioned}
+     * 表示输入是否用了 {} 分节语法。
      */
-    public record DimensionParseResult(Map<String, List<Object>> dimensions, List<String> errors,
+    public record DimensionParseResult(Map<String, ParsedDimension> dimensions, List<String> errors,
                                        boolean sectioned) {}
+
+    /**
+     * 指令里可写的原版名称（无命名空间时校验；跨版本并集，26.3 新增项在旧版本上不会命中）。
+     * 含自定义命名空间（如 {@code mymod:xxx}）的名称直接放行，供数据包/模组结构使用。
+     */
+    private static final Set<String> KNOWN_STRUCTURE_NAMES = Set.of(
+            "abandoned_camp", "abandoned_camp_bamboo_jungle", "abandoned_camp_birch_forest",
+            "abandoned_camp_cherry_grove", "abandoned_camp_dappled_forest", "abandoned_camp_flower_forest",
+            "abandoned_camp_forest", "abandoned_camp_meadow", "abandoned_camp_old_growth_birch_forest",
+            "abandoned_camp_old_growth_pine_taiga", "abandoned_camp_old_growth_spruce_taiga",
+            "abandoned_camp_pale_garden", "abandoned_camp_savanna", "abandoned_camp_snowy_taiga",
+            "abandoned_camp_sparse_jungle", "abandoned_camp_swamp", "abandoned_camp_taiga",
+            "abandoned_camp_windswept_forest", "abandoned_camp_wooded_badlands", "ancient_cities",
+            "ancient_city", "bastion_remnant", "buried_treasure", "buried_treasures", "desert_pyramid",
+            "desert_pyramids", "end_cities", "end_city", "fortress", "igloo", "igloos", "jungle_pyramid",
+            "jungle_temples", "mansion", "mineshaft", "mineshaft_mesa", "mineshafts", "monument",
+            "nether_complexes", "nether_fossil", "nether_fossils", "ocean_monuments", "ocean_ruin_cold",
+            "ocean_ruin_warm", "ocean_ruins", "pillager_outpost", "pillager_outposts", "ruined_portal",
+            "ruined_portal_desert", "ruined_portal_jungle", "ruined_portal_mountain", "ruined_portal_nether",
+            "ruined_portal_ocean", "ruined_portal_swamp", "ruined_portals", "shipwreck", "shipwreck_beached",
+            "shipwrecks", "stronghold", "strongholds", "swamp_hut", "swamp_huts", "trail_ruins",
+            "trial_chambers", "village_desert", "village_plains", "village_savanna", "village_snowy",
+            "village_taiga", "villages", "woodland_mansions");
+
+    private static final Set<String> KNOWN_BIOME_NAMES = Set.of(
+            "badlands", "bamboo_jungle", "basalt_deltas", "beach", "birch_forest", "cherry_grove",
+            "cold_ocean", "crimson_forest", "dappled_forest", "dark_forest", "deep_cold_ocean", "deep_dark",
+            "deep_frozen_ocean", "deep_lukewarm_ocean", "deep_ocean", "desert", "dripstone_caves",
+            "end_barrens", "end_highlands", "end_midlands", "eroded_badlands", "flower_forest", "forest",
+            "frozen_ocean", "frozen_peaks", "frozen_river", "grove", "ice_spikes", "jagged_peaks", "jungle",
+            "lukewarm_ocean", "lush_caves", "mangrove_swamp", "meadow", "mushroom_fields", "nether_wastes",
+            "ocean", "old_growth_birch_forest", "old_growth_pine_taiga", "old_growth_spruce_taiga",
+            "pale_garden", "plains", "river", "savanna", "savanna_plateau", "small_end_islands",
+            "snowy_beach", "snowy_plains", "snowy_slopes", "snowy_taiga", "soul_sand_valley",
+            "sparse_jungle", "stony_peaks", "stony_shore", "sulfur_caves", "sunflower_plains", "swamp",
+            "taiga", "the_end", "warm_ocean", "warped_forest", "windswept_forest",
+            "windswept_gravelly_hills", "windswept_hills", "windswept_savanna", "wooded_badlands");
 
     public static ParseResult parseWithErrors(String input) {
         if (input == null || input.isBlank()) return invalid("Formula is empty");
@@ -62,16 +105,17 @@ public class FormulaParser {
         if (cleaned.trim().startsWith("{")) return parseSections(cleaned.trim());
 
         ParseResult result = parseLayers(cleaned);
-        Map<String, List<Object>> dimensions = new LinkedHashMap<>();
+        Map<String, ParsedDimension> dimensions = new LinkedHashMap<>();
         if (result.errors().isEmpty() && !result.layers().isEmpty()) {
-            dimensions.put(DIM_OVERWORLD, result.layers());
+            dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
+                    DimensionRules.StructureRule.ALL, null));
         }
         return new DimensionParseResult(Map.copyOf(dimensions), result.errors(), false);
     }
 
     /** 分节语法：{dim=...}{dim=...}；节间允许空白或 ';'，节内容=层语法或维度别名。 */
     private static DimensionParseResult parseSections(String input) {
-        Map<String, List<Object>> dimensions = new LinkedHashMap<>();
+        Map<String, ParsedDimension> dimensions = new LinkedHashMap<>();
         Map<String, String> aliases = new LinkedHashMap<>();
         List<String> errors = new ArrayList<>();
         int pos = 0;
@@ -114,8 +158,8 @@ public class FormulaParser {
         return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), true);
     }
 
-    /** 解析单个 {名称=内容} 节：内容是维度名 → 别名；否则按层语法解析（错误带维度前缀）。 */
-    private static void parseSection(String body, Map<String, List<Object>> dimensions,
+    /** 解析单个 {名称=内容} 节：内容是维度名 → 别名；否则解析可选指令 + 层语法（错误带维度前缀）。 */
+    private static void parseSection(String body, Map<String, ParsedDimension> dimensions,
                                      Map<String, String> aliases, List<String> errors) {
         int eq = body.indexOf('=');
         if (eq < 0) {
@@ -149,18 +193,122 @@ public class FormulaParser {
             return;
         }
 
-        ParseResult result = parseLayers(content);
+        // 可选指令：[structure:...] / [biome:...]，可各出现一次、顺序任意，之后必须是层语法。
+        DimensionRules.StructureRule structure = DimensionRules.StructureRule.ALL;
+        DimensionRules.BiomeRule biome = null;
+        boolean structureSeen = false;
+        boolean biomeSeen = false;
+        int pos = 0;
+        while (true) {
+            while (pos < content.length() && Character.isWhitespace(content.charAt(pos))) pos++;
+            if (pos >= content.length() || content.charAt(pos) != '[') break;
+            int close = content.indexOf(']', pos + 1);
+            if (close < 0) {
+                errors.add(name + ": unbalanced '[' in directive");
+                return;
+            }
+            String directive = content.substring(pos + 1, close).trim();
+            pos = close + 1;
+            if (directive.startsWith("structure:")) {
+                if (structureSeen) {
+                    errors.add(name + ": duplicate structure directive");
+                    return;
+                }
+                structureSeen = true;
+                structure = parseStructureDirective(directive.substring("structure:".length()), name, errors);
+                if (structure == null) return;
+            } else if (directive.startsWith("biome:")) {
+                if (biomeSeen) {
+                    errors.add(name + ": duplicate biome directive");
+                    return;
+                }
+                biomeSeen = true;
+                biome = parseBiomeDirective(directive.substring("biome:".length()), name, errors);
+                if (biome == null) return;
+            } else {
+                errors.add(name + ": unknown directive [" + truncate(directive)
+                        + "] (available: structure, biome)");
+                return;
+            }
+        }
+
+        String layerText = content.substring(pos).trim();
+        if (layerText.isEmpty()) {
+            errors.add(name + ": dimension section is empty");
+            return;
+        }
+        ParseResult result = parseLayers(layerText);
         for (String error : result.errors()) errors.add(name + ": " + error);
         if (result.errors().isEmpty() && !result.layers().isEmpty()) {
-            dimensions.put(name, result.layers());
+            dimensions.put(name, new ParsedDimension(result.layers(), structure, biome));
         }
+    }
+
+    /** [structure:all|none|only=a,b|except=a,b]。 */
+    private static DimensionRules.StructureRule parseStructureDirective(String arg, String dimension,
+                                                                        List<String> errors) {
+        String a = arg.trim();
+        if (a.equals("all")) return DimensionRules.StructureRule.ALL;
+        if (a.equals("none")) {
+            return new DimensionRules.StructureRule(DimensionRules.StructureRule.Mode.NONE, List.of());
+        }
+        DimensionRules.StructureRule.Mode mode;
+        String listPart;
+        if (a.startsWith("only=")) {
+            mode = DimensionRules.StructureRule.Mode.ONLY;
+            listPart = a.substring("only=".length());
+        } else if (a.startsWith("except=")) {
+            mode = DimensionRules.StructureRule.Mode.EXCEPT;
+            listPart = a.substring("except=".length());
+        } else {
+            errors.add(dimension + ": invalid structure mode \"" + truncate(a)
+                    + "\" (use all|none|only=a,b|except=a,b)");
+            return null;
+        }
+        List<String> names = new ArrayList<>();
+        for (String raw : listPart.split(",", -1)) {
+            String entry = raw.trim();
+            if (entry.isEmpty()) {
+                errors.add(dimension + ": empty name in structure list");
+                return null;
+            }
+            String normalized = DimensionRules.normalizeName(entry);
+            if (!normalized.contains(":") && !KNOWN_STRUCTURE_NAMES.contains(normalized)) {
+                errors.add(dimension + ": unknown structure or structure set \"" + entry
+                        + "\" (see the guide for available names)");
+                return null;
+            }
+            names.add(normalized);
+        }
+        if (names.isEmpty()) {
+            errors.add(dimension + ": empty structure list");
+            return null;
+        }
+        return new DimensionRules.StructureRule(mode, List.copyOf(names));
+    }
+
+    /** [biome:vanilla|&lt;群系id&gt;]。 */
+    private static DimensionRules.BiomeRule parseBiomeDirective(String arg, String dimension,
+                                                                List<String> errors) {
+        String a = arg.trim();
+        if (a.isEmpty()) {
+            errors.add(dimension + ": empty biome directive");
+            return null;
+        }
+        if (a.equals("vanilla")) return DimensionRules.BiomeRule.VANILLA;
+        String normalized = DimensionRules.normalizeName(a);
+        if (!normalized.contains(":") && !KNOWN_BIOME_NAMES.contains(normalized)) {
+            errors.add(dimension + ": unknown biome \"" + a + "\" (see the guide for available names)");
+            return null;
+        }
+        return DimensionRules.BiomeRule.single(normalized);
     }
 
     /**
      * 解析别名：目标必须在本输入里显式有公式（链式别名允许；环路/自引用报错）。
      * 成功时别名与目标共享同一个层表实例（各维度仍用自己的高度范围与 ly 语义）。
      */
-    private static void resolveAliases(Map<String, List<Object>> dimensions, Map<String, String> aliases,
+    private static void resolveAliases(Map<String, ParsedDimension> dimensions, Map<String, String> aliases,
                                        List<String> errors) {
         for (Map.Entry<String, String> entry : aliases.entrySet()) {
             String dimension = entry.getKey();
@@ -173,7 +321,7 @@ public class FormulaParser {
                     break;
                 }
                 chain.add(current);
-                List<Object> target = dimensions.get(current);
+                ParsedDimension target = dimensions.get(current);
                 if (target != null) {
                     dimensions.put(dimension, target);
                     break;

@@ -71,6 +71,55 @@
   · v1.2.0 之前创建的"公式化生成"世界没有下界/末地维度（旧版一直存在的问题，
     传送门无法使用）：升级不会给已有世界补上，新建世界即可获得。
 
+【结构与群系指令（可选）】
+
+  在每个维度的公式内容开头，可以写方括号指令（顺序任意、可不写）：
+
+    {the_nether=
+      [structure:none]
+      y=0..5: minecraft:netherrack;
+      y=6..120: seedhash(x, z, 1) < 0.5 ? minecraft:basalt : minecraft:blackstone
+    }
+    {overworld=
+      [structure:only=villages,strongholds] [biome:vanilla]
+      y=-64: minecraft:bedrock;
+      y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    }
+
+  ★ [structure:...] 控制该维度的自然结构生成（默认 all = 全开）：
+      [structure:all]              全开（默认，省略不写也是全开）
+      [structure:none]             全关
+      [structure:only=a,b,c]       白名单：只生成列出的结构
+      [structure:except=a,b,c]     黑名单：除列出的外都生成
+    名单里可写"结构组名"（villages、strongholds、mineshafts、nether_complexes、
+    end_cities…）或"具体结构名"（village_plains、fortress、bastion_remnant…），
+    两种写法可以混用；自定义/模组结构写 命名空间:名称（如 mymod:tower）。
+
+  ★ 结构表（原版；标 * 的为 26.3 新增，旧版本写上去也不会生成、不会报错）：
+    【主世界】villages 村庄 · strongholds 要塞 · ruined_portals 废弃传送门 ·
+      mineshafts 废弃矿井 · desert_pyramids 沙漠神殿 · jungle_temples 丛林神庙 ·
+      igloos 冰屋 · swamp_huts 沼泽小屋 · shipwrecks 沉船 · buried_treasures 埋藏的宝藏 ·
+      ocean_ruins 海底废墟 · ocean_monuments 海底神殿 · pillager_outposts 掠夺者前哨站 ·
+      woodland_mansions 林地府邸 · ancient_cities 远古城市 · trail_ruins 古迹废墟 ·
+      trial_chambers 试炼密室 · abandoned_camp 废弃营地*
+    【下界】nether_complexes 下界要塞+堡垒遗迹 · nether_fossils 下界化石 ·
+      ruined_portals 废弃传送门（下界变体）
+    【末地】end_cities 末地城
+
+  ★ [biome:...] 控制该维度的生物群系（默认保持现状：主世界平原、下界/末地原版）：
+      [biome:vanilla]          该维度使用原版群系分布（按坐标生成，与公式地形无关）
+      [biome:minecraft:desert] 整个维度固定为指定群系
+    使用 [biome:vanilla] 后，群系专属结构（沙漠神殿、丛林神庙、冰屋…）会按群系
+    自然生成；刷怪、天气、水色等也随群系变化。
+
+  ★ 注意：
+    · [structure:...] 只影响新生成的结构；/locate 与末影之眼仍按原版理论位置计算。
+    · 主世界默认群系是平原，很多结构（如沙漠神殿）需要对应群系才会生成——
+      想让它们都能出现，可以配合 [biome:vanilla]。
+    · 用本版本"新建"的世界默认全部结构开启；本版本之前创建的旧世界，其结构
+      覆盖表固化在存档里，[structure:...] 只能减少、不能增加。
+    · 指令不写就保持旧行为，旧公式不受任何影响。
+
 
 二、变量
 

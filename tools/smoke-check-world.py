@@ -63,12 +63,32 @@ DIMENSION_SMOKE_RULES = {
     },
 }
 
+# P4 结构冒烟（配合 smoke-server-config.py 的 --structure-none / --structure-only 与
+# jar-server-smoke.sh 的 16×16 区块 forceload 网格）：
+# 结构引用以结构 ID 的字符串形式保存在区块 NBT 里，直接按字节扫描即可。
+# 用废弃矿井当白名单样本（密度高、平原群系有效）。
+STRUCTURE_SMOKE_RULES = {
+    "1": {  # [structure:none]：主世界不应出现任何结构
+        "expect": {},
+        "forbid": {
+            "overworld": ("minecraft:mineshaft", "minecraft:village_plains", "minecraft:stronghold"),
+        },
+    },
+    "2": {  # [structure:only=mineshafts]：必须有废弃矿井、且没有村庄/要塞
+        "expect": {"overworld": ("minecraft:mineshaft",)},
+        "forbid": {
+            "overworld": ("minecraft:village_plains", "minecraft:stronghold"),
+        },
+    },
+}
+
 
 def parse_args(argv):
-    """返回 (server, require_all, dimension_smoke, expects, forbids)；出错返回 None。"""
+    """返回 (server, require_all, dimension_smoke, structure_smoke, expects, forbids)；出错返回 None。"""
     server = None
     require_all = False
     dimension_smoke = None
+    structure_smoke = None
     expects = {}
     forbids = {}
     i = 0
@@ -79,6 +99,9 @@ def parse_args(argv):
             i += 1
         elif arg == "--dimension-smoke" and i + 1 < len(argv):
             dimension_smoke = argv[i + 1]
+            i += 2
+        elif arg == "--structure-smoke" and i + 1 < len(argv):
+            structure_smoke = argv[i + 1]
             i += 2
         elif arg in ("--expect", "--forbid") and i + 2 < len(argv):
             target = expects if arg == "--expect" else forbids
@@ -93,7 +116,7 @@ def parse_args(argv):
         else:
             print("[smoke-check] FAIL: 多余的位置参数")
             return None
-    return server, require_all, dimension_smoke, expects, forbids
+    return server, require_all, dimension_smoke, structure_smoke, expects, forbids
 
 
 def scan(dirs, needles):
@@ -162,16 +185,17 @@ def main():
     parsed = parse_args(sys.argv[1:])
     if parsed is None:
         return 2
-    server, require_all, dimension_smoke, expects, forbids = parsed
+    server, require_all, dimension_smoke, structure_smoke, expects, forbids = parsed
     if server is None:
         print(__doc__)
         return 2
     world = Path(server) / "world"
 
-    if dimension_smoke:
-        rules = DIMENSION_SMOKE_RULES.get(dimension_smoke)
+    if dimension_smoke or structure_smoke:
+        preset = dimension_smoke if dimension_smoke else structure_smoke
+        rules = (DIMENSION_SMOKE_RULES if dimension_smoke else STRUCTURE_SMOKE_RULES).get(preset)
         if rules is None:
-            print(f"[smoke-check] FAIL: 未知分节冒烟模式 {dimension_smoke}")
+            print(f"[smoke-check] FAIL: 未知冒烟预设 {preset}")
             return 2
         merged_expects = {dim: list(blocks) for dim, blocks in rules["expect"].items()}
         merged_forbids = {dim: list(blocks) for dim, blocks in rules.get("forbid", {}).items()}

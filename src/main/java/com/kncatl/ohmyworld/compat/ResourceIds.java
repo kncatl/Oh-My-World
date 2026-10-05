@@ -41,6 +41,11 @@ public final class ResourceIds {
         //?}
     }
 
+    /** ResourceKey 的 ID 字符串（{@code namespace:path}），跨版本可用。 */
+    public static String keyIdString(ResourceKey<?> key) {
+        return keyId(key).toString();
+    }
+
     /** 两个 ResourceKey 是否指向同一个 ID。 */
     public static boolean sameKey(ResourceKey<?> a, ResourceKey<?> b) {
         return keyId(a).equals(keyId(b));

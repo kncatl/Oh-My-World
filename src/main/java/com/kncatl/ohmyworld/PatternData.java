@@ -5,6 +5,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -14,6 +15,7 @@ import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -22,9 +24,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.structure.StructureSet;
 
 import com.kncatl.ohmyworld.compat.ChunkWrites;
 import com.kncatl.ohmyworld.compat.LevelHeights;
+import com.kncatl.ohmyworld.compat.ResourceIds;
 import com.kncatl.ohmyworld.expr.ExprEvaluator;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
@@ -70,7 +74,8 @@ public class PatternData {
             FormulaParser.DIM_NETHER, Level.NETHER,
             FormulaParser.DIM_END, Level.END);
 
-    public record PatternSnapshot(List<Object> layers, String rawInput, long version) {}
+    public record PatternSnapshot(List<Object> layers, String rawInput, long version,
+                                  DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -81,15 +86,17 @@ public class PatternData {
     public static boolean setDimensions(FormulaParser.DimensionParseResult result, String rawInput) {
         if (result == null || !result.errors().isEmpty() || result.dimensions().isEmpty()) return false;
         String raw = stripNewlines(rawInput);
-        Map<List<Object>, PatternSnapshot> shared = new IdentityHashMap<>();
+        Map<FormulaParser.ParsedDimension, PatternSnapshot> shared = new IdentityHashMap<>();
         Map<ResourceKey<Level>, PatternSnapshot> table = new LinkedHashMap<>();
-        for (Map.Entry<String, List<Object>> entry : result.dimensions().entrySet()) {
+        for (Map.Entry<String, FormulaParser.ParsedDimension> entry : result.dimensions().entrySet()) {
             ResourceKey<Level> dimension = DIMENSION_KEYS.get(entry.getKey());
             if (dimension == null) continue;
-            PatternSnapshot snapshot = shared.get(entry.getValue());
+            FormulaParser.ParsedDimension parsed = entry.getValue();
+            PatternSnapshot snapshot = shared.get(parsed);
             if (snapshot == null) {
-                snapshot = new PatternSnapshot(List.copyOf(entry.getValue()), raw, SNAPSHOT_VERSION.incrementAndGet());
-                shared.put(entry.getValue(), snapshot);
+                snapshot = new PatternSnapshot(List.copyOf(parsed.layers()), raw,
+                        SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome());
+                shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
         }
@@ -130,7 +137,7 @@ public class PatternData {
         synchronized (PatternData.class) {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
-                        SNAPSHOT_VERSION.incrementAndGet());
+                        SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null);
             }
             return defaultSnapshot;
         }
@@ -178,6 +185,32 @@ public class PatternData {
             GeneratorBinding binding = GENERATOR_PATTERNS.get(generator);
             return binding == null ? null : binding.snapshot();
         }
+    }
+
+    /**
+     * 生成期结构过滤：[structure:...] 指令按“该生成器所属维度”的规则裁剪结构组。
+     * 未绑定 / 规则为 all / 旧公式（无指令）→ 原样返回（零行为变化）。
+     */
+    public static List<Holder<StructureSet>> filterStructureSets(ChunkGenerator generator,
+                                                                 List<Holder<StructureSet>> sets) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        if (snapshot == null) return sets;
+        DimensionRules.StructureRule rule = snapshot.structure();
+        if (rule == null || rule.isDefault()) return sets;
+
+        List<Holder<StructureSet>> filtered = new ArrayList<>(sets.size());
+        for (Holder<StructureSet> holder : sets) {
+            StructureSet set = holder.value();
+            String setId = holder.unwrapKey()
+                    .map(key -> DimensionRules.normalizeName(ResourceIds.keyIdString(key))).orElse("");
+            List<String> memberIds = new ArrayList<>(set.structures().size());
+            for (StructureSet.StructureSelectionEntry entry : set.structures()) {
+                entry.structure().unwrapKey().ifPresent(
+                        key -> memberIds.add(DimensionRules.normalizeName(ResourceIds.keyIdString(key))));
+            }
+            if (rule.allows(setId, memberIds)) filtered.add(holder);
+        }
+        return filtered;
     }
 
     public static void clearGenerator(ChunkGenerator generator) {

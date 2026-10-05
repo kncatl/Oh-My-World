@@ -81,6 +81,20 @@ DIMENSION_ALIAS_FORMULA = (
     "{the_end=the_nether}"
 )
 
+# P4 结构冒烟：主世界公式带 [structure:...] 指令（配合 16×16 区块 forceload 网格与
+# smoke-check-world.py --structure-smoke 的结构 ID 扫描）。
+# 用废弃矿井当白名单样本：密度高（每区块候选）、平原群系有效、区块 NBT 里能扫到
+# 结构 ID（"minecraft:mineshaft"）。
+STRUCTURE_NONE_FORMULA = (
+    "{overworld=[structure:none] "
+    "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
+)
+
+STRUCTURE_ONLY_FORMULA = (
+    "{overworld=[structure:only=mineshafts] "
+    "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -97,6 +111,8 @@ def main():
     dimension_formula = "--dimension-formula" in sys.argv
     dimension_alias = "--dimension-alias" in sys.argv
     marker_formula = "--marker-formula" in sys.argv
+    structure_none = "--structure-none" in sys.argv
+    structure_only = "--structure-only" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -115,6 +131,12 @@ def main():
                 key, _, value = line.partition("=")
                 props[key.strip()] = value.strip()
     props.update(PROPERTIES)
+    if structure_none or structure_only:
+        # 结构冒烟要真正生成结构：
+        # - 用我们自己的预设（结构覆盖表已移除 → 候选=全部结构）；
+        # - 打开结构开关（默认冒烟是关结构，避免干扰方块核验）。
+        props["level-type"] = "ohmyworld\\:flat_plus"
+        props["generate-structures"] = "true"
     props["server-port"] = str(port)
     prop_file.write_text("\n".join(f"{k}={v}" for k, v in props.items()) + "\n", encoding="utf-8")
 
@@ -124,6 +146,10 @@ def main():
         formula = DIMENSION_ALIAS_FORMULA
     elif marker_formula:
         formula = DIMENSION_FORMULA
+    elif structure_none:
+        formula = STRUCTURE_NONE_FORMULA
+    elif structure_only:
+        formula = STRUCTURE_ONLY_FORMULA
     elif seed_formula:
         formula = SEED_FORMULA
     else:
@@ -131,7 +157,7 @@ def main():
 
     config = server / "config" / "ohmyworld.json"
     wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
-                     or marker_formula or not config.exists())
+                     or marker_formula or structure_none or structure_only or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；
         # 只有作者手写/巨构公式才原样保留。
@@ -160,6 +186,10 @@ def main():
         label = "使用分节冒烟公式（1：overworld+the_nether，末地缺失）"
     elif dimension_alias:
         label = "使用分节冒烟公式（2：无 overworld + the_end 别名）"
+    elif structure_none:
+        label = "使用结构冒烟公式（下界 [structure:none]）"
+    elif structure_only:
+        label = "使用结构冒烟公式（下界 [structure:only=nether_fossils]）"
     elif seed_formula:
         label = "使用种子专项冒烟公式"
     elif wrote_formula:

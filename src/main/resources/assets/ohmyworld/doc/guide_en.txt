@@ -81,6 +81,63 @@ Default preset:
     dimensions (a long-standing bug, portals do nothing): upgrading does not
     add them to existing worlds; create a new world to get them.
 
+[Structure and Biome Directives (optional)]
+
+  At the beginning of a dimension's content you may write bracketed
+  directives (any order, all optional):
+
+    {the_nether=
+      [structure:none]
+      y=0..5: minecraft:netherrack;
+      y=6..120: seedhash(x, z, 1) < 0.5 ? minecraft:basalt : minecraft:blackstone
+    }
+    {overworld=
+      [structure:only=villages,strongholds] [biome:vanilla]
+      y=-64: minecraft:bedrock;
+      y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    }
+
+  * [structure:...] controls natural structure generation in that dimension
+    (default: all = everything on):
+      [structure:all]              everything (default, may be omitted)
+      [structure:none]             no structures
+      [structure:only=a,b,c]       whitelist: only the listed ones
+      [structure:except=a,b,c]     blacklist: everything but the listed ones
+    Entries may be "structure set" names (villages, strongholds, mineshafts,
+    nether_complexes, end_cities, ...) or individual structure names
+    (village_plains, fortress, bastion_remnant, ...); both may be mixed.
+    Custom/modded structures use namespace:name (e.g. mymod:tower).
+
+  * Structure table (vanilla; entries marked * were added in 26.3 and simply
+    never generate on older versions):
+    [Overworld] villages, strongholds, ruined_portals, mineshafts,
+      desert_pyramids, jungle_temples, igloos, swamp_huts, shipwrecks,
+      buried_treasures, ocean_ruins, ocean_monuments, pillager_outposts,
+      woodland_mansions, ancient_cities, trail_ruins, trial_chambers,
+      abandoned_camp*
+    [Nether] nether_complexes (fortress + bastion), nether_fossils,
+      ruined_portals (nether variant)
+    [End] end_cities
+
+  * [biome:...] controls the dimension's biomes (default: unchanged --
+    Overworld plains, Nether/End vanilla):
+      [biome:vanilla]          vanilla biome distribution for that dimension
+                               (coordinate-based, independent of your terrain)
+      [biome:minecraft:desert] a single fixed biome for the whole dimension
+    With [biome:vanilla], biome-specific structures (desert pyramids, jungle
+    temples, igloos, ...) generate by biome, and mob spawning, weather and
+    water colours follow the biomes.
+
+  * Notes:
+    - [structure:...] only affects newly generated structures; /locate and
+      eyes of ender still use the vanilla theoretical positions.
+    - The Overworld biome is plains by default, and many structures need
+      their own biome -- combine with [biome:vanilla] to unlock them.
+    - Worlds newly created with this version have all structures on by
+      default; in worlds created before this version the structure list is
+      baked into the save, so [structure:...] can only remove, not add.
+    - Without directives nothing changes; old formulas keep working.
+
 
 2. Variables
 
