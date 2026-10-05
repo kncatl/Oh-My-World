@@ -28,18 +28,39 @@ import com.kncatl.ohmyworld.PatternData;
 import com.kncatl.ohmyworld.compat.ClientScreens;
 import com.kncatl.ohmyworld.compat.FileOpen;
 import com.kncatl.ohmyworld.compat.GuiCompat;
+import com.kncatl.ohmyworld.compat.MultiLineBox;
 
 public class CustomFlatScreen extends Screen implements PresetEditor {
 
-    private static final int CARD_MAX_W = 420;
-    private static final int CARD_H = 272;
+    private static final int CARD_MAX_W = 640;
+    private static final int CARD_H = 300;
+    private static final int PREVIEW_CELL = 4;
+    private static final int PREVIEW_PX = FormulaPreview.SIZE * PREVIEW_CELL;
+    private static final int PREVIEW_BOX = PREVIEW_PX + 4;
     private static final int ERROR_COLOR = 0xFFFF5555;
     private static final int OK_COLOR = 0xFF7FE07F;
     private static final int WARN_COLOR = 0xFFFFAA00;
     private static final int MUTED_COLOR = 0xFF9A9A9A;
+    private static final long PREVIEW_DEBOUNCE_MS = 500;
+    private static final int KEY_ENTER = 257;   // GLFW_KEY_ENTER（26.x 编译路径不暴露 LWJGL，直接用数值）
+    private static final int MOD_CONTROL = 2;   // GLFW_MOD_CONTROL
+
+    /** 示例公式：名称文案键 + 公式内容（与指南示例保持一致）。 */
+    private record Example(String nameKey, String formula) {}
+
+    private static final List<Example> EXAMPLES = List.of(
+            new Example("ohmyworld.custom_screen.example.checker",
+                    "y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete"),
+            new Example("ohmyworld.custom_screen.example.grid3",
+                    "y=-64..64: (floordiv(x,3)+floordiv(z,3))%2==0 ? minecraft:white_concrete : minecraft:gray_concrete"),
+            new Example("ohmyworld.custom_screen.example.cycle",
+                    "y=-64..64: 3*[minecraft:bedrock],2*[minecraft:dirt],1*[(x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete]"),
+            new Example("ohmyworld.custom_screen.example.multi",
+                    "{overworld=y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete}"
+                            + "{the_nether=y=0..5: minecraft:netherrack;y=6..120: seedhash(x, z, 1) < 0.5 ? minecraft:basalt : minecraft:blackstone}"));
 
     private final CreateWorldScreen parent;
-    private EditBox layersInput;
+    private MultiLineBox.Handle formulaBox;
     private EditBox nameInput;
     private Button saveBtn;
     private Button loadBtn;
@@ -51,20 +72,31 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private int formulaY;
     private int nameY;
     private int statusY;
+    private boolean previewVisible;
+    private int previewX;
+    private int previewY;
     private List<String> currentErrors = new ArrayList<>();
     private FormulaParser.DimensionParseResult currentResult;
     private Component statusMessage;
     private int statusColor = OK_COLOR;
     private long statusUntil;
+    private int[] previewColors;
+    private String previewDim;
+    private String previewComputedFor;
+    private long previewDueAt;
+    private boolean previewRunning;
     private String pendingFormula;
     private String pendingName;
 
     private static final Component TITLE = Component.translatable("ohmyworld.custom_screen.title");
     private static final Component HINT = Component.translatable("ohmyworld.custom_screen.layers");
     private static final Component FORMULA_LABEL = Component.translatable("ohmyworld.custom_screen.formula_label");
+    private static final Component FORMULA_HINT = Component.translatable("ohmyworld.custom_screen.formula_hint");
     private static final Component NAME_LABEL = Component.translatable("ohmyworld.custom_screen.name_label");
     private static final Component NAME_HINT = Component.translatable("ohmyworld.custom_screen.name_hint");
     private static final Component OPEN_GUIDE = Component.translatable("ohmyworld.custom_screen.open_guide");
+    private static final Component EXAMPLES_BTN = Component.translatable("ohmyworld.custom_screen.examples");
+    private static final Component EXAMPLES_TITLE = Component.translatable("ohmyworld.custom_screen.examples_title");
     private static final Component DONE = Component.translatable("ohmyworld.custom_screen.done");
     private static final Component CANCEL = Component.translatable("ohmyworld.custom_screen.cancel");
     private static final Component SAVE = Component.translatable("ohmyworld.custom_screen.save");
@@ -85,24 +117,27 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     @Override
     protected void init() {
-        this.cardW = Math.min(CARD_MAX_W, this.width - 16);
+        int maxW = Math.min(CARD_MAX_W, this.width - 16);
+        boolean wantPreview = maxW - 32 - (PREVIEW_BOX + 12) >= 360;
+        this.cardW = wantPreview ? maxW : Math.min(maxW, 480);
         this.cardH = Math.min(CARD_H, Math.max(220, this.height - 8));
         this.cardX = (this.width - this.cardW) / 2;
         this.cardY = Math.max(4, (this.height - this.cardH) / 2);
-        int inner = this.cardW - 32;
+
+        int deficit = CARD_H - this.cardH;
+        int formulaH = Math.max(36, 84 - deficit);
+        this.formulaY = this.cardY + 66;
+        this.previewVisible = wantPreview && this.formulaY + PREVIEW_BOX <= this.cardY + this.cardH - 36;
+        int leftW = this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0);
         int fx = this.cardX + 16;
 
-        // 窗口偏矮时压缩公式框（其余行依次上移），保证按钮始终在屏内
-        int formulaH = Math.max(26, 56 - (CARD_H - this.cardH));
-        this.formulaY = this.cardY + 66;
-        this.layersInput = new EditBox(this.font, fx, this.formulaY, inner, formulaH, FORMULA_LABEL);
-        this.layersInput.setMaxLength(FormulaParser.MAX_INPUT_LENGTH);
-        this.layersInput.setValue(pendingFormula != null ? pendingFormula : PatternData.getRawInput());
-        this.layersInput.setResponder(t -> validate());
-        this.addRenderableWidget(this.layersInput);
+        this.formulaBox = MultiLineBox.create(this.font, fx, this.formulaY, leftW, formulaH,
+                FORMULA_HINT, FORMULA_LABEL, FormulaParser.MAX_INPUT_LENGTH, t -> validate());
+        this.formulaBox.setValue(pendingFormula != null ? pendingFormula : PatternData.getRawInput());
+        this.addRenderableWidget(this.formulaBox.widget());
 
         this.nameY = this.formulaY + formulaH + 16;
-        this.nameInput = new EditBox(this.font, fx, this.nameY, inner, 20, NAME_LABEL);
+        this.nameInput = new EditBox(this.font, fx, this.nameY, leftW, 20, NAME_LABEL);
         this.nameInput.setMaxLength(64);
         this.nameInput.setHint(NAME_HINT);
         if (pendingName != null) this.nameInput.setValue(pendingName);
@@ -110,15 +145,21 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.addRenderableWidget(this.nameInput);
 
         this.statusY = this.nameY + 40;
+        if (this.previewVisible) {
+            this.previewX = this.cardX + this.cardW - 16 - PREVIEW_BOX + 2;
+            this.previewY = this.formulaY + 2;
+        }
 
+        int right = this.cardX + this.cardW - 16;
         this.addRenderableWidget(Button.builder(OPEN_GUIDE, b -> openGuide())
-                .bounds(this.cardX + this.cardW - 16 - 76, this.cardY + 26, 76, 20).build());
+                .bounds(right - 76, this.cardY + 26, 76, 20).build());
+        this.addRenderableWidget(Button.builder(EXAMPLES_BTN, b -> openExamples())
+                .bounds(right - 76 - 6 - 56, this.cardY + 26, 56, 20).build());
 
         int btnY = this.cardY + this.cardH - 30;
         int gap = 6;
-        int btnW = Math.max(50, Math.min(80, (inner - 3 * gap - 10) / 4));
-        int doneW = Math.min(btnW + 10, inner - 3 * (btnW + gap));
-        int right = this.cardX + this.cardW - 16;
+        int btnW = Math.max(50, Math.min(80, (leftW - 3 * gap - 10) / 4));
+        int doneW = Math.min(btnW + 10, leftW - 3 * (btnW + gap));
         this.doneBtn = Button.builder(DONE, b -> onDone()).bounds(right - doneW, btnY, doneW, 20).build();
         this.loadBtn = Button.builder(LOAD, b -> openLoadList())
                 .bounds(right - doneW - gap - btnW, btnY, btnW, 20).build();
@@ -138,16 +179,17 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     private void validate() {
-        String input = this.layersInput.getValue();
+        String input = this.formulaBox.value();
         FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(input);
         this.currentResult = result;
         this.currentErrors = result.errors();
+        this.previewDueAt = System.currentTimeMillis() + PREVIEW_DEBOUNCE_MS;
         updateButtonState();
     }
 
     private void updateButtonState() {
         boolean hasName = !this.nameInput.getValue().isBlank();
-        boolean hasFormula = !this.layersInput.getValue().isBlank();
+        boolean hasFormula = !this.formulaBox.value().isBlank();
         this.saveBtn.active = hasName && hasFormula;
         this.doneBtn.active = hasFormula && this.currentErrors.isEmpty();
     }
@@ -161,7 +203,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     private void onSave() {
         String name = sanitizeFileName(this.nameInput.getValue());
-        String formula = this.layersInput.getValue();
+        String formula = this.formulaBox.value();
         if (name.isEmpty() || formula.isBlank()) return;
         try {
             Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
@@ -200,6 +242,31 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }, "ohmyworld-open-guide");
         opener.setDaemon(true);
         opener.start();
+    }
+
+    /** 示例公式列表：点选后填入公式与名称。 */
+    private void openExamples() {
+        this.showScreen(new Screen(EXAMPLES_TITLE) {
+            @Override
+            protected void init() {
+                int bw = 260;
+                int y = 40;
+                for (Example example : EXAMPLES) {
+                    this.addRenderableWidget(Button.builder(Component.translatable(example.nameKey()), b -> {
+                        pendingFormula = example.formula();
+                        pendingName = Component.translatable(example.nameKey()).getString();
+                        CustomFlatScreen.this.showScreen(CustomFlatScreen.this);
+                    }).bounds(this.width / 2 - bw / 2, y, bw, 20).build());
+                    y += 24;
+                }
+                this.addRenderableWidget(Button.builder(Component.translatable("gui.back"),
+                        b -> CustomFlatScreen.this.showScreen(CustomFlatScreen.this))
+                        .bounds(this.width / 2 - 40, this.height - 28, 80, 20).build());
+            }
+
+            @Override
+            public void onClose() { CustomFlatScreen.this.showScreen(CustomFlatScreen.this); }
+        });
     }
 
     /** 去除路径分隔符与目录穿越片段，防止保存/加载时写出 ohmyworld 目录。 */
@@ -313,7 +380,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     private void onDone() {
-        String input = this.layersInput.getValue();
+        String input = this.formulaBox.value();
         FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(input);
         if (!PatternData.setDimensions(result, input)) {
             // 存在解析/语义错误时禁止应用残缺地形
@@ -345,6 +412,26 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             Files.deleteIfExists(temp);
         }
     }
+
+    //? >=1.21.11 {
+    @Override
+    public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+        if (event.key() == KEY_ENTER && (event.modifiers() & MOD_CONTROL) != 0) {
+            if (this.doneBtn.active) onDone();
+            return true;
+        }
+        return super.keyPressed(event);
+    }
+    //?} else {
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == KEY_ENTER && (modifiers & MOD_CONTROL) != 0) {
+            if (this.doneBtn.active) onDone();
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+    //?}
 
     //? >=26.1 {
     @Override
@@ -392,14 +479,67 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         t.fill(x + 12, y + 24, x + w - 12, y + 25, 0xFF333333);
     }
 
-    /** 前景层：标题、标签与状态区（在控件之后绘制）。 */
+    /** 前景层：标题、标签、预览与状态区（在控件之后绘制）。 */
     private void drawOverlay(GuiCompat.Draw t) {
         int fx = this.cardX + 16;
         t.centered(this.font, TITLE, this.cardX + this.cardW / 2, this.cardY + 8, 0xFFFFFFFF);
         t.text(this.font, HINT, fx, this.cardY + 32, 0xFFB8B8B8);
         t.text(this.font, FORMULA_LABEL, fx, this.formulaY - 12, MUTED_COLOR);
         t.text(this.font, NAME_LABEL, fx, this.nameY - 12, MUTED_COLOR);
-        drawStatus(t, fx, this.statusY, this.cardW - 32);
+        tickPreview();
+        drawPreview(t);
+        drawStatus(t, fx, this.statusY, this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0));
+    }
+
+    /** 预览区（含外框与标题）；未就绪时只画框。 */
+    private void drawPreview(GuiCompat.Draw t) {
+        if (!this.previewVisible) return;
+        int px = this.previewX;
+        int py = this.previewY;
+        t.fill(px - 2, py - 2, px + PREVIEW_PX + 2, py + PREVIEW_PX + 2, 0xFF4A4A4A);
+        t.fill(px - 1, py - 1, px + PREVIEW_PX + 1, py + PREVIEW_PX + 1, 0xFF0A0A0A);
+        String dim = this.previewDim;
+        if (dim == null) dim = FormulaParser.DIM_OVERWORLD;
+        t.text(this.font, Component.translatable("ohmyworld.custom_screen.preview",
+                Component.translatable("ohmyworld.dimension." + dim)), px, this.formulaY - 12, MUTED_COLOR);
+        int[] colors = this.previewColors;
+        if (colors == null) return;
+        for (int dz = 0; dz < FormulaPreview.SIZE; dz++) {
+            for (int dx = 0; dx < FormulaPreview.SIZE; dx++) {
+                int color = colors[dz * FormulaPreview.SIZE + dx];
+                int cx = px + dx * PREVIEW_CELL;
+                int cy = py + dz * PREVIEW_CELL;
+                t.fill(cx, cy, cx + PREVIEW_CELL, cy + PREVIEW_CELL, color);
+            }
+        }
+    }
+
+    /** 预览的防抖重建：公式停下约 0.5 秒后在后台线程采样，结果回主线程。 */
+    private void tickPreview() {
+        if (!this.previewVisible || this.previewRunning) return;
+        long now = System.currentTimeMillis();
+        if (this.previewDueAt == 0 || now < this.previewDueAt) return;
+        String formula = this.formulaBox.value();
+        if (formula.isBlank() || !this.currentErrors.isEmpty() || formula.equals(this.previewComputedFor)) return;
+        FormulaParser.DimensionParseResult parsed = this.currentResult;
+        this.previewRunning = true;
+        Thread worker = new Thread(() -> {
+            FormulaPreview.Result result = null;
+            try {
+                result = FormulaPreview.compute(parsed);
+            } catch (Exception ignored) {}
+            FormulaPreview.Result computed = result;
+            Minecraft.getInstance().execute(() -> {
+                this.previewRunning = false;
+                if (computed != null) {
+                    this.previewColors = computed.colors();
+                    this.previewDim = computed.dimensionKey();
+                }
+                this.previewComputedFor = formula;
+            });
+        }, "ohmyworld-preview");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     /** 状态区：短暂提示 > 错误列表 > 空输入提示 > 解析摘要（+ 原版主世界提醒）。 */
@@ -426,7 +566,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             return;
         }
 
-        if (this.layersInput.getValue().isBlank()) {
+        if (this.formulaBox.value().isBlank()) {
             t.text(this.font, EMPTY, x, y, MUTED_COLOR);
             return;
         }
