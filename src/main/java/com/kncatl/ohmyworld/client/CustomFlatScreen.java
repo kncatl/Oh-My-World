@@ -1,6 +1,5 @@
 package com.kncatl.ohmyworld.client;
 
-import java.awt.Desktop;
 import java.nio.file.Files;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.LinkOption;
@@ -27,6 +26,7 @@ import net.minecraft.network.chat.Component;
 import com.kncatl.ohmyworld.FormulaParser;
 import com.kncatl.ohmyworld.PatternData;
 import com.kncatl.ohmyworld.compat.ClientScreens;
+import com.kncatl.ohmyworld.compat.FileOpen;
 import com.kncatl.ohmyworld.compat.GuiCompat;
 
 public class CustomFlatScreen extends Screen implements PresetEditor {
@@ -101,7 +101,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.layersInput.setResponder(t -> validate());
         this.addRenderableWidget(this.layersInput);
 
-        this.nameY = this.formulaY + formulaH + 10;
+        this.nameY = this.formulaY + formulaH + 16;
         this.nameInput = new EditBox(this.font, fx, this.nameY, inner, 20, NAME_LABEL);
         this.nameInput.setMaxLength(64);
         this.nameInput.setHint(NAME_HINT);
@@ -174,20 +174,32 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         }
     }
 
-    /** 打开公式指南（随语言选 zh/en；文件缺失时退回打开 ohmyworld 目录）。 */
+    /** 打开公式指南：优先当前语言、其次另一语言、最后退回 ohmyworld 目录；在后台线程尝试，结果回主线程显示。 */
     private void openGuide() {
         Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
         String language = this.minecraft.options.languageCode;
-        Path guide = dir.resolve(language != null && language.startsWith("zh")
-                ? "README_zh_cn.md" : "README_en_us.md");
-        Path target = Files.exists(guide) ? guide : dir;
-        try {
-            if (!Desktop.isDesktopSupported()) throw new UnsupportedOperationException("desktop");
-            Desktop.getDesktop().open(target.toFile());
-            setStatus(Component.translatable("ohmyworld.custom_screen.guide_opened"), OK_COLOR, 2500);
-        } catch (Exception e) {
-            setStatus(Component.translatable("ohmyworld.custom_screen.guide_failed", dir.toString()), WARN_COLOR, 8000);
-        }
+        Path zh = dir.resolve("README_zh_cn.md");
+        Path en = dir.resolve("README_en_us.md");
+        Path preferred = language != null && language.startsWith("zh") ? zh : en;
+        Path target = Files.exists(preferred, LinkOption.NOFOLLOW_LINKS) ? preferred
+                : Files.exists(zh, LinkOption.NOFOLLOW_LINKS) ? zh
+                : Files.exists(en, LinkOption.NOFOLLOW_LINKS) ? en
+                : dir;
+        Thread opener = new Thread(() -> {
+            boolean ok = FileOpen.open(target);
+            if (!ok && !target.equals(dir)) ok = FileOpen.open(dir);
+            boolean opened = ok;
+            Minecraft.getInstance().execute(() -> {
+                if (opened) {
+                    setStatus(Component.translatable("ohmyworld.custom_screen.guide_opened"), OK_COLOR, 2500);
+                } else {
+                    setStatus(Component.translatable("ohmyworld.custom_screen.guide_failed", dir.toString()),
+                            WARN_COLOR, 8000);
+                }
+            });
+        }, "ohmyworld-open-guide");
+        opener.setDaemon(true);
+        opener.start();
     }
 
     /** 去除路径分隔符与目录穿越片段，防止保存/加载时写出 ohmyworld 目录。 */
