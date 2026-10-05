@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块
 if [[ "$CHECK_MODE" != "default" && "$SETTLE" -lt 45 ]]; then SETTLE=45; fi
@@ -154,6 +154,11 @@ case "$CHECK_MODE" in
     marker)          SMOKE_CONFIG_MODE="--marker-formula" ;;
     structure-none)  SMOKE_CONFIG_MODE="--structure-none" ;;
     structure-only)  SMOKE_CONFIG_MODE="--structure-only" ;;
+    biome-desert)    SMOKE_CONFIG_MODE="--biome-desert" ;;
+    biome-vanilla)   SMOKE_CONFIG_MODE="--biome-vanilla" ;;
+    biome-structures) SMOKE_CONFIG_MODE="--biome-structures" ;;
+    features-all)    SMOKE_CONFIG_MODE="--features-all" ;;
+    features-none)   SMOKE_CONFIG_MODE="--features-none" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
 # 先清世界再写配置：marker 模式会在配置阶段预置 world/ohmyworld_marker.txt
@@ -168,10 +173,25 @@ python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" $SMOKE_CONFIG_MODE
 console_commands() {
     while ! grep -q 'Done (' "$LOG" 2>/dev/null; do sleep 1; done
     sleep 3
-    if [[ "$CHECK_MODE" == structure-* ]]; then
-        # 结构冒烟：forceload 单次上限 256 区块；在出生区之外再补 16×16 区块
+    if [[ "$CHECK_MODE" == structure-* || "$CHECK_MODE" == biome-* ]]; then
+        # 结构/群系冒烟：forceload 单次上限 256 区块；在出生区之外再补 16×16 区块
         # （出生区本身约 29×29 区块，矿井密度高，样本量足够）
         echo "execute in minecraft:overworld run forceload add 512 0 767 255"
+        if [[ "$CHECK_MODE" == "biome-vanilla" ]]; then
+            # 原版群系分布要跨气候带采样：再补三个远离出生点的区域（种子固定，样本可复现）
+            sleep 12
+            echo "execute in minecraft:overworld run forceload add 6656 6656 6911 6911"
+            sleep 12
+            echo "execute in minecraft:overworld run forceload add -7168 -7168 -6913 -6913"
+            sleep 12
+            echo "execute in minecraft:overworld run forceload add 512 -7168 767 -6913"
+            sleep 12
+        else
+            sleep 20
+        fi
+    elif [[ "$CHECK_MODE" == features-* ]]; then
+        # 特性冒烟：下界玄武岩三角洲的装饰方块样本；16×16 区块足以扫到斑块/荧石
+        echo "execute in minecraft:the_nether run forceload add 0 0 255 255"
         sleep 20
     else
         echo "execute in minecraft:the_nether run forceload add 0 0"
@@ -264,6 +284,26 @@ case "$CHECK_MODE" in
     structure-only)
         python3 "$TOOLS/smoke-check-world.py" --structure-smoke 2 "$SRV" \
             || fail "结构冒烟（only）核验失败：白名单外的结构出现或化石缺失"
+        ;;
+    biome-desert)
+        python3 "$TOOLS/smoke-check-world.py" --biome-smoke 1 "$SRV" \
+            || fail "群系冒烟（desert）核验失败：主世界群系不是纯沙漠"
+        ;;
+    biome-vanilla)
+        python3 "$TOOLS/smoke-check-world.py" --biome-smoke 2 "$SRV" \
+            || fail "群系冒烟（vanilla）核验失败：群系多样性不足"
+        ;;
+    biome-structures)
+        python3 "$TOOLS/smoke-check-world.py" --structure-smoke 3 "$SRV" \
+            || fail "群系结构冒烟核验失败：换群系后沙漠神殿没有解锁"
+        ;;
+    features-all)
+        python3 "$TOOLS/smoke-check-world.py" --features-smoke 1 "$SRV" \
+            || fail "特性冒烟（all）核验失败：玄武岩三角洲装饰没有出现"
+        ;;
+    features-none)
+        python3 "$TOOLS/smoke-check-world.py" --features-smoke 2 "$SRV" \
+            || fail "特性冒烟（none）核验失败：仍出现装饰方块"
         ;;
     *)
         python3 "$TOOLS/smoke-check-world.py" "$SRV" || fail "世界里没有公式特征方块（公式没有生效）"

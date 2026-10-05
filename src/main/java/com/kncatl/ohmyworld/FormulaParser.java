@@ -31,7 +31,7 @@ public class FormulaParser {
 
     /** 解析出的单个维度：层表 + 可选指令（别名与目标共享同一实例）。 */
     public record ParsedDimension(List<Object> layers, DimensionRules.StructureRule structure,
-                                  DimensionRules.BiomeRule biome) {}
+                                  DimensionRules.BiomeRule biome, boolean featuresOff) {}
 
     /**
      * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
@@ -108,7 +108,7 @@ public class FormulaParser {
         Map<String, ParsedDimension> dimensions = new LinkedHashMap<>();
         if (result.errors().isEmpty() && !result.layers().isEmpty()) {
             dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
-                    DimensionRules.StructureRule.ALL, null));
+                    DimensionRules.StructureRule.ALL, null, false));
         }
         return new DimensionParseResult(Map.copyOf(dimensions), result.errors(), false);
     }
@@ -193,11 +193,13 @@ public class FormulaParser {
             return;
         }
 
-        // 可选指令：[structure:...] / [biome:...]，可各出现一次、顺序任意，之后必须是层语法。
+        // 可选指令：[structure:...] / [biome:...] / [features:...]，可各出现一次、顺序任意，之后必须是层语法。
         DimensionRules.StructureRule structure = DimensionRules.StructureRule.ALL;
         DimensionRules.BiomeRule biome = null;
+        boolean featuresOff = false;
         boolean structureSeen = false;
         boolean biomeSeen = false;
+        boolean featuresSeen = false;
         int pos = 0;
         while (true) {
             while (pos < content.length() && Character.isWhitespace(content.charAt(pos))) pos++;
@@ -225,9 +227,18 @@ public class FormulaParser {
                 biomeSeen = true;
                 biome = parseBiomeDirective(directive.substring("biome:".length()), name, errors);
                 if (biome == null) return;
+            } else if (directive.startsWith("features:")) {
+                if (featuresSeen) {
+                    errors.add(name + ": duplicate features directive");
+                    return;
+                }
+                featuresSeen = true;
+                Boolean off = parseFeaturesDirective(directive.substring("features:".length()), name, errors);
+                if (off == null) return;
+                featuresOff = off;
             } else {
                 errors.add(name + ": unknown directive [" + truncate(directive)
-                        + "] (available: structure, biome)");
+                        + "] (available: structure, biome, features)");
                 return;
             }
         }
@@ -240,7 +251,7 @@ public class FormulaParser {
         ParseResult result = parseLayers(layerText);
         for (String error : result.errors()) errors.add(name + ": " + error);
         if (result.errors().isEmpty() && !result.layers().isEmpty()) {
-            dimensions.put(name, new ParsedDimension(result.layers(), structure, biome));
+            dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff));
         }
     }
 
@@ -302,6 +313,15 @@ public class FormulaParser {
             return null;
         }
         return DimensionRules.BiomeRule.single(normalized);
+    }
+
+    /** [features:all|none]；返回 true 表示 none（关闭装饰特性）。 */
+    private static Boolean parseFeaturesDirective(String arg, String dimension, List<String> errors) {
+        String a = arg.trim();
+        if (a.equals("all")) return Boolean.FALSE;
+        if (a.equals("none")) return Boolean.TRUE;
+        errors.add(dimension + ": invalid features mode \"" + truncate(a) + "\" (use all|none)");
+        return null;
     }
 
     /**

@@ -42,7 +42,7 @@ public final class WorldLoadHandler {
             }
             // server_mode：每个维度各按配置公式的对应节绑定；未写维度 = 不接管 = 原版。
             // 主世界额外覆写 marker，保证之后关闭 server_mode 时世界恢复的是配置公式。
-            PatternData.bindGenerator(dimension, generator);
+            bindDimension(sl, generator);
             if (dimension == Level.OVERWORLD) PatternData.markActive(sl, true);
             logDecision(sl, "server_mode", generator);
             return;
@@ -60,14 +60,14 @@ public final class WorldLoadHandler {
                 PatternData.markActive(sl);
             }
             PatternData.clearPending();
-            PatternData.bindGenerator(dimension, generator);
+            bindDimension(sl, generator);
             logDecision(sl, "created", generator);
             return;
         }
 
         if (PatternData.restoreFromMarker(sl)) {
             // 已有世界 + marker = 本模组世界：按该维度是否写了公式决定是否接管
-            PatternData.bindGenerator(dimension, generator);
+            bindDimension(sl, generator);
             logDecision(sl, "marker", generator);
             return;
         }
@@ -76,7 +76,7 @@ public final class WorldLoadHandler {
             // 创建流程的兜底信号（created 缺失时）：视为新建的本模组世界
             PatternData.markActive(sl);
             PatternData.clearPending();
-            PatternData.bindGenerator(dimension, generator);
+            bindDimension(sl, generator);
             logDecision(sl, "pending", generator);
             return;
         }
@@ -104,6 +104,12 @@ public final class WorldLoadHandler {
                 PatternData.hasFormulaFor(sl.dimension()), PatternData.snapshotFor(generator) != null);
     }
 
+    /** 绑定该维度的生成器（结构/特性规则随快照生效），随后套用 {@code [biome:...]} 群系源规则。 */
+    private static void bindDimension(ServerLevel sl, ChunkGenerator generator) {
+        PatternData.bindGenerator(sl.dimension(), generator);
+        BiomeControl.apply(sl, generator);
+    }
+
     /** 运行中热加载：server_mode 下每 5 秒检查一次配置文件，变化时立即应用新公式。 */
     private static void onServerTick(MinecraftServer server) {
         if (++tickCount % 100 != 0) return;
@@ -115,6 +121,7 @@ public final class WorldLoadHandler {
             // 热加载失败时保留上一次有效快照，不让临时半写入文件破坏正在生成的世界。
             if (applyConfigFormula(config)) {
                 PatternData.bindAllGenerators();
+                BiomeControl.reapplyAll(server);
                 ServerLevel overworld = server.overworld();
                 if (overworld != null) PatternData.markActive(overworld, true);
             }
@@ -127,6 +134,7 @@ public final class WorldLoadHandler {
             } else {
                 PatternData.bindAllGenerators();
             }
+            BiomeControl.reapplyAll(server); // 规则可能已消失：无绑定的生成器还原原始群系源
         }
     }
 

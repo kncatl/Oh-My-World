@@ -49,3 +49,6 @@ repo/
 # Benchmark input derived from the author's own formula. Deliberately kept out of
 # the repository; PatternBenchTest skips itself when this file is absent.
 src/test/resources/bench-mega-formula.txt
+
+### Python tooling cache ###
+__pycache__/

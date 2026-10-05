@@ -75,7 +75,8 @@ public class PatternData {
             FormulaParser.DIM_END, Level.END);
 
     public record PatternSnapshot(List<Object> layers, String rawInput, long version,
-                                  DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome) {}
+                                  DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome,
+                                  boolean featuresOff) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -95,7 +96,8 @@ public class PatternData {
             PatternSnapshot snapshot = shared.get(parsed);
             if (snapshot == null) {
                 snapshot = new PatternSnapshot(List.copyOf(parsed.layers()), raw,
-                        SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome());
+                        SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome(),
+                        parsed.featuresOff());
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -137,7 +139,7 @@ public class PatternData {
         synchronized (PatternData.class) {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
-                        SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null);
+                        SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false);
             }
             return defaultSnapshot;
         }
@@ -185,6 +187,18 @@ public class PatternData {
             GeneratorBinding binding = GENERATOR_PATTERNS.get(generator);
             return binding == null ? null : binding.snapshot();
         }
+    }
+
+    /** [biome:...] 规则；未绑定 / 无规则 → null（群系源还原）。 */
+    public static DimensionRules.BiomeRule biomeRuleFor(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot == null ? null : snapshot.biome();
+    }
+
+    /** [features:none] 是否生效；未绑定 / 缺省 → false（零行为变化）。 */
+    public static boolean suppressFeatures(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot != null && snapshot.featuresOff();
     }
 
     /**

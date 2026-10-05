@@ -276,6 +276,35 @@ class FormulaParserTest {
                 badDirective.errors().toString());
     }
 
+    /** 特性开关指令：none / all / 无指令默认 / 非法值 / 重复。 */
+    @Test
+    void featuresDirectivesParse() {
+        FormulaParser.DimensionParseResult none = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=[features:none] y=0: rand()}");
+        assertTrue(none.errors().isEmpty(), none.errors().toString());
+        assertTrue(none.dimensions().get(FormulaParser.DIM_NETHER).featuresOff());
+
+        FormulaParser.DimensionParseResult all = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=[features:all] y=0: rand()}");
+        assertTrue(all.errors().isEmpty(), all.errors().toString());
+        assertFalse(all.dimensions().get(FormulaParser.DIM_NETHER).featuresOff());
+
+        FormulaParser.DimensionParseResult absent = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=y=0: rand()}");
+        assertTrue(absent.errors().isEmpty(), absent.errors().toString());
+        assertFalse(absent.dimensions().get(FormulaParser.DIM_NETHER).featuresOff());
+
+        FormulaParser.DimensionParseResult bad = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=[features:maybe] y=0: rand()}");
+        assertTrue(bad.errors().stream().anyMatch(e -> e.contains("invalid features mode")),
+                bad.errors().toString());
+
+        FormulaParser.DimensionParseResult duplicate = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=[features:none][features:all] y=0: rand()}");
+        assertTrue(duplicate.errors().stream().anyMatch(e -> e.contains("duplicate features directive")),
+                duplicate.errors().toString());
+    }
+
     /** 指令与别名共存：别名共享目标的指令与层表。 */
     @Test
     void directivesCombineWithAliases() {

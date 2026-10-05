@@ -27,6 +27,11 @@
   与模式（1）相同的分节 marker——验证「已有世界 + 分节 marker」的恢复路径
   （server_mode 冒烟不经过它）。核验规则同 --dimension-smoke 1。
 
+--biome-desert / --biome-vanilla（P4.2）：主世界 [biome:...] 群系冒烟；配合
+  smoke-check-world.py --biome-smoke 1|2 判定（区块 NBT 群系调色板扫描）。
+--features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
+  装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
+
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
@@ -95,6 +100,39 @@ STRUCTURE_ONLY_FORMULA = (
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
 )
 
+# P4.2 群系冒烟：主世界固定沙漠 / 原版群系分布（配合 smoke-check-world.py --biome-smoke）。
+# 群系 id 存在区块 NBT 的群系调色板里，直接扫描即可；地形层用来确认区块确已生成。
+BIOME_DESERT_FORMULA = (
+    "{overworld=[biome:minecraft:desert] "
+    "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
+)
+
+BIOME_VANILLA_FORMULA = (
+    "{overworld=[biome:vanilla] "
+    "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
+)
+
+# 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的
+# 群系源（平原）"过滤过结构组，沙漠神殿本不在候选里——本模组换群系后会重建结构组
+# 状态；若重建失败，这里将扫不到 desert_pyramid。配合 --structure-smoke 3。
+BIOME_STRUCTURES_FORMULA = (
+    "{overworld=[biome:minecraft:desert] [structure:only=desert_pyramids] "
+    "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
+)
+
+# P4.3 特性冒烟：下界固定玄武岩三角洲（原始群系表内 → 装饰合法），
+# all = 原版装饰（黑石/玄武岩斑块、荧石、岩浆块…）；none = 只留公式地形。
+# 默认公式行不含装饰方块，核验靠 smoke-check-world.py --features-smoke。
+FEATURES_ALL_FORMULA = (
+    "{the_nether=[biome:minecraft:basalt_deltas] [features:all] "
+    "y=0..60: minecraft:netherrack;y=61..127: minecraft:air}"
+)
+
+FEATURES_NONE_FORMULA = (
+    "{the_nether=[biome:minecraft:basalt_deltas] [features:none] "
+    "y=0..60: minecraft:netherrack;y=61..127: minecraft:air}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -113,6 +151,11 @@ def main():
     marker_formula = "--marker-formula" in sys.argv
     structure_none = "--structure-none" in sys.argv
     structure_only = "--structure-only" in sys.argv
+    biome_desert = "--biome-desert" in sys.argv
+    biome_vanilla = "--biome-vanilla" in sys.argv
+    biome_structures = "--biome-structures" in sys.argv
+    features_all = "--features-all" in sys.argv
+    features_none = "--features-none" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -137,6 +180,12 @@ def main():
         # - 打开结构开关（默认冒烟是关结构，避免干扰方块核验）。
         props["level-type"] = "ohmyworld\\:flat_plus"
         props["generate-structures"] = "true"
+    elif biome_desert or biome_vanilla or biome_structures or features_all or features_none:
+        # 群系/特性冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
+        props["level-type"] = "ohmyworld\\:flat_plus"
+    if biome_structures:
+        # 结构解锁冒烟要真正生成结构
+        props["generate-structures"] = "true"
     props["server-port"] = str(port)
     prop_file.write_text("\n".join(f"{k}={v}" for k, v in props.items()) + "\n", encoding="utf-8")
 
@@ -150,6 +199,16 @@ def main():
         formula = STRUCTURE_NONE_FORMULA
     elif structure_only:
         formula = STRUCTURE_ONLY_FORMULA
+    elif biome_desert:
+        formula = BIOME_DESERT_FORMULA
+    elif biome_vanilla:
+        formula = BIOME_VANILLA_FORMULA
+    elif biome_structures:
+        formula = BIOME_STRUCTURES_FORMULA
+    elif features_all:
+        formula = FEATURES_ALL_FORMULA
+    elif features_none:
+        formula = FEATURES_NONE_FORMULA
     elif seed_formula:
         formula = SEED_FORMULA
     else:
@@ -157,7 +216,10 @@ def main():
 
     config = server / "config" / "ohmyworld.json"
     wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
-                     or marker_formula or structure_none or structure_only or not config.exists())
+                     or marker_formula or structure_none or structure_only
+                     or biome_desert or biome_vanilla or biome_structures
+                     or features_all or features_none
+                     or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；
         # 只有作者手写/巨构公式才原样保留。
@@ -169,9 +231,11 @@ def main():
             pass
     if wrote_formula:
         config.parent.mkdir(parents=True, exist_ok=True)
+        import os
+        debug = "true" if os.environ.get("SMOKE_DEBUG") == "1" else "false"
         config.write_text(
-            '{\n  "server_mode": %s,\n  "formula": "%s"\n}\n'
-            % ("false" if marker_formula else "true", formula), encoding="utf-8"
+            '{\n  "server_mode": %s,\n  "debug_logs": %s,\n  "formula": "%s"\n}\n'
+            % ("false" if marker_formula else "true", debug, formula), encoding="utf-8"
         )
 
     if marker_formula:
@@ -190,6 +254,16 @@ def main():
         label = "使用结构冒烟公式（下界 [structure:none]）"
     elif structure_only:
         label = "使用结构冒烟公式（下界 [structure:only=nether_fossils]）"
+    elif biome_desert:
+        label = "使用群系冒烟公式（主世界 [biome:minecraft:desert]）"
+    elif biome_vanilla:
+        label = "使用群系冒烟公式（主世界 [biome:vanilla]）"
+    elif biome_structures:
+        label = "使用群系结构冒烟公式（主世界 [biome:desert] + [structure:only=desert_pyramids]）"
+    elif features_all:
+        label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
+    elif features_none:
+        label = "使用特性冒烟公式（下界 [features:none] + 玄武岩三角洲）"
     elif seed_formula:
         label = "使用种子专项冒烟公式"
     elif wrote_formula:

@@ -124,9 +124,23 @@ Default preset:
       [biome:vanilla]          vanilla biome distribution for that dimension
                                (coordinate-based, independent of your terrain)
       [biome:minecraft:desert] a single fixed biome for the whole dimension
-    With [biome:vanilla], biome-specific structures (desert pyramids, jungle
-    temples, igloos, ...) generate by biome, and mob spawning, weather and
-    water colours follow the biomes.
+    With [biome:...]: biome-specific structures (desert pyramids, jungle
+    temples, igloos, ...) generate by biome, mob spawning, weather and water
+    colours follow the biomes, and decoration features (trees, flowers, ores,
+    ...) generate with the new biomes as usual (the flat Overworld base grows
+    vanilla vegetation too once its biomes change). Only newly generated
+    chunks are affected (existing chunks keep their biomes).
+
+  * [features:...] controls the dimension's biome decoration features
+    (trees, flowers, ores, glowstone, basalt patches and columns, ...;
+    only on/off, not per-feature). Either way only your terrain and the
+    structures are kept:
+      [features:all]   decoration as usual (default, may be omitted): with a
+                       [biome:...] rule it follows the new biomes; without
+                       one each dimension keeps its natural behaviour
+                       (Nether/End keep theirs, the flat Overworld base has
+                       no decoration anyway)
+      [features:none]  disable all biome decoration features
 
   * Notes:
     - [structure:...] only affects newly generated structures; /locate and
