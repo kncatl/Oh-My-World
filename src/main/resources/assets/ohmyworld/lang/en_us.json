@@ -13,5 +13,6 @@
   "ohmyworld.custom_screen.load_title": "Select a saved formula to load",
   "ohmyworld.custom_screen.no_saves": "No saved formulas found in <game_dir>/ohmyworld/",
   "ohmyworld.custom_screen.errors": "Errors (%d):",
-  "ohmyworld.custom_screen.no_errors": "No errors detected."
+  "ohmyworld.custom_screen.no_errors": "No errors detected.",
+  "ohmyworld.custom_screen.vanilla_overworld": "No overworld section: the new world's overworld will use vanilla generation (existing worlds are unaffected)"
 }

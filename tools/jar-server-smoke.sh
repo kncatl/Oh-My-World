@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # 用「真 jar + 真服务器」验证一个已构建的 jar 能否在目标 MC 版本上加载并生成世界。
 #
-# 用法: tools/jar-server-smoke.sh <jar> <目标MC> <neoforge|fabric> [等待秒数]
+# 用法: tools/jar-server-smoke.sh <jar> <目标MC> <neoforge|fabric> [等待秒数] [default|dimension|dimension-alias|marker]
 # 例:   tools/jar-server-smoke.sh \
 #         versions/1.21.3-neoforge/build/libs/oh-my-world-1.21.3-neoforge-1.1.6.jar 1.21.4 neoforge
+#       tools/jar-server-smoke.sh \
+#         versions/26.3-fabric/build/libs/oh-my-world-26.3-fabric-1.2.0.jar 26.3 fabric 45 dimension
+#
+# 检查模式：
+#   default         —— 常规冒烟公式（主世界特征方块），见 smoke-server-config.py
+#   dimension       —— 分节冒烟（1）：overworld+the_nether 公式、末地缺失=原版；
+#                      启动后自动 forceload 下界/末地并做按维度核验
+#   dimension-alias —— 分节冒烟（2）：无 overworld 节 + the_end 别名；同样 forceload
+#   marker          —— marker 驱动冒烟：预置 world/ohmyworld_marker.txt（server_mode=false），
+#                      验证"已有世界 + 分节 marker"的恢复路径；核验规则同 dimension
 #
 # 为什么需要它：开发服（runServer）按版本编译源码，只能证明「该版本的源码能跑」；
 # 要证明「为 A 版本构建的 jar 能否在 B 版本加载」只能用真服务器 + 真 jar。
@@ -15,10 +25,17 @@
 # 服务器与日志放在 ~/omw-verify/jar-smoke/<loader>-<mc>/（可重复使用）。
 set -euo pipefail
 
-JAR="${1:?用法: tools/jar-server-smoke.sh <jar> <目标MC> <neoforge|fabric> [等待秒数]}"
+JAR="${1:?用法: tools/jar-server-smoke.sh <jar> <目标MC> <neoforge|fabric> [等待秒数] [检查模式]}"
 TARGET_MC="${2:?缺少目标 MC 版本}"
 LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
+CHECK_MODE="${5:-default}"
+case "$CHECK_MODE" in
+    default|dimension|dimension-alias|marker) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker）"; exit 1 ;;
+esac
+# 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块
+if [[ "$CHECK_MODE" != "default" && "$SETTLE" -lt 45 ]]; then SETTLE=45; fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TOOLS="$ROOT/tools"
@@ -131,15 +148,42 @@ PY
 # level-type=flat 必须显式设置：否则 Mixin 不触发、公式不会跑，验证会假阳性。
 # 端口交给系统分配（并行验证不会撞端口）。
 PORT=auto
-python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" --force-formula
+case "$CHECK_MODE" in
+    dimension)       SMOKE_CONFIG_MODE="--dimension-formula" ;;
+    dimension-alias) SMOKE_CONFIG_MODE="--dimension-alias" ;;
+    marker)          SMOKE_CONFIG_MODE="--marker-formula" ;;
+    *)               SMOKE_CONFIG_MODE="--force-formula" ;;
+esac
+# 先清世界再写配置：marker 模式会在配置阶段预置 world/ohmyworld_marker.txt
 rm -rf "$SRV/world" "$SRV/logs"
+python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" $SMOKE_CONFIG_MODE
 
 # ---------- 4. 启动、等待、停止 ----------
 : > "$LOG"
+
+# 分节冒烟：服务器就绪后通过控制台 forceload 下界/末地（各生成出生点区块）。
+# 用管道喂 stdin；$! 是管道最后一段（即 exec 出的服务端 JVM），kill 目标不变。
+console_commands() {
+    while ! grep -q 'Done (' "$LOG" 2>/dev/null; do sleep 1; done
+    sleep 3
+    echo "execute in minecraft:the_nether run forceload add 0 0"
+    sleep 15
+    echo "execute in minecraft:the_end run forceload add 0 0"
+    sleep 15
+}
+
 if [[ "$LOADER" == "neoforge" ]]; then
-    ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G @user_jvm_args.txt @"libraries/net/neoforged/neoforge/$NEO_VER/unix_args.txt" nogui ) >>"$LOG" 2>&1 &
+    if [[ "$CHECK_MODE" != "default" ]]; then
+        console_commands | ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G @user_jvm_args.txt @"libraries/net/neoforged/neoforge/$NEO_VER/unix_args.txt" nogui ) >>"$LOG" 2>&1 &
+    else
+        ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G @user_jvm_args.txt @"libraries/net/neoforged/neoforge/$NEO_VER/unix_args.txt" nogui ) >>"$LOG" 2>&1 &
+    fi
 else
-    ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G -jar fabric-server-launch.jar nogui ) >>"$LOG" 2>&1 &
+    if [[ "$CHECK_MODE" != "default" ]]; then
+        console_commands | ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G -jar fabric-server-launch.jar nogui ) >>"$LOG" 2>&1 &
+    else
+        ( cd "$SRV" && exec "$JAVA_BIN" -Xmx2G -jar fabric-server-launch.jar nogui ) >>"$LOG" 2>&1 &
+    fi
 fi
 PID=$!
 
@@ -195,7 +239,19 @@ CHUNKS=$(find "$SRV/world" -path '*/region/*.mca' 2>/dev/null | wc -l | tr -d ' 
 [[ "$CHUNKS" -gt 0 ]] || fail "没有生成 region 文件"
 # 世界里必须能找到冒烟公式的特征方块：证明「Mixin → fillChunk → 公式 → 注册表查方块」
 # 整条链路真的跑过（否则就是"服务器起来了但公式没生效"的假阳性）。
-python3 "$TOOLS/smoke-check-world.py" "$SRV" || fail "世界里没有公式特征方块（公式没有生效）"
+case "$CHECK_MODE" in
+    dimension|marker)
+        python3 "$TOOLS/smoke-check-world.py" --dimension-smoke 1 "$SRV" \
+            || fail "分节冒烟（1/marker）核验失败：逐维度检查未通过"
+        ;;
+    dimension-alias)
+        python3 "$TOOLS/smoke-check-world.py" --dimension-smoke 2 "$SRV" \
+            || fail "分节冒烟（2）核验失败：逐维度检查未通过"
+        ;;
+    *)
+        python3 "$TOOLS/smoke-check-world.py" "$SRV" || fail "世界里没有公式特征方块（公式没有生效）"
+        ;;
+esac
 
 echo "[jar-smoke] OK: jar 在 MC $TARGET_MC / $LOADER 上加载并生成成功（region 文件 $CHUNKS 个）"
 grep -E 'Done \(' "$LOG" | tail -1

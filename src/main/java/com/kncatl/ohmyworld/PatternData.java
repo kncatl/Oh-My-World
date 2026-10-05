@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +34,13 @@ public class PatternData {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final int HEIGHT_CACHE_LIMIT = 8192;
 
-    private static volatile PatternSnapshot currentSnapshot;
+    /** 维度 → 公式快照；只含显式定义了公式的维度（别名与目标共享同一快照）。空表=未设置过公式。 */
+    private static volatile Map<ResourceKey<Level>, PatternSnapshot> DIMENSION_PATTERNS = Map.of();
+    /** 当前公式的原始整串输入（编辑器 / marker 用）；null = 未设置过公式（编辑器显示默认公式）。 */
+    private static volatile String currentRawInput;
+    /** 未设置过公式时的默认快照（未编辑的 flat_plus 世界按默认图案生成主世界）。 */
+    private static volatile PatternSnapshot defaultSnapshot;
+
     private static final AtomicLong SNAPSHOT_VERSION = new AtomicLong();
     private static final Map<HeightKey, Integer> HEIGHT_CACHE = new LinkedHashMap<>(256, 0.75f, true);
 
@@ -57,66 +64,110 @@ public class PatternData {
     /** 默认公式（与 OhMyWorldConfig 共用同一份定义）。最底层统一为世界底部 -64。 */
     public static final String DEFAULT_INPUT = "y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete";
 
+    /** 规范维度名 → 维度键（解析器不依赖 MC 类，映射放在这里）。 */
+    private static final Map<String, ResourceKey<Level>> DIMENSION_KEYS = Map.of(
+            FormulaParser.DIM_OVERWORLD, Level.OVERWORLD,
+            FormulaParser.DIM_NETHER, Level.NETHER,
+            FormulaParser.DIM_END, Level.END);
+
     public record PatternSnapshot(List<Object> layers, String rawInput, long version) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
-    public static void set(List<?> pattern, String rawInput) {
-        List<Object> copy = List.copyOf(pattern);
-        currentSnapshot = new PatternSnapshot(copy, stripNewlines(rawInput), SNAPSHOT_VERSION.incrementAndGet());
-        active = !copy.isEmpty();
+    /**
+     * 设置按维度的公式（旧输入 = 仅 overworld）。有错误或没有任何维度时不生效、返回 false。
+     * 别名与目标共享同一份快照；每个快照有独立的版本号（高度缓存按版本隔离）。
+     */
+    public static boolean setDimensions(FormulaParser.DimensionParseResult result, String rawInput) {
+        if (result == null || !result.errors().isEmpty() || result.dimensions().isEmpty()) return false;
+        String raw = stripNewlines(rawInput);
+        Map<List<Object>, PatternSnapshot> shared = new IdentityHashMap<>();
+        Map<ResourceKey<Level>, PatternSnapshot> table = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Object>> entry : result.dimensions().entrySet()) {
+            ResourceKey<Level> dimension = DIMENSION_KEYS.get(entry.getKey());
+            if (dimension == null) continue;
+            PatternSnapshot snapshot = shared.get(entry.getValue());
+            if (snapshot == null) {
+                snapshot = new PatternSnapshot(List.copyOf(entry.getValue()), raw, SNAPSHOT_VERSION.incrementAndGet());
+                shared.put(entry.getValue(), snapshot);
+            }
+            table.put(dimension, snapshot);
+        }
+        if (table.isEmpty()) return false;
+        DIMENSION_PATTERNS = Map.copyOf(table);
+        currentRawInput = raw;
+        active = true;
         clearHeightCache();
-    }
-
-    public static boolean setIfValid(FormulaParser.ParseResult result, String rawInput) {
-        if (result == null || !result.errors().isEmpty() || result.layers().isEmpty()) return false;
-        set(result.layers(), rawInput);
         return true;
     }
 
-    public static PatternSnapshot snapshot() {
-        PatternSnapshot snapshot = currentSnapshot;
-        if (snapshot != null && !snapshot.layers().isEmpty()) return snapshot;
-
-        synchronized (PatternData.class) {
-            snapshot = currentSnapshot;
-            if (snapshot == null || snapshot.layers().isEmpty()) {
-                List<Object> defaults = FormulaParser.parse(DEFAULT_INPUT);
-                snapshot = new PatternSnapshot(defaults, DEFAULT_INPUT, SNAPSHOT_VERSION.incrementAndGet());
-                currentSnapshot = snapshot;
-                clearHeightCache();
-            }
-            return snapshot;
-        }
+    /** 该维度当前是否会被公式接管；未设置过公式时默认公式只作用于主世界。 */
+    public static boolean hasFormulaFor(ResourceKey<Level> dimension) {
+        if (currentRawInput == null) return Level.OVERWORLD.equals(dimension);
+        return DIMENSION_PATTERNS.containsKey(dimension);
     }
 
-    public static List<Object> get() { return snapshot().layers(); }
+    /** 是否显式设置过公式（false = 编辑器显示默认公式、世界未编辑）。 */
+    public static boolean hasExplicitFormula() { return currentRawInput != null; }
 
-    public static String getRawInput() { return snapshot().rawInput(); }
+    public static String getRawInput() {
+        String raw = currentRawInput;
+        return raw != null ? raw : DEFAULT_INPUT;
+    }
+
+    /** 该维度要绑定的快照；null = 不接管（原版生成）。 */
+    private static PatternSnapshot patternFor(ResourceKey<Level> dimension) {
+        PatternSnapshot snapshot = DIMENSION_PATTERNS.get(dimension);
+        if (snapshot != null) return snapshot;
+        // 未设置过公式：仅主世界有隐式默认公式（未编辑的 flat_plus 世界按默认图案生成）
+        if (currentRawInput == null && Level.OVERWORLD.equals(dimension)) return defaultSnapshot();
+        return null;
+    }
+
+    private static PatternSnapshot defaultSnapshot() {
+        PatternSnapshot snapshot = defaultSnapshot;
+        if (snapshot != null) return snapshot;
+        synchronized (PatternData.class) {
+            if (defaultSnapshot == null) {
+                defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
+                        SNAPSHOT_VERSION.incrementAndGet());
+            }
+            return defaultSnapshot;
+        }
+    }
 
     public static boolean isActive() { return active; }
 
     public static void clearActive() { active = false; }
 
     /**
-     * 将当前快照绑定到具体生成器（同时记录所属维度），避免不同维度的 generator
-     * 互相污染。P2 起绑定表对任何生成器类型通用（超平坦或噪声）；
-     * 没有分节语法之前，调用方只会绑定主世界的超平坦生成器。
+     * 将该维度的生成器登记进绑定表（快照 = 该维度当前公式）。该维度没有公式时不
+     * 登记——未登记 = 不接管 = 原版生成。绑定表对任何生成器类型通用（超平坦或噪声）。
      */
     public static void bindGenerator(ResourceKey<Level> dimension, ChunkGenerator generator) {
         if (generator == null || !active) return;
+        PatternSnapshot snapshot = patternFor(dimension);
+        if (snapshot == null) return;
         synchronized (GENERATOR_PATTERNS) {
-            GENERATOR_PATTERNS.put(generator, new GeneratorBinding(dimension, snapshot()));
+            GENERATOR_PATTERNS.put(generator, new GeneratorBinding(dimension, snapshot));
             anyGeneratorBound = true;
         }
     }
 
+    /** 热加载：按每条绑定记录的维度取新快照；该维度已无公式的绑定直接移除。 */
     public static void bindAllGenerators() {
         if (!active) return;
-        PatternSnapshot snapshot = snapshot();
         synchronized (GENERATOR_PATTERNS) {
-            GENERATOR_PATTERNS.replaceAll((generator, binding) ->
-                    new GeneratorBinding(binding.dimension(), snapshot));
+            var iterator = GENERATOR_PATTERNS.entrySet().iterator();
+            while (iterator.hasNext()) {
+                var entry = iterator.next();
+                PatternSnapshot snapshot = patternFor(entry.getValue().dimension());
+                if (snapshot == null) {
+                    iterator.remove();
+                } else {
+                    entry.setValue(new GeneratorBinding(entry.getValue().dimension(), snapshot));
+                }
+            }
             anyGeneratorBound = !GENERATOR_PATTERNS.isEmpty();
         }
     }
@@ -200,13 +251,12 @@ public class PatternData {
                 }
                 String raw = Files.readString(marker);
                 if (raw != null && !raw.isBlank()) {
-                    FormulaParser.ParseResult result = FormulaParser.parseWithErrors(raw);
-                    if (!result.errors().isEmpty() || result.layers().isEmpty()) {
+                    FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(raw);
+                    if (!result.errors().isEmpty() || result.dimensions().isEmpty()) {
                         for (String e : result.errors()) LOGGER.error("ohmyworld: marker formula error: {}", e);
                         return false;
                     }
-                    set(result.layers(), raw);
-                    active = true;
+                    if (!setDimensions(result, raw)) return false;
                     pending = false;
                     return true;
                 }

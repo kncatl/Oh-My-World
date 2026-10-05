@@ -13,5 +13,6 @@
   "ohmyworld.custom_screen.load_title": "选择一个已保存的公式加载",
   "ohmyworld.custom_screen.no_saves": "在 <游戏文件夹>/ohmyworld/ 中未找到已保存的公式",
   "ohmyworld.custom_screen.errors": "错误（%d）：",
-  "ohmyworld.custom_screen.no_errors": "未检测到错误。"
+  "ohmyworld.custom_screen.no_errors": "未检测到错误。",
+  "ohmyworld.custom_screen.vanilla_overworld": "未定义 overworld：新建世界的主世界将按原版生成（已有世界不受影响）"
 }

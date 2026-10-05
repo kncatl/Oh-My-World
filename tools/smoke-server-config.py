@@ -2,6 +2,7 @@
 """为冒烟测试写服务端配置（开发服与真 jar 验证共用）。
 
 用法: smoke-server-config.py <服务端目录> <端口> [--force-formula] [--seed-formula]
+                            [--dimension-formula | --dimension-alias]
 
 做的事：
   * eula.txt = true
@@ -15,6 +16,16 @@
   仅当 `seed == 12345` 时铺方块，并用 `seedhash(x, z, 0) < 0.5` 在两种特征方块间
   切换。seed 读错 → 世界无特征方块；seedhash 退化成常量 → 只剩一种特征方块。
   因此该模式要用 smoke-check-world.py --require-all 判定。
+
+--dimension-formula：分节冒烟（1）：{overworld=...}{the_nether=...}——末地未写
+  按原版；配合控制台 forceload 生成下界/末地区块后用
+  smoke-check-world.py --dimension-smoke 1 判定。
+--dimension-alias：分节冒烟（2）：{the_nether=...}{the_end=the_nether}——没有
+  overworld 节（主世界=超平坦基座、无公式）、末地走别名。配合
+  smoke-check-world.py --dimension-smoke 2 判定。
+--marker-formula：marker 驱动冒烟：server_mode=false，预先在 world 目录写入
+  与模式（1）相同的分节 marker——验证「已有世界 + 分节 marker」的恢复路径
+  （server_mode 冒烟不经过它）。核验规则同 --dimension-smoke 1。
 
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
@@ -50,6 +61,26 @@ SEED_FORMULA = (
     " : minecraft:air"
 )
 
+# 分节冒烟（1）：主世界 + 下界各写公式，末地不写（必须保持原版）。
+# 下界用 ochre_froglight（非自然生成、非白名单，同样走注册表查询）。
+DIMENSION_FORMULA = (
+    "{overworld="
+    "y=-64: minecraft:bedrock;"
+    "y=-63..64: (x+z)%2==0 ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks"
+    "}"
+    "{the_nether="
+    "y=0..40: minecraft:ochre_froglight"
+    "}"
+)
+
+# 分节冒烟（2）：没有 overworld 节 + 末地走别名（= 下界公式）。
+DIMENSION_ALIAS_FORMULA = (
+    "{the_nether="
+    "y=0..40: minecraft:ochre_froglight"
+    "}"
+    "{the_end=the_nether}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -63,6 +94,9 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     force = "--force-formula" in sys.argv
     seed_formula = "--seed-formula" in sys.argv
+    dimension_formula = "--dimension-formula" in sys.argv
+    dimension_alias = "--dimension-alias" in sys.argv
+    marker_formula = "--marker-formula" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -84,8 +118,20 @@ def main():
     props["server-port"] = str(port)
     prop_file.write_text("\n".join(f"{k}={v}" for k, v in props.items()) + "\n", encoding="utf-8")
 
+    if dimension_formula:
+        formula = DIMENSION_FORMULA
+    elif dimension_alias:
+        formula = DIMENSION_ALIAS_FORMULA
+    elif marker_formula:
+        formula = DIMENSION_FORMULA
+    elif seed_formula:
+        formula = SEED_FORMULA
+    else:
+        formula = FORMULA
+
     config = server / "config" / "ohmyworld.json"
-    wrote_formula = force or seed_formula or not config.exists()
+    wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
+                     or marker_formula or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；
         # 只有作者手写/巨构公式才原样保留。
@@ -98,13 +144,29 @@ def main():
     if wrote_formula:
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(
-            '{\n  "server_mode": true,\n  "formula": "%s"\n}\n'
-            % (SEED_FORMULA if seed_formula else FORMULA), encoding="utf-8"
+            '{\n  "server_mode": %s,\n  "formula": "%s"\n}\n'
+            % ("false" if marker_formula else "true", formula), encoding="utf-8"
         )
 
-    print(f"[smoke-config] {server}: level-type=flat, port={port}, "
-          + ("使用种子专项冒烟公式" if seed_formula else
-             ("使用冒烟公式" if wrote_formula else "保留已有公式")))
+    if marker_formula:
+        # 预置世界 marker：server_mode=false 时由 WorldLoadHandler 的 marker 恢复路径接管
+        world = server / "world"
+        world.mkdir(parents=True, exist_ok=True)
+        (world / "ohmyworld_marker.txt").write_text(DIMENSION_FORMULA, encoding="utf-8")
+
+    if marker_formula:
+        label = "marker 驱动冒烟（预置分节 marker、server_mode=false）"
+    elif dimension_formula:
+        label = "使用分节冒烟公式（1：overworld+the_nether，末地缺失）"
+    elif dimension_alias:
+        label = "使用分节冒烟公式（2：无 overworld + the_end 别名）"
+    elif seed_formula:
+        label = "使用种子专项冒烟公式"
+    elif wrote_formula:
+        label = "使用冒烟公式"
+    else:
+        label = "保留已有公式"
+    print(f"[smoke-config] {server}: level-type=flat, port={port}, {label}")
     print(f"SMOKE_FORMULA={1 if wrote_formula else 0}")
     return 0
 

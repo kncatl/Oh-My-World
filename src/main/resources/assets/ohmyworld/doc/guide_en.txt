@@ -33,6 +33,51 @@ Separate layers with semicolons ";". Two formats are supported:
 Default preset:
   y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
+[Multi-dimension (optional)]
+
+  A formula without { } only affects the Overworld. To use formulas in the
+  Nether / End as well, wrap each dimension's rules in a { } section:
+
+    {overworld=
+      y=-64: minecraft:bedrock;
+      y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    }
+    {the_nether=
+      y=0..5: minecraft:netherrack;
+      y=6..120: seedhash(x, z, 1) < 0.5 ? minecraft:basalt : minecraft:blackstone
+    }
+
+  * Dimension names: overworld, the_nether, the_end. Shorthands nether / end
+    and an optional "minecraft:" prefix are accepted.
+  * A dimension you do not write keeps vanilla generation: vanilla Nether/End
+    biomes, features and structures still generate.
+  * Alias: {the_end=overworld} reuses the Overworld formula for the End. The
+    alias target must be explicitly defined in this formula (chains allowed).
+  * Whitespace or a semicolon is allowed between sections; layers inside a
+    section are still separated by semicolons.
+  * Each dimension uses its own height range: out-of-range y values are
+    clamped (e.g. y=-64..319 only covers 0..255 in the Nether); ly is always
+    relative to the layer's declared start.
+  * Old formulas (no { }) are unchanged: they only affect the Overworld.
+
+  [Vanilla Overworld] When creating a new world, if the formula has no
+  overworld section (e.g. only a Nether formula), the new world's Overworld
+  uses vanilla generation while the Nether/End follow their formulas.
+  Existing worlds are unaffected (the generator is fixed at creation).
+  Write an overworld section if you explicitly want a flat/void Overworld.
+
+  [Notes] The formula takes over terrain / surface / carvers only: biomes,
+  features and structures (fortresses, end cities, ores, vegetation, ...)
+  still generate by the vanilla rules and land inside your formula terrain.
+  Two suggestions:
+  * In the End, draw the main island area yourself -- the dragon fight and
+    obsidian pillars rely on it.
+  * No bedrock ceiling is generated unless you draw one (the Nether height
+    limit is still 256).
+  * The new syntax (sections / seed) is a parse error on older mod
+    versions (the pattern is disabled): worlds created with a newer version
+    are not meant to be opened with an older one.
+
 
 2. Variables
 
@@ -162,6 +207,15 @@ Default preset:
     For grid noise, floordiv the coordinates first, e.g.
     seedhash(floordiv(x,3), floordiv(z,3), 0) < 0.5 ? ... : ...
 
+  ▸ Multi-dimension (Overworld checker + Nether formula + End alias):
+
+    {overworld=y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete}
+    {the_nether=y=0..40: seedhash(x, z, 7) < 0.5 ? minecraft:basalt : minecraft:blackstone}
+    {the_end=overworld}
+
+    The End has no rules of its own: it reuses the Overworld formula via an
+    alias (each dimension still uses its own height range).
+
   ▸ let block — avoid recomputing sub-expressions for complex formulas:
 
     y=-64..319: {
@@ -217,3 +271,13 @@ written from the editor. Set server_mode: true in config/ohmyworld.json instead;
 the formula is then applied to all superflat worlds on the server (non-flat worlds
 are unaffected). With server_mode, config formula edits take effect in about
 5 seconds without restarting the server (newly generated chunks only).
+
+  The server_mode formula also accepts the sectioned syntax: each dimension
+  that has a section is taken over, dimensions without one stay vanilla. The
+  server-side Overworld generator is decided by level-type: for "vanilla
+  Overworld + formula-driven Nether/End", set level-type to normal (the
+  default) and write only the the_nether / the_end sections.
+  * Adding or removing a dimension section on a running server requires a
+    server restart (leave and re-enter the world in singleplayer) before it
+    affects the already-created generators; editing the formula text inside
+    the sections still takes effect in about 5 seconds.

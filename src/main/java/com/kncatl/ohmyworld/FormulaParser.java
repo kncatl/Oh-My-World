@@ -2,6 +2,8 @@ package com.kncatl.ohmyworld;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -21,9 +23,19 @@ public class FormulaParser {
 
     public record ParseResult(List<Object> layers, List<String> errors) {}
 
+    /** 维度节的规范名（{@link DimensionParseResult} 与 PatternData 的键）。 */
+    public static final String DIM_OVERWORLD = "overworld";
+    public static final String DIM_NETHER = "the_nether";
+    public static final String DIM_END = "the_end";
+
+    /**
+     * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的层表
+     * （别名与目标共享同一个列表实例）；{@code sectioned} 表示输入是否用了 {} 分节语法。
+     */
+    public record DimensionParseResult(Map<String, List<Object>> dimensions, List<String> errors,
+                                       boolean sectioned) {}
+
     public static ParseResult parseWithErrors(String input) {
-        List<Object> layers = new ArrayList<>();
-        List<String> errors = new ArrayList<>();
         if (input == null || input.isBlank()) return invalid("Formula is empty");
         if (input.length() > MAX_INPUT_LENGTH) {
             return invalid("Formula exceeds the maximum input size of " + MAX_INPUT_LENGTH + " characters");
@@ -31,7 +43,171 @@ public class FormulaParser {
 
         String cleaned = input.replace("\r", "").replace("\n", "");
         if (cleaned.isBlank()) return invalid("Formula is empty");
+        return parseLayers(cleaned);
+    }
 
+    /**
+     * 按维度的解析入口：输入以 '{' 开头时按分节语法解析，否则等价于
+     * {@code {overworld=...}}（旧输入 = 仅主世界，行为与旧版完全一致）。
+     */
+    public static DimensionParseResult parseDimensionsWithErrors(String input) {
+        if (input == null || input.isBlank()) return dimensionInvalid("Formula is empty");
+        if (input.length() > MAX_INPUT_LENGTH) {
+            return dimensionInvalid("Formula exceeds the maximum input size of " + MAX_INPUT_LENGTH + " characters");
+        }
+
+        String cleaned = input.replace("\r", "").replace("\n", "");
+        if (cleaned.isBlank()) return dimensionInvalid("Formula is empty");
+
+        if (cleaned.trim().startsWith("{")) return parseSections(cleaned.trim());
+
+        ParseResult result = parseLayers(cleaned);
+        Map<String, List<Object>> dimensions = new LinkedHashMap<>();
+        if (result.errors().isEmpty() && !result.layers().isEmpty()) {
+            dimensions.put(DIM_OVERWORLD, result.layers());
+        }
+        return new DimensionParseResult(Map.copyOf(dimensions), result.errors(), false);
+    }
+
+    /** 分节语法：{dim=...}{dim=...}；节间允许空白或 ';'，节内容=层语法或维度别名。 */
+    private static DimensionParseResult parseSections(String input) {
+        Map<String, List<Object>> dimensions = new LinkedHashMap<>();
+        Map<String, String> aliases = new LinkedHashMap<>();
+        List<String> errors = new ArrayList<>();
+        int pos = 0;
+        int length = input.length();
+        int sections = 0;
+
+        while (pos < length) {
+            char c = input.charAt(pos);
+            if (c == ' ' || c == '\t' || c == ';') {
+                pos++;
+                continue;
+            }
+            if (c != '{') {
+                errors.add("Unexpected text outside dimension sections: \"" + truncate(input.substring(pos)) + "\"");
+                break;
+            }
+            sections++;
+
+            // 按大括号配对找节尾；节内的 let { } 靠深度计数保护。
+            int depth = 1;
+            int end = pos + 1;
+            while (end < length && depth > 0) {
+                char d = input.charAt(end);
+                if (d == '{') depth++;
+                else if (d == '}') depth--;
+                if (depth > 0) end++;
+            }
+            if (depth != 0) {
+                errors.add("Unbalanced '{' in dimension sections");
+                break;
+            }
+
+            String body = input.substring(pos + 1, end);
+            pos = end + 1;
+            parseSection(body, dimensions, aliases, errors);
+        }
+
+        if (sections == 0 && errors.isEmpty()) errors.add("Formula contains no dimension sections");
+        resolveAliases(dimensions, aliases, errors);
+        return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), true);
+    }
+
+    /** 解析单个 {名称=内容} 节：内容是维度名 → 别名；否则按层语法解析（错误带维度前缀）。 */
+    private static void parseSection(String body, Map<String, List<Object>> dimensions,
+                                     Map<String, String> aliases, List<String> errors) {
+        int eq = body.indexOf('=');
+        if (eq < 0) {
+            errors.add("Dimension section is missing '='");
+            return;
+        }
+        String rawName = body.substring(0, eq).trim();
+        String content = body.substring(eq + 1).trim();
+        if (rawName.isEmpty()) {
+            errors.add("Dimension section is missing a name before '='");
+            return;
+        }
+        String name = canonicalDimension(rawName);
+        if (name == null) {
+            errors.add("Unknown dimension \"" + truncate(rawName)
+                    + "\" (available: overworld, the_nether, the_end)");
+            return;
+        }
+        if (content.isEmpty()) {
+            errors.add(name + ": dimension section is empty");
+            return;
+        }
+        if (dimensions.containsKey(name) || aliases.containsKey(name)) {
+            errors.add(name + ": duplicate dimension section");
+            return;
+        }
+
+        String aliasTarget = canonicalDimension(content);
+        if (aliasTarget != null) {
+            aliases.put(name, aliasTarget);
+            return;
+        }
+
+        ParseResult result = parseLayers(content);
+        for (String error : result.errors()) errors.add(name + ": " + error);
+        if (result.errors().isEmpty() && !result.layers().isEmpty()) {
+            dimensions.put(name, result.layers());
+        }
+    }
+
+    /**
+     * 解析别名：目标必须在本输入里显式有公式（链式别名允许；环路/自引用报错）。
+     * 成功时别名与目标共享同一个层表实例（各维度仍用自己的高度范围与 ly 语义）。
+     */
+    private static void resolveAliases(Map<String, List<Object>> dimensions, Map<String, String> aliases,
+                                       List<String> errors) {
+        for (Map.Entry<String, String> entry : aliases.entrySet()) {
+            String dimension = entry.getKey();
+            List<String> chain = new ArrayList<>();
+            LinkedHashSet<String> seen = new LinkedHashSet<>();
+            String current = dimension;
+            while (true) {
+                if (!seen.add(current)) {
+                    errors.add(dimension + ": alias cycle (" + String.join(" -> ", chain) + " -> " + current + ")");
+                    break;
+                }
+                chain.add(current);
+                List<Object> target = dimensions.get(current);
+                if (target != null) {
+                    dimensions.put(dimension, target);
+                    break;
+                }
+                String next = aliases.get(current);
+                if (next == null) {
+                    errors.add(dimension + ": alias target \"" + current + "\" is not defined in this formula");
+                    break;
+                }
+                current = next;
+            }
+        }
+    }
+
+    /** 维度名规范化：可写简写（nether/end）与可选 minecraft: 前缀；未知返回 null。 */
+    private static String canonicalDimension(String name) {
+        String n = name.trim();
+        if (n.startsWith("minecraft:")) n = n.substring("minecraft:".length());
+        return switch (n) {
+            case "overworld" -> DIM_OVERWORLD;
+            case "nether", "the_nether" -> DIM_NETHER;
+            case "end", "the_end" -> DIM_END;
+            default -> null;
+        };
+    }
+
+    private static DimensionParseResult dimensionInvalid(String error) {
+        return new DimensionParseResult(Map.of(), List.of(error), false);
+    }
+
+    /** 旧入口的层解析主体（含 smartSplit 分段与逐层校验）。 */
+    private static ParseResult parseLayers(String cleaned) {
+        List<Object> layers = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
         String[] lines = smartSplit(cleaned);
         for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             if (layers.size() + errors.size() >= MAX_LAYERS) {

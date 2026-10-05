@@ -34,6 +34,41 @@
 
   y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
 
+【多维度（可选）】
+
+  默认公式只作用于主世界。若要用公式改造下界 / 末地，用分节语法把各维度的
+  规则分别包在 { } 里：
+
+    {overworld=
+      y=-64: minecraft:bedrock;
+      y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete
+    }
+    {the_nether=
+      y=0..5: minecraft:netherrack;
+      y=6..120: seedhash(x, z, 1) < 0.5 ? minecraft:basalt : minecraft:blackstone
+    }
+
+  ★ 维度名：overworld（主世界）、the_nether（下界）、the_end（末地）。
+    可写简写 nether / end，也可加 minecraft: 前缀。
+  ★ 没写到的维度 = 按原版生成：下界/末地的生物群系、特征与结构照常生成。
+  ★ 别名：{the_end=overworld} 表示末地复用主世界的公式；别名目标必须在本公式
+    里显式定义（链式允许，如 {the_end=nether}{nether=...} 需 nether 节存在）。
+  ★ 节与节之间允许空白或分号；节内仍用分号分隔各层。
+  ★ 各维度用自己的高度：层范围超出该维度高度时自动截断（例如 y=-64..319 在
+    下界只有 0..255 生效）；ly 始终是"该层声明的起点"算起的层内坐标。
+  ★ 旧写法（不带 {}）完全不变：仅作用于主世界。
+
+  【主世界按原版生成】新建世界时，如果公式里没有 overworld 节（例如只写了下界
+  公式），创建出的世界主世界将使用原版地形生成；下界/末地按各自公式。已有世界
+  不受影响（生成器在创建时固化）。想显式要（空/平）的主世界，就写一个 overworld 节。
+
+  【须知】公式接管的是地形 / 表面 / 洞穴：生物群系、特征与结构（堡垒、末地城、
+  矿物、植被等）仍按原版生成，会落进你的公式地形里。两点建议：
+  · 末地建议自行绘制主岛区域——末影龙战、黑曜石柱等原版机制依赖主岛；
+  · 不画基岩顶就没有顶（下界高度上限仍为 256）。
+  · 新语法（分节/seed）在旧版本模组里会解析报错（图案停用）：用新版本创建的
+    世界不建议降级打开。
+
 
 二、变量
 
@@ -246,6 +281,15 @@
   y=-64..64: seedhash(floordiv(x,3), floordiv(z,3), 0) < 0.5 ? minecraft:white_concrete : minecraft:gray_concrete
 
 
+▸ 多维度（主世界棋盘格 + 下界公式 + 末地复用主世界）：
+
+  {overworld=y=-64: minecraft:bedrock;y=-63..64: (x+z)%2==0 ? minecraft:white_concrete : minecraft:gray_concrete}
+  {the_nether=y=0..40: seedhash(x, z, 7) < 0.5 ? minecraft:basalt : minecraft:blackstone}
+  {the_end=overworld}
+
+  末地没有写公式内容，而是用别名复用主世界的公式（各维度仍按自己的高度范围）。
+
+
 ▸ let 代码块——避免重复计算，提升复杂公式可读性：
 
   y=-64..319: {
@@ -322,3 +366,10 @@
 config/ohmyworld.json 中设置 server_mode: true，公式将应用于服务器上
 所有超平坦世界（非超平坦世界不受影响）。server_mode 下修改公式约 5 秒
 自动生效（仅影响之后新生成的区块），无需重启服务器。
+
+  server_mode 的公式同样支持分节语法：写了哪个维度，哪个维度被接管；
+  没写的维度保持原版。服务器端主世界生成器由 level-type 决定：想要
+  "主世界原版 + 公式化下界/末地"，把 level-type 设为 normal（默认）并只写
+  the_nether / the_end 节即可。
+  ★ 运行中新增/移除维度节：需要重启服务器（单人游戏退出重进）才会对已有
+    生成器生效；只改各节内的公式内容则约 5 秒自动生效。

@@ -37,6 +37,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private Button loadBtn;
     private Button doneBtn;
     private List<String> currentErrors = new ArrayList<>();
+    private FormulaParser.DimensionParseResult currentResult;
     private String pendingFormula;
     private String pendingName;
 
@@ -101,7 +102,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     private void validate() {
         String input = this.layersInput.getValue();
-        FormulaParser.ParseResult result = FormulaParser.parseWithErrors(input);
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(input);
+        this.currentResult = result;
         this.currentErrors = result.errors();
         updateButtonState();
     }
@@ -235,14 +237,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     private void onDone() {
         String input = this.layersInput.getValue();
-        FormulaParser.ParseResult result = FormulaParser.parseWithErrors(input);
-        if (!result.errors().isEmpty()) {
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(input);
+        if (!PatternData.setDimensions(result, input)) {
             // 存在解析/语义错误时禁止应用残缺地形
-            this.currentErrors = result.errors();
-            updateButtonState();
-            return;
-        }
-        if (!PatternData.setIfValid(result, input)) {
+            this.currentResult = result;
             this.currentErrors = result.errors().isEmpty()
                     ? List.of("Formula contains no valid layers") : result.errors();
             updateButtonState();
@@ -317,6 +315,13 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             if (currentErrors.size() > 6) {
                 g.text(this.font, Component.literal("..."), this.width / 2 - 145, lineY, ERROR_COLOR);
             }
+        }
+
+        // 分节公式但没有 overworld 节：提示新建世界的主世界将按原版生成
+        if (currentErrors.isEmpty() && currentResult != null && currentResult.sectioned()
+                && !currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
+            g.text(this.font, Component.translatable("ohmyworld.custom_screen.vanilla_overworld"),
+                    this.width / 2 - 145, errorY + 12, 0xFFFFAA00);
         }
     }
 
