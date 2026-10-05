@@ -1,5 +1,6 @@
 package com.kncatl.ohmyworld.client;
 
+import java.awt.Desktop;
 import java.nio.file.Files;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.LinkOption;
@@ -30,29 +31,47 @@ import com.kncatl.ohmyworld.compat.GuiCompat;
 
 public class CustomFlatScreen extends Screen implements PresetEditor {
 
+    private static final int CARD_MAX_W = 420;
+    private static final int CARD_H = 272;
+    private static final int ERROR_COLOR = 0xFFFF5555;
+    private static final int OK_COLOR = 0xFF7FE07F;
+    private static final int WARN_COLOR = 0xFFFFAA00;
+    private static final int MUTED_COLOR = 0xFF9A9A9A;
+
     private final CreateWorldScreen parent;
     private EditBox layersInput;
     private EditBox nameInput;
     private Button saveBtn;
     private Button loadBtn;
     private Button doneBtn;
+    private int cardX;
+    private int cardY;
+    private int cardW;
+    private int cardH;
+    private int formulaY;
+    private int nameY;
+    private int statusY;
     private List<String> currentErrors = new ArrayList<>();
     private FormulaParser.DimensionParseResult currentResult;
+    private Component statusMessage;
+    private int statusColor = OK_COLOR;
+    private long statusUntil;
     private String pendingFormula;
     private String pendingName;
 
     private static final Component TITLE = Component.translatable("ohmyworld.custom_screen.title");
-    private static final Component LAYERS_LABEL = Component.translatable("ohmyworld.custom_screen.layers");
+    private static final Component HINT = Component.translatable("ohmyworld.custom_screen.layers");
+    private static final Component FORMULA_LABEL = Component.translatable("ohmyworld.custom_screen.formula_label");
+    private static final Component NAME_LABEL = Component.translatable("ohmyworld.custom_screen.name_label");
+    private static final Component NAME_HINT = Component.translatable("ohmyworld.custom_screen.name_hint");
+    private static final Component OPEN_GUIDE = Component.translatable("ohmyworld.custom_screen.open_guide");
     private static final Component DONE = Component.translatable("ohmyworld.custom_screen.done");
     private static final Component CANCEL = Component.translatable("ohmyworld.custom_screen.cancel");
     private static final Component SAVE = Component.translatable("ohmyworld.custom_screen.save");
-    private static final Component SAVE_NAME = Component.translatable("ohmyworld.custom_screen.save_name");
-    private static final Component SAVE_NAME2 = Component.translatable("ohmyworld.custom_screen.save_name2");
     private static final Component LOAD = Component.translatable("ohmyworld.custom_screen.load");
     private static final Component LOAD_TITLE = Component.translatable("ohmyworld.custom_screen.load_title");
     private static final Component NO_SAVES = Component.translatable("ohmyworld.custom_screen.no_saves");
-    private static final int ERROR_COLOR = 0xFFFF5555;
-    private static final int OK_COLOR = 0xFF55FF55;
+    private static final Component EMPTY = Component.translatable("ohmyworld.custom_screen.empty");
 
     public CustomFlatScreen(CreateWorldScreen parent, WorldCreationContext context) {
         super(TITLE);
@@ -66,32 +85,50 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     @Override
     protected void init() {
-        int centerX = this.width / 2;
-        int boxW = 300;
-        int boxY = 45;
-        int fxH = 44;
+        this.cardW = Math.min(CARD_MAX_W, this.width - 16);
+        this.cardH = Math.min(CARD_H, Math.max(220, this.height - 8));
+        this.cardX = (this.width - this.cardW) / 2;
+        this.cardY = Math.max(4, (this.height - this.cardH) / 2);
+        int inner = this.cardW - 32;
+        int fx = this.cardX + 16;
 
-        this.layersInput = new EditBox(this.font, centerX - boxW / 2 + 10, boxY + 20, boxW - 20, fxH, LAYERS_LABEL);
+        // 窗口偏矮时压缩公式框（其余行依次上移），保证按钮始终在屏内
+        int formulaH = Math.max(26, 56 - (CARD_H - this.cardH));
+        this.formulaY = this.cardY + 66;
+        this.layersInput = new EditBox(this.font, fx, this.formulaY, inner, formulaH, FORMULA_LABEL);
         this.layersInput.setMaxLength(FormulaParser.MAX_INPUT_LENGTH);
         this.layersInput.setValue(pendingFormula != null ? pendingFormula : PatternData.getRawInput());
         this.layersInput.setResponder(t -> validate());
         this.addRenderableWidget(this.layersInput);
 
-        int nameY = boxY + 20 + fxH + 40;
-        this.nameInput = new EditBox(this.font, centerX - boxW / 2 + 10, nameY, boxW - 20, 20, SAVE_NAME);
+        this.nameY = this.formulaY + formulaH + 10;
+        this.nameInput = new EditBox(this.font, fx, this.nameY, inner, 20, NAME_LABEL);
         this.nameInput.setMaxLength(64);
+        this.nameInput.setHint(NAME_HINT);
         if (pendingName != null) this.nameInput.setValue(pendingName);
         this.nameInput.setResponder(t -> updateButtonState());
         this.addRenderableWidget(this.nameInput);
 
-        int btnY = nameY + 30;
-        this.saveBtn = Button.builder(SAVE, b -> onSave()).bounds(centerX - boxW / 2, btnY, 80, 20).build();
+        this.statusY = this.nameY + 40;
+
+        this.addRenderableWidget(Button.builder(OPEN_GUIDE, b -> openGuide())
+                .bounds(this.cardX + this.cardW - 16 - 76, this.cardY + 26, 76, 20).build());
+
+        int btnY = this.cardY + this.cardH - 30;
+        int gap = 6;
+        int btnW = Math.max(50, Math.min(80, (inner - 3 * gap - 10) / 4));
+        int doneW = Math.min(btnW + 10, inner - 3 * (btnW + gap));
+        int right = this.cardX + this.cardW - 16;
+        this.doneBtn = Button.builder(DONE, b -> onDone()).bounds(right - doneW, btnY, doneW, 20).build();
+        this.loadBtn = Button.builder(LOAD, b -> openLoadList())
+                .bounds(right - doneW - gap - btnW, btnY, btnW, 20).build();
+        this.saveBtn = Button.builder(SAVE, b -> onSave())
+                .bounds(right - doneW - 2 * (gap + btnW), btnY, btnW, 20).build();
         this.addRenderableWidget(this.saveBtn);
-        this.loadBtn = Button.builder(LOAD, b -> openLoadList()).bounds(centerX - boxW / 2 + 90, btnY, 80, 20).build();
         this.addRenderableWidget(this.loadBtn);
-        this.doneBtn = Button.builder(DONE, b -> onDone()).bounds(centerX + boxW / 2 - 80, btnY, 80, 20).build();
         this.addRenderableWidget(this.doneBtn);
-        this.addRenderableWidget(Button.builder(CANCEL, b -> onCancel()).bounds(centerX - 40, btnY + 26, 80, 20).build());
+        this.addRenderableWidget(Button.builder(CANCEL, b -> onCancel())
+                .bounds(fx, btnY, btnW, 20).build());
 
         updateButtonState();
         validate();
@@ -115,6 +152,13 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.doneBtn.active = hasFormula && this.currentErrors.isEmpty();
     }
 
+    /** 短暂状态提示（保存/加载/打开指南的反馈）。 */
+    private void setStatus(Component message, int color, long millis) {
+        this.statusMessage = message;
+        this.statusColor = color;
+        this.statusUntil = System.currentTimeMillis() + millis;
+    }
+
     private void onSave() {
         String name = sanitizeFileName(this.nameInput.getValue());
         String formula = this.layersInput.getValue();
@@ -123,7 +167,27 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
             Files.createDirectories(dir);
             writeFormulaAtomically(dir.resolve(name + ".txt"), formula);
-        } catch (Exception ignored) {}
+            setStatus(Component.translatable("ohmyworld.custom_screen.saved", name + ".txt"), OK_COLOR, 4000);
+        } catch (Exception e) {
+            String detail = e.getMessage() == null ? name : e.getMessage();
+            setStatus(Component.translatable("ohmyworld.custom_screen.save_failed", detail), ERROR_COLOR, 6000);
+        }
+    }
+
+    /** 打开公式指南（随语言选 zh/en；文件缺失时退回打开 ohmyworld 目录）。 */
+    private void openGuide() {
+        Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
+        String language = this.minecraft.options.languageCode;
+        Path guide = dir.resolve(language != null && language.startsWith("zh")
+                ? "README_zh_cn.md" : "README_en_us.md");
+        Path target = Files.exists(guide) ? guide : dir;
+        try {
+            if (!Desktop.isDesktopSupported()) throw new UnsupportedOperationException("desktop");
+            Desktop.getDesktop().open(target.toFile());
+            setStatus(Component.translatable("ohmyworld.custom_screen.guide_opened"), OK_COLOR, 2500);
+        } catch (Exception e) {
+            setStatus(Component.translatable("ohmyworld.custom_screen.guide_failed", dir.toString()), WARN_COLOR, 8000);
+        }
     }
 
     /** 去除路径分隔符与目录穿越片段，防止保存/加载时写出 ohmyworld 目录。 */
@@ -232,6 +296,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             String content = Files.readString(file);
             this.pendingFormula = content;
             this.pendingName = name;
+            setStatus(Component.translatable("ohmyworld.custom_screen.loaded", name), OK_COLOR, 4000);
         } catch (Exception ignored) {}
     }
 
@@ -271,15 +336,27 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     //? >=26.1 {
     @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        super.extractBackground(graphics, mouseX, mouseY, partialTick);
+        drawCard(GuiCompat.of(graphics));
+    }
+
+    @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        drawScreen(GuiCompat.of(graphics));
+        drawOverlay(GuiCompat.of(graphics));
     }
     //?} else {
     @Override
+    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        super.renderBackground(graphics, mouseX, mouseY, partialTick);
+        drawCard(GuiCompat.of(graphics));
+    }
+
+    @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        drawScreen(GuiCompat.of(graphics));
+        drawOverlay(GuiCompat.of(graphics));
     }
     //?}
 
@@ -288,41 +365,84 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         ClientScreens.show(this.minecraft, screen);
     }
 
-    /** 版本无关的绘制主体：只表达「画什么、画在哪」，不接触具体渲染 API。 */
-    private void drawScreen(GuiCompat.Text g) {
-        g.centered(this.font, TITLE, this.width / 2, 18, 0xFFFFFFFF);
-        g.text(this.font, LAYERS_LABEL, this.width / 2 - 145, 47, 0xFFA0A0A0);
-        g.text(this.font, SAVE_NAME, this.width / 2 - 145, this.nameInput.getY() - 22, 0xFFA0A0A0);
-        g.text(this.font, SAVE_NAME2, this.width / 2 - 145, this.nameInput.getY() - 12, 0xFFA0A0A0);
+    /** 背景层：卡片底板（在背景之后、控件之前绘制）。 */
+    private void drawCard(GuiCompat.Draw t) {
+        int x = this.cardX;
+        int y = this.cardY;
+        int w = this.cardW;
+        int h = this.cardH;
+        t.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x40000000);
+        t.fill(x, y, x + w, y + h, 0xE6141414);
+        t.fill(x, y, x + w, y + 1, 0xFF4A4A4A);
+        t.fill(x, y + h - 1, x + w, y + h, 0xFF4A4A4A);
+        t.fill(x, y, x + 1, y + h, 0xFF4A4A4A);
+        t.fill(x + w - 1, y, x + w, y + h, 0xFF4A4A4A);
+        t.fill(x + 12, y + 24, x + w - 12, y + 25, 0xFF333333);
+    }
 
-        int errorY = this.nameInput.getY() + 30 + 26 + 20 + 10;
-        if (currentErrors.isEmpty()) {
-            if (!this.layersInput.getValue().isBlank()) {
-                g.text(this.font, Component.translatable("ohmyworld.custom_screen.no_errors"),
-                        this.width / 2 - 145, errorY, OK_COLOR);
-            }
-        } else {
-            g.text(this.font, Component.translatable("ohmyworld.custom_screen.errors", currentErrors.size()),
-                    this.width / 2 - 145, errorY, ERROR_COLOR);
-            int lineY = errorY + 12;
-            int maxShow = Math.min(currentErrors.size(), 6);
+    /** 前景层：标题、标签与状态区（在控件之后绘制）。 */
+    private void drawOverlay(GuiCompat.Draw t) {
+        int fx = this.cardX + 16;
+        t.centered(this.font, TITLE, this.cardX + this.cardW / 2, this.cardY + 8, 0xFFFFFFFF);
+        t.text(this.font, HINT, fx, this.cardY + 32, 0xFFB8B8B8);
+        t.text(this.font, FORMULA_LABEL, fx, this.formulaY - 12, MUTED_COLOR);
+        t.text(this.font, NAME_LABEL, fx, this.nameY - 12, MUTED_COLOR);
+        drawStatus(t, fx, this.statusY, this.cardW - 32);
+    }
+
+    /** 状态区：短暂提示 > 错误列表 > 空输入提示 > 解析摘要（+ 原版主世界提醒）。 */
+    private void drawStatus(GuiCompat.Draw t, int x, int y, int width) {
+        if (this.statusMessage != null && System.currentTimeMillis() < this.statusUntil) {
+            t.text(this.font, this.statusMessage, x, y, this.statusColor);
+            return;
+        }
+        this.statusMessage = null;
+
+        if (!this.currentErrors.isEmpty()) {
+            t.text(this.font, Component.translatable("ohmyworld.custom_screen.errors", this.currentErrors.size()),
+                    x, y, ERROR_COLOR);
+            int lineY = y + 12;
+            int maxShow = Math.min(this.currentErrors.size(), 4);
             for (int i = 0; i < maxShow; i++) {
-                String msg = currentErrors.get(i);
-                String trimmed = this.font.plainSubstrByWidth(msg, 290);
-                g.text(this.font, Component.literal(trimmed), this.width / 2 - 145, lineY, ERROR_COLOR);
+                String trimmed = this.font.plainSubstrByWidth(this.currentErrors.get(i), width);
+                t.text(this.font, Component.literal(trimmed), x, lineY, ERROR_COLOR);
                 lineY += 11;
             }
-            if (currentErrors.size() > 6) {
-                g.text(this.font, Component.literal("..."), this.width / 2 - 145, lineY, ERROR_COLOR);
+            if (this.currentErrors.size() > maxShow) {
+                t.text(this.font, Component.literal("..."), x, lineY, ERROR_COLOR);
             }
+            return;
         }
 
-        // 分节公式但没有 overworld 节：提示新建世界的主世界将按原版生成
-        if (currentErrors.isEmpty() && currentResult != null && currentResult.sectioned()
-                && !currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
-            g.text(this.font, Component.translatable("ohmyworld.custom_screen.vanilla_overworld"),
-                    this.width / 2 - 145, errorY + 12, 0xFFFFAA00);
+        if (this.layersInput.getValue().isBlank()) {
+            t.text(this.font, EMPTY, x, y, MUTED_COLOR);
+            return;
         }
+
+        if (this.currentResult != null) {
+            t.text(this.font, summaryLine(this.currentResult), x, y, OK_COLOR);
+            if (this.currentResult.sectioned()
+                    && !this.currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
+                t.text(this.font, Component.translatable("ohmyworld.custom_screen.vanilla_overworld"),
+                        x, y + 13, WARN_COLOR);
+            }
+        }
+    }
+
+    /** 「已识别 N 个维度 · 主世界 12 层 · 下界 5 层」。 */
+    private static Component summaryLine(FormulaParser.DimensionParseResult result) {
+        List<String> parts = new ArrayList<>();
+        // Map.copyOf 不保证顺序：按固定维度顺序展示
+        for (String dim : List.of(FormulaParser.DIM_OVERWORLD, FormulaParser.DIM_NETHER, FormulaParser.DIM_END)) {
+            FormulaParser.ParsedDimension parsed = result.dimensions().get(dim);
+            if (parsed == null) continue;
+            Component name = Component.translatable("ohmyworld.dimension." + dim);
+            Component part = Component.translatable("ohmyworld.custom_screen.dim_part",
+                    name, parsed.layers().size());
+            parts.add(part.getString());
+        }
+        return Component.translatable("ohmyworld.custom_screen.summary",
+                result.dimensions().size(), String.join(" · ", parts));
     }
 
     @Override
