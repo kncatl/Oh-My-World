@@ -375,3 +375,6 @@ config/ohmyworld.json 中设置 server_mode: true，公式将应用于服务器�
   the_nether / the_end 节即可。
   ★ 运行中新增/移除维度节：需要重启服务器（单人游戏退出重进）才会对已有
     生成器生效；只改各节内的公式内容则约 5 秒自动生效。
+  ★ 排查问题时，可以把 config/ohmyworld.json 的 "debug_logs" 设为 true：
+    日志会输出每个维度的接管决定、公式 marker 的读写、主世界替换决定等
+    诊断信息（默认 false，正常游玩无需开启）。

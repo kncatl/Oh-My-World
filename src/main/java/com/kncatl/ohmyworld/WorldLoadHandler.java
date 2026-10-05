@@ -83,8 +83,10 @@ public final class WorldLoadHandler {
 
         // 不是本模组的世界（无 marker、无 pending）：不接管任何维度
         PatternData.clearGenerator(generator);
-        LOGGER.debug("ohmyworld: level {} ignored (no marker); generator={}",
-                ResourceIds.keyId(dimension), generator.getClass().getSimpleName());
+        if (OhMyWorldConfig.debugLogsEnabled()) {
+            LOGGER.info("ohmyworld: level {} ignored (no marker); generator={}",
+                    ResourceIds.keyId(dimension), generator.getClass().getSimpleName());
+        }
         if (dimension == Level.OVERWORLD && generator instanceof FlatLevelSource) {
             // 超平坦世界但没有公式 marker：无 UI 的专用服务器无法写入 marker，
             // 需要在 config/ohmyworld.json 开启 server_mode
@@ -94,8 +96,9 @@ public final class WorldLoadHandler {
         }
     }
 
-    /** 调试/支持用：记录某个维度加载时“是否被公式接管”的决定。 */
+    /** 调试/支持用：记录某个维度加载时“是否被公式接管”的决定（config 的 debug_logs 打开时输出）。 */
     private static void logDecision(ServerLevel sl, String source, ChunkGenerator generator) {
+        if (!OhMyWorldConfig.debugLogsEnabled()) return;
         LOGGER.info("ohmyworld: level {} ({}) generator={}, formula for this dimension={}, bound={}",
                 ResourceIds.keyId(sl.dimension()), source, generator.getClass().getSimpleName(),
                 PatternData.hasFormulaFor(sl.dimension()), PatternData.snapshotFor(generator) != null);

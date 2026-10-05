@@ -284,3 +284,6 @@ are unaffected). With server_mode, config formula edits take effect in about
     server restart (leave and re-enter the world in singleplayer) before it
     affects the already-created generators; editing the formula text inside
     the sections still takes effect in about 5 seconds.
+  * For troubleshooting, set "debug_logs": true in config/ohmyworld.json: the
+    log then shows per-dimension takeover decisions, formula marker reads and
+    writes, and the overworld replacement decision (default false).

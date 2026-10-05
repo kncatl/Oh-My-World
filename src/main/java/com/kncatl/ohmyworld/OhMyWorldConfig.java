@@ -30,9 +30,19 @@ public class OhMyWorldConfig {
 
     private boolean server_mode = false;
     private String formula = DEFAULT_FORMULA;
+    /** 诊断日志开关：为 true 时输出每个维度的接管决定、marker 读写、客户端替换决定等。 */
+    private boolean debug_logs = false;
 
     public boolean serverMode() { return server_mode; }
     public String formula() { return formula; }
+    public boolean debugLogs() { return debug_logs; }
+
+    /** 当前配置是否开启了诊断日志（供各处的日志门控使用；未加载时按需读取一次）。 */
+    public static boolean debugLogsEnabled() {
+        OhMyWorldConfig config = instance;
+        if (config == null) config = load();
+        return config != null && config.debugLogs();
+    }
 
     public static OhMyWorldConfig load() {
         if (instance != null) return instance;

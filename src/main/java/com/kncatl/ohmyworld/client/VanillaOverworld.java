@@ -10,6 +10,7 @@ import net.minecraft.world.level.biome.MultiNoiseBiomeSourceParameterLists;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 
+import com.kncatl.ohmyworld.OhMyWorldConfig;
 import com.kncatl.ohmyworld.PatternData;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
@@ -39,12 +40,14 @@ public final class VanillaOverworld {
     /** 供注入点调用：满足条件时返回“主世界换成原版”的世界创建上下文，否则原样返回。 */
     public static WorldCreationContext maybeReplace(WorldCreationContext context) {
         if (shouldReplace()) {
-            LOGGER.info("ohmyworld: [client] formula has no overworld section; "
-                    + "the new world's overworld will use vanilla generation");
+            if (OhMyWorldConfig.debugLogsEnabled()) {
+                LOGGER.info("ohmyworld: [client] formula has no overworld section; "
+                        + "the new world's overworld will use vanilla generation");
+            }
             return context.withDimensions((access, dimensions) ->
                     dimensions.replaceOverworldGenerator(access, vanillaOverworldGenerator(access)));
         }
-        if (PatternData.isPending()) {
+        if (PatternData.isPending() && OhMyWorldConfig.debugLogsEnabled()) {
             LOGGER.info("ohmyworld: [client] overworld replacement skipped "
                             + "(explicit formula = {}, overworld section = {})",
                     PatternData.hasExplicitFormula(), PatternData.hasFormulaFor(Level.OVERWORLD));

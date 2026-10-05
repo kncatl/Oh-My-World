@@ -228,7 +228,9 @@ public class PatternData {
                 Files.createDirectories(marker.getParent());
                 String raw = getRawInput();
                 writeAtomically(marker, raw);
-                LOGGER.info("ohmyworld: wrote formula marker ({} chars)", raw.length());
+                if (OhMyWorldConfig.debugLogsEnabled()) {
+                    LOGGER.info("ohmyworld: wrote formula marker ({} chars)", raw.length());
+                }
             }
         } catch (Exception e) {
             LOGGER.warn("markActive failed", e);
@@ -260,8 +262,10 @@ public class PatternData {
                     }
                     if (!setDimensions(result, raw)) return false;
                     pending = false;
-                    LOGGER.info("ohmyworld: restored formula from marker ({} dimension(s))",
-                            result.dimensions().size());
+                    if (OhMyWorldConfig.debugLogsEnabled()) {
+                        LOGGER.info("ohmyworld: restored formula from marker ({} dimension(s))",
+                                result.dimensions().size());
+                    }
                     return true;
                 }
             }
