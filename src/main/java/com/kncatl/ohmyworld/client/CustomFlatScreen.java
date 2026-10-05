@@ -81,10 +81,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private int statusColor = OK_COLOR;
     private long statusUntil;
     private int[] previewColors;
-    private String previewDim;
+    private String previewSelectedDim;
     private String previewComputedFor;
     private long previewDueAt;
     private boolean previewRunning;
+    private Button switchBtn;
     private String pendingFormula;
     private String pendingName;
 
@@ -97,6 +98,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final Component OPEN_GUIDE = Component.translatable("ohmyworld.custom_screen.open_guide");
     private static final Component EXAMPLES_BTN = Component.translatable("ohmyworld.custom_screen.examples");
     private static final Component EXAMPLES_TITLE = Component.translatable("ohmyworld.custom_screen.examples_title");
+    private static final Component PREVIEW_SWITCH = Component.translatable("ohmyworld.custom_screen.preview_switch");
     private static final Component DONE = Component.translatable("ohmyworld.custom_screen.done");
     private static final Component CANCEL = Component.translatable("ohmyworld.custom_screen.cancel");
     private static final Component SAVE = Component.translatable("ohmyworld.custom_screen.save");
@@ -127,7 +129,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int deficit = CARD_H - this.cardH;
         int formulaH = Math.max(36, 84 - deficit);
         this.formulaY = this.cardY + 66;
-        this.previewVisible = wantPreview && this.formulaY + PREVIEW_BOX <= this.cardY + this.cardH - 36;
+        this.previewVisible = wantPreview && this.formulaY + 206 <= this.cardY + this.cardH;
         int leftW = this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0);
         int fx = this.cardX + 16;
 
@@ -145,9 +147,13 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.addRenderableWidget(this.nameInput);
 
         this.statusY = this.nameY + 40;
+        this.switchBtn = null;
         if (this.previewVisible) {
             this.previewX = this.cardX + this.cardW - 16 - PREVIEW_BOX + 2;
             this.previewY = this.formulaY + 2;
+            this.switchBtn = Button.builder(PREVIEW_SWITCH, b -> cyclePreviewDimension())
+                    .bounds(this.previewX, this.previewY + PREVIEW_PX + 6, PREVIEW_BOX, 20).build();
+            this.addRenderableWidget(this.switchBtn);
         }
 
         int right = this.cardX + this.cardW - 16;
@@ -185,7 +191,38 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.currentResult = result;
         this.currentErrors = result.errors();
         this.previewDueAt = System.currentTimeMillis() + PREVIEW_DEBOUNCE_MS;
+        // 预览维度选择：失效/未选时退回第一个可用维度；只有一个可用维度时隐藏切换按钮
+        List<String> available = availablePreviewDimensions();
+        if (this.previewSelectedDim == null || !available.contains(this.previewSelectedDim)) {
+            this.previewSelectedDim = available.isEmpty() ? null : available.get(0);
+            this.previewComputedFor = null;
+        }
+        if (this.switchBtn != null) {
+            this.switchBtn.visible = available.size() > 1;
+        }
         updateButtonState();
+    }
+
+    /** 当前公式里有内容的维度，按固定顺序返回。 */
+    private List<String> availablePreviewDimensions() {
+        List<String> dims = new ArrayList<>();
+        if (this.currentResult == null) return dims;
+        for (String dim : List.of(FormulaParser.DIM_OVERWORLD,
+                FormulaParser.DIM_NETHER, FormulaParser.DIM_END)) {
+            if (this.currentResult.dimensions().containsKey(dim)) dims.add(dim);
+        }
+        return dims;
+    }
+
+    /** 循环切换预览维度（主世界 → 下界 → 末地 → …），并立即重建预览。 */
+    private void cyclePreviewDimension() {
+        List<String> available = availablePreviewDimensions();
+        if (available.size() < 2) return;
+        int index = available.indexOf(this.previewSelectedDim);
+        this.previewSelectedDim = available.get((index + 1) % available.size());
+        this.previewColors = null; // 旧维度的画面先清掉，避免误导
+        this.previewComputedFor = null;
+        this.previewDueAt = System.currentTimeMillis();
     }
 
     private void updateButtonState() {
@@ -503,7 +540,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int py = this.previewY;
         t.fill(px - 2, py - 2, px + PREVIEW_PX + 2, py + PREVIEW_PX + 2, 0xFF4A4A4A);
         t.fill(px - 1, py - 1, px + PREVIEW_PX + 1, py + PREVIEW_PX + 1, 0xFF0A0A0A);
-        String dim = this.previewDim;
+        String dim = this.previewSelectedDim;
         if (dim == null) dim = FormulaParser.DIM_OVERWORLD;
         t.text(this.font, Component.translatable("ohmyworld.custom_screen.preview",
                 Component.translatable("ohmyworld.dimension." + dim)), px, this.formulaY - 12, MUTED_COLOR);
@@ -525,22 +562,24 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         long now = System.currentTimeMillis();
         if (this.previewDueAt == 0 || now < this.previewDueAt) return;
         String formula = this.formulaBox.value();
-        if (formula.isBlank() || !this.currentErrors.isEmpty() || formula.equals(this.previewComputedFor)) return;
+        String dimension = this.previewSelectedDim;
+        if (formula.isBlank() || !this.currentErrors.isEmpty() || dimension == null) return;
+        String key = formula + "\u0000" + dimension;
+        if (key.equals(this.previewComputedFor)) return;
         FormulaParser.DimensionParseResult parsed = this.currentResult;
         this.previewRunning = true;
         Thread worker = new Thread(() -> {
             FormulaPreview.Result result = null;
             try {
-                result = FormulaPreview.compute(parsed);
+                result = FormulaPreview.compute(parsed, dimension);
             } catch (Exception ignored) {}
             FormulaPreview.Result computed = result;
             Minecraft.getInstance().execute(() -> {
                 this.previewRunning = false;
                 if (computed != null) {
                     this.previewColors = computed.colors();
-                    this.previewDim = computed.dimensionKey();
                 }
-                this.previewComputedFor = formula;
+                this.previewComputedFor = key;
             });
         }, "ohmyworld-preview");
         worker.setDaemon(true);

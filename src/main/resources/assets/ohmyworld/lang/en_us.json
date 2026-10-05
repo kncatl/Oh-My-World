@@ -16,6 +16,7 @@
   "ohmyworld.custom_screen.example.cycle": "Cyclic layers (3+2+1)",
   "ohmyworld.custom_screen.example.multi": "Multi-dimension + seedhash",
   "ohmyworld.custom_screen.preview": "Preview - %s",
+  "ohmyworld.custom_screen.preview_switch": "Switch dimension",
   "ohmyworld.custom_screen.done": "Done",
   "ohmyworld.custom_screen.cancel": "Cancel",
   "ohmyworld.custom_screen.save": "Save Formula",

@@ -32,9 +32,8 @@ public final class FormulaPreview {
 
     private FormulaPreview() {}
 
-    /** 计算预览；公式为空或无有效维度时返回 null。 */
-    public static Result compute(FormulaParser.DimensionParseResult parsed) {
-        String dimension = pickDimension(parsed);
+    /** 计算指定维度的预览；该维度不在公式里时返回 null。 */
+    public static Result compute(FormulaParser.DimensionParseResult parsed, String dimension) {
         if (dimension == null) return null;
         FormulaParser.ParsedDimension parsedDim = parsed.dimensions().get(dimension);
         if (parsedDim == null || parsedDim.layers().isEmpty()) return null;
@@ -64,14 +63,5 @@ public final class FormulaPreview {
             return (color >>> 24) == 0 ? color | 0xFF000000 : color;
         }
         return EMPTY_COLOR;
-    }
-
-    /** 预览维度：优先主世界，其次按固定顺序取第一个有公式的维度。 */
-    private static String pickDimension(FormulaParser.DimensionParseResult parsed) {
-        for (String dimension : List.of(FormulaParser.DIM_OVERWORLD,
-                FormulaParser.DIM_NETHER, FormulaParser.DIM_END)) {
-            if (parsed.dimensions().containsKey(dimension)) return dimension;
-        }
-        return null;
     }
 }
