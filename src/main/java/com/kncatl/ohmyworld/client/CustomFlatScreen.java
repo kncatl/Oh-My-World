@@ -151,7 +151,6 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.nameY = this.formulaY + formulaH + 16;
         this.nameInput = new EditBox(this.font, fx, this.nameY, leftW, 20, NAME_LABEL);
         this.nameInput.setMaxLength(64);
-        this.nameInput.setHint(NAME_HINT);
         if (pendingName != null) this.nameInput.setValue(pendingName);
         this.nameInput.setResponder(t -> updateButtonState());
         this.addRenderableWidget(this.nameInput);
@@ -693,6 +692,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         t.text(this.font, HINT, fx, this.cardY + 32, 0xFFB8B8B8);
         t.text(this.font, FORMULA_LABEL, fx, this.formulaY - 12, MUTED_COLOR);
         t.text(this.font, NAME_LABEL, fx, this.nameY - 12, MUTED_COLOR);
+        // 名称框占位文字自绘：原版 EditBox 的 hint 颜色跨版本不一致（1.21.1 偏黑）
+        if (this.nameInput.getValue().isEmpty() && !this.nameInput.isFocused()) {
+            t.text(this.font, NAME_HINT, this.nameInput.getX() + 4, this.nameInput.getY() + 6, MUTED_COLOR);
+        }
         tickPreview();
         drawPreview(t);
         drawStatus(t, fx, this.statusY, this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0));
