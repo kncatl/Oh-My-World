@@ -15,6 +15,8 @@
   - **Open Guide button**: opens the bundled formula guide (per language), falling back to the ohmyworld folder.
   - **Saved-formula management**: entries show their last-modified time and support rename/delete (with confirmation).
 - Fixed: formulas with newlines keep their line breaks when the editor is reopened; the name-field placeholder was too dark on 1.21.1; widget misalignment and a crash when the window was resized or the screen reopened.
+- Fixed: Fabric 1.21.1-1.21.5 (<1.21.11) crashed when opening the formula editor (the multi-line compat code used mojmap reflection; it now uses compile-time calls with a single-line fallback so the screen always opens).
+- Fixed: startup crash on old Fabric Loaders (0.18.x, bundled MixinExtras 0.5.0) - the injectors now use `@WrapOperation`, avoiding the old MixinExtras issue with array-shaped `@Redirect` annotations; updating the loader is still recommended.
 
 ### Compatibility
 - UI-only change: formula syntax, parsing, world generation and save formats are unchanged; existing worlds, formulas and saved files keep working.

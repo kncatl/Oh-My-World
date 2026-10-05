@@ -5,9 +5,10 @@ import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 
 import com.kncatl.ohmyworld.client.VanillaOverworld;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
  * 「公式没有 overworld 节 → 新建世界的主世界用原版生成」的注入点。
@@ -21,14 +22,19 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 创建路径调用；创建世界界面走的是 {@code onCreate → bake →
  * createLevelFromExistingSettings} 这条链（1.21.1 与 26.3 结构一致，NeoForge 的
  * 补丁也不修改 onCreate 区域）。
+ *
+ * <p>用 MixinExtras 的 {@code @WrapOperation} 而非 Sponge 的 {@code @Redirect}：
+ * 旧 Fabric Loader（0.18.x，MixinExtras 0.5.0）读取数组形态的 {@code @Redirect.at}
+ * 会崩；{@code @WrapOperation} 的 {@code at} 在两代 MixinExtras 里都是数组形态。
  */
 @Mixin(CreateWorldScreen.class)
 public class MixinCreateWorldScreen {
 
-    @Redirect(method = "onCreate", at = @At(value = "INVOKE",
+    @WrapOperation(method = "onCreate", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/gui/screens/worldselection/WorldCreationUiState;getSettings()"
                     + "Lnet/minecraft/client/gui/screens/worldselection/WorldCreationContext;"))
-    private WorldCreationContext ohmyworld$replaceOverworldOnCreate(WorldCreationUiState uiState) {
-        return VanillaOverworld.maybeReplace(uiState.getSettings());
+    private WorldCreationContext ohmyworld$replaceOverworldOnCreate(WorldCreationUiState uiState,
+                                                                    Operation<WorldCreationContext> original) {
+        return VanillaOverworld.maybeReplace(original.call(uiState));
     }
 }

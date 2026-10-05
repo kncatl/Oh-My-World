@@ -8,9 +8,10 @@ import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 
 import com.kncatl.ohmyworld.PatternData;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
  * 结构控制与装饰特性开关：{@code [structure:...]} 指令在生成期裁剪结构组；
@@ -26,22 +27,28 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 1.21.1–26.3 字节码已核对）；{@code [features:none]} 时返回空列表即可只掐特性、
  * 不影响结构部件放置。换群系后的特性表重建在 {@code BiomeControl} 里完成。
  *
+ * <p>用 MixinExtras 的 {@code @WrapOperation} 而非 Sponge 的 {@code @Redirect}：
+ * 旧 Fabric Loader（0.18.x，MixinExtras 0.5.0）读取我们 jar 里数组形态的
+ * {@code @Redirect.at} 会崩（0.5.5 才修）；{@code @WrapOperation} 的 {@code at}
+ * 在两代 MixinExtras 里都是数组形态，旧/新加载器通吃。
+ *
  * <p>locate 与末影之眼不受影响（仍按理论位置计算；指南已注明）。
  */
 @Mixin(ChunkGenerator.class)
 public class MixinChunkGenerator {
 
-    @Redirect(method = "createStructures", at = @At(value = "INVOKE",
+    @WrapOperation(method = "createStructures", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/level/chunk/ChunkGeneratorStructureState;possibleStructureSets()"
                     + "Ljava/util/List;"))
-    private List<Holder<StructureSet>> ohmyworld$filterStructureSets(ChunkGeneratorStructureState state) {
-        return PatternData.filterStructureSets((ChunkGenerator) (Object) this, state.possibleStructureSets());
+    private List<Holder<StructureSet>> ohmyworld$filterStructureSets(ChunkGeneratorStructureState state,
+                                                                     Operation<List<Holder<StructureSet>>> original) {
+        return PatternData.filterStructureSets((ChunkGenerator) (Object) this, original.call(state));
     }
 
-    @Redirect(method = "applyBiomeDecoration", at = @At(value = "INVOKE",
+    @WrapOperation(method = "applyBiomeDecoration", at = @At(value = "INVOKE",
             target = "Ljava/util/function/Supplier;get()Ljava/lang/Object;"))
-    private Object ohmyworld$suppressFeatures(java.util.function.Supplier<?> supplier) {
+    private Object ohmyworld$suppressFeatures(java.util.function.Supplier<?> supplier, Operation<Object> original) {
         if (PatternData.suppressFeatures((ChunkGenerator) (Object) this)) return List.of();
-        return supplier.get();
+        return original.call(supplier);
     }
 }
