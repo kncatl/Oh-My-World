@@ -86,7 +86,8 @@ public class PatternData {
      */
     public static boolean setDimensions(FormulaParser.DimensionParseResult result, String rawInput) {
         if (result == null || !result.errors().isEmpty() || result.dimensions().isEmpty()) return false;
-        String raw = stripNewlines(rawInput);
+        // 编辑器往返要保留原始换行（多行公式显示）；写 marker 时再剥掉换行（见 markActive）
+        String raw = rawInput == null ? "" : rawInput;
         Map<FormulaParser.ParsedDimension, PatternSnapshot> shared = new IdentityHashMap<>();
         Map<ResourceKey<Level>, PatternSnapshot> table = new LinkedHashMap<>();
         for (Map.Entry<String, FormulaParser.ParsedDimension> entry : result.dimensions().entrySet()) {
@@ -273,7 +274,8 @@ public class PatternData {
             Path marker = markerPath(level);
             if (overwrite || !Files.exists(marker)) {
                 Files.createDirectories(marker.getParent());
-                String raw = getRawInput();
+                // marker 按单行存储（换行只影响公式文本的排版，解析不受影响）
+                String raw = stripNewlines(getRawInput());
                 writeAtomically(marker, raw);
                 if (OhMyWorldConfig.debugLogsEnabled()) {
                     LOGGER.info("ohmyworld: wrote formula marker ({} chars)", raw.length());

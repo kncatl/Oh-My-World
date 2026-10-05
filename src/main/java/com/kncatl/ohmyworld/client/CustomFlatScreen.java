@@ -179,6 +179,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     private void validate() {
+        if (this.formulaBox == null) return; // init 期间的早期回调（MultiLineEditBox.setValue 会立即触发监听器）
         String input = this.formulaBox.value();
         FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(input);
         this.currentResult = result;
@@ -188,6 +189,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     private void updateButtonState() {
+        // init 期间控件还没建齐时的回调直接跳过（init 末尾会统一刷新一次）
+        if (this.nameInput == null || this.saveBtn == null || this.doneBtn == null || this.formulaBox == null) {
+            return;
+        }
         boolean hasName = !this.nameInput.getValue().isBlank();
         boolean hasFormula = !this.formulaBox.value().isBlank();
         this.saveBtn.active = hasName && hasFormula;
