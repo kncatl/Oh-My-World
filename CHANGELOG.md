@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.2.0-beta.1
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Multi-dimension formulas**: write per-dimension rules in `{overworld=...}{the_nether=...}{the_end=...}` sections. Dimensions without a section keep vanilla generation; `{the_end=overworld}` reuses another dimension's formula (aliases can be chained). Shorthands (`nether`, `end`) and an optional `minecraft:` prefix are accepted.
+- **Vanilla Overworld option**: when a formula has no `overworld` section, newly created worlds use the vanilla Overworld generator while the Nether/End follow their formulas. The editor shows a hint for this case; existing worlds are unaffected.
+- **`seed` variable** and **`seedhash(...)` function**: the world seed is available to formulas, and `seedhash` mixes the full 64-bit seed with its arguments (returns `[0,1)`), so the same formula can differ between worlds. The mixing algorithm is frozen (documented as a compatibility contract).
+- Strongholds now generate in formula worlds (alongside villages), matching current vanilla superflat — the End portal is reachable again.
+- New `debug_logs` option in `config/ohmyworld.json` (default `false`) for diagnostic logging.
+
+### Fixed
+- **Worlds created with the Formula Generator preset had no Nether/End at all** (trying to use a portal did nothing). The preset now defines both dimensions like the vanilla presets do. Worlds created before this version cannot gain them retroactively — create a new world to get them.
+- The "vanilla Overworld" replacement never ran on the create-world screen (the injection point was only used by the quick-create path); it now hooks the actual creation step.
+
+### Compatibility
+- Formulas without `{}` behave exactly as before (they only affect the Overworld).
+- `rand`/`randexcept` are unchanged.
+- Worlds created with this version store the sectioned syntax in their marker; opening them with an older mod version disables the pattern (documented). Worlds created before this version keep working — note they will still lack the Nether/End.
+- The light values saved in a chunk are light-engine state and can differ slightly between any two runs.
+
 ## v1.1.7
 
 ### Added

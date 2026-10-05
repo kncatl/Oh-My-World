@@ -164,15 +164,21 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           title="Oh-My-World ${tag}"
+          # 预发布后缀（如 v1.2.0-beta.1）：发布为 Pre-release，不会被标记成 Latest
+          prerelease=""
+          case "$tag" in
+            *-*) prerelease="--prerelease" ;;
+          esac
 
           if gh release view "$tag" >/dev/null 2>&1; then
             # 允许重跑：已存在则更新说明并覆盖附件
             echo "Release $tag already exists, updating"
             gh release upload "$tag" dist/*.jar --clobber
-            gh release edit "$tag" --title "$title" --notes-file dist/RELEASE_NOTES.md
+            gh release edit "$tag" --title "$title" --notes-file dist/RELEASE_NOTES.md $prerelease
           else
             gh release create "$tag" dist/*.jar \
               --title "$title" \
               --notes-file dist/RELEASE_NOTES.md \
-              --verify-tag
+              --verify-tag \
+              $prerelease
           fi
