@@ -19,7 +19,7 @@
 - **Vanilla Overworld option** — a formula without an `overworld` section creates a normal vanilla Overworld, with formulas only in the dimensions you wrote
 - **Cyclic layer patterns** — define repeating sequences within a y-range
 - **Checkboard, stripes, sine waves, random terrain** and more
-- **Custom formula editor** with save/load to local files
+- **Modern formula editor** — card layout, multi-line editing with drag-selection, a live top-down preview (switchable dimensions), example formulas, fullscreen editing; saved formulas can be renamed/deleted and loaded from local files
 - **Live error feedback** — parse and semantic errors (unknown functions/blocks, wrong argument counts, etc.) are shown directly in the editor, and invalid formulas cannot be applied
 - **Cross-session persistence** — your pattern is stored with the world
 

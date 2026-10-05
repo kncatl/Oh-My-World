@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.2.2-beta.1
+
+> Beta release — please report any issue on GitHub.
+
+### Changed
+- **The formula editor got a full makeover** (client-side UI only; formula syntax and world generation are unchanged):
+  - New card layout with clear sections, grouped buttons and a live status area (parse summary such as "Parsed 2 dimension(s) - Overworld: 12 layers", error list, save/load feedback).
+  - **The formula field is a real multi-line editor**: soft wrapping, proper newline display, mouse drag-selection and internal scrolling.
+  - **Live top-down preview**: samples the top block of each column and colours it by its map colour; refreshes about 0.5s after typing stops, and a "Switch dimension" button previews the Nether/End.
+  - **Examples button**: four built-in formulas (checkerboard / 3x3 grid / cyclic layers / multi-dimension + seedhash) fill in with one click.
+  - **Fullscreen editing**: expand long formulas into a full-window editor (Ctrl+Enter to finish, Esc to cancel).
+  - **Ctrl+Enter** applies the formula.
+  - **Open Guide button**: opens the bundled formula guide (per language), falling back to the ohmyworld folder.
+  - **Saved-formula management**: entries show their last-modified time and support rename/delete (with confirmation).
+- Fixed: formulas with newlines keep their line breaks when the editor is reopened; the name-field placeholder was too dark on 1.21.1; widget misalignment and a crash when the window was resized or the screen reopened.
+
+### Compatibility
+- UI-only change: formula syntax, parsing, world generation and save formats are unchanged; existing worlds, formulas and saved files keep working.
+- Server-side generation is unchanged: servers may stay on v1.2.1-beta.1, but upgrading both sides together is recommended.
+
 ## v1.2.1-beta.1
 
 > Beta release — please report any issue on GitHub.
