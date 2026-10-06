@@ -30,7 +30,7 @@ import com.kncatl.ohmyworld.compat.GuiCompat;
 public class FormulaEditor extends AbstractWidget {
 
     private static final int PAD = 4;
-    private static final int SCROLLBAR_W = 3;
+    private static final int SCROLLBAR_W = 4;
     private static final int SCROLL_STEP_LINES = 2;
 
     private static final int COLOR_BG = 0xFF0A0A0A;
@@ -40,6 +40,7 @@ public class FormulaEditor extends AbstractWidget {
     private static final int COLOR_SELECTION = 0x7A3B6EA5;
     private static final int COLOR_CURSOR = 0xFFD0D0D0;
     private static final int COLOR_SCROLLBAR = 0xFF5A5A5A;
+    private static final int COLOR_SCROLLBAR_HOVER = 0xFF9A9A9A;
 
     private static final int K_LEFT = InputConstants.KEY_LEFT;
     private static final int K_RIGHT = InputConstants.KEY_RIGHT;
@@ -60,6 +61,9 @@ public class FormulaEditor extends AbstractWidget {
     /** 视口第一条可见行的行号（滚动以整行为步长）。 */
     private int scrollLine;
     private boolean dragging;
+    private boolean scrollDragging;
+    /** 按住滑块时，光标相对滑块顶部的偏移；点轨道时为滑块高度一半（滑块居中跳过去）。 */
+    private double scrollGrabOffset;
     private long focusedTime;
 
     public FormulaEditor(Font font, int x, int y, int width, int height,
@@ -68,7 +72,7 @@ public class FormulaEditor extends AbstractWidget {
         super(x, y, width, height, narration);
         this.font = font;
         this.placeholder = placeholder;
-        this.innerWidth = Math.max(1, width - PAD * 2);
+        this.innerWidth = Math.max(1, width - PAD * 2 - SCROLLBAR_W - 1);
         this.model = new FormulaTextModel(font, this.innerWidth);
         this.model.setCharacterLimit(maxLength);
         if (responder != null) this.model.setValueListener(responder);
@@ -107,6 +111,70 @@ public class FormulaEditor extends AbstractWidget {
 
     private int clampScroll(int value) {
         return Math.max(0, Math.min(value, maxScrollLine()));
+    }
+
+    // ------------------------------------------------------------ 滚动条交互
+
+    private int scrollbarX() {
+        return getX() + getWidth() - PAD - SCROLLBAR_W;
+    }
+
+    private int trackTop() {
+        return getY() + PAD;
+    }
+
+    private int trackHeight() {
+        return Math.max(1, getHeight() - PAD * 2);
+    }
+
+    private int thumbHeight() {
+        int count = Math.max(1, this.model.lines().size());
+        int track = trackHeight();
+        return Math.min(track, Math.max(8, (int) ((long) track * visibleLines() / count)));
+    }
+
+    private int thumbY() {
+        int max = maxScrollLine();
+        if (max <= 0) return trackTop();
+        return trackTop() + (int) ((long) (trackHeight() - thumbHeight()) * this.scrollLine / max);
+    }
+
+    private boolean scrollbarVisibleNow() {
+        return maxScrollLine() > 0;
+    }
+
+    private boolean isOverScrollbar(double mouseX, double mouseY) {
+        if (!scrollbarVisibleNow()) return false;
+        int sx = scrollbarX();
+        return mouseX >= sx - 1 && mouseX <= sx + SCROLLBAR_W + 1
+                && mouseY >= trackTop() - 1 && mouseY <= trackTop() + trackHeight() + 1;
+    }
+
+    /** 点击落在滚动条上时接管本次点击（按到滑块保持抓取偏移，点轨道则滑块居中跳过去）。 */
+    private boolean startScrollbarDrag(double mouseX, double mouseY) {
+        if (!isOverScrollbar(mouseX, mouseY)) return false;
+        this.dragging = false;
+        int thumbTop = thumbY();
+        int thumbH = thumbHeight();
+        if (mouseY >= thumbTop && mouseY <= thumbTop + thumbH) {
+            this.scrollGrabOffset = mouseY - thumbTop;
+        } else {
+            this.scrollGrabOffset = thumbH / 2.0;
+        }
+        this.scrollDragging = true;
+        scrollFromMouse(mouseY);
+        return true;
+    }
+
+    private void scrollFromMouse(double mouseY) {
+        int span = trackHeight() - thumbHeight();
+        int max = maxScrollLine();
+        if (span <= 0 || max <= 0) {
+            this.scrollLine = 0;
+            return;
+        }
+        double rel = mouseY - trackTop() - this.scrollGrabOffset;
+        this.scrollLine = clampScroll((int) Math.round(rel / span * max));
     }
 
     /** 光标行保持可见。 */
@@ -228,6 +296,7 @@ public class FormulaEditor extends AbstractWidget {
     //? >=1.21.11 {
     @Override
     public void onClick(net.minecraft.client.input.MouseButtonEvent event, boolean doubled) {
+        if (startScrollbarDrag(event.x(), event.y())) return;
         this.dragging = true;
         int index = indexAt(event.x(), event.y());
         if (doubled) {
@@ -241,6 +310,10 @@ public class FormulaEditor extends AbstractWidget {
 
     @Override
     public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent event, double dragX, double dragY) {
+        if (this.scrollDragging) {
+            scrollFromMouse(event.y());
+            return true;
+        }
         if (this.dragging) {
             this.model.moveTo(indexAt(event.x(), event.y()), true);
             scrollToCursor();
@@ -252,6 +325,7 @@ public class FormulaEditor extends AbstractWidget {
     @Override
     public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent event) {
         this.dragging = false;
+        this.scrollDragging = false;
         return super.mouseReleased(event);
     }
 
@@ -271,6 +345,7 @@ public class FormulaEditor extends AbstractWidget {
     //?} else {
     @Override
     public void onClick(double mouseX, double mouseY) {
+        if (startScrollbarDrag(mouseX, mouseY)) return;
         this.dragging = true;
         this.model.moveTo(indexAt(mouseX, mouseY), net.minecraft.client.gui.screens.Screen.hasShiftDown());
         scrollToCursor();
@@ -278,6 +353,10 @@ public class FormulaEditor extends AbstractWidget {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.scrollDragging) {
+            scrollFromMouse(mouseY);
+            return true;
+        }
         if (this.dragging && button == 0) {
             this.model.moveTo(indexAt(mouseX, mouseY), true);
             scrollToCursor();
@@ -289,6 +368,7 @@ public class FormulaEditor extends AbstractWidget {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         this.dragging = false;
+        this.scrollDragging = false;
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
@@ -326,16 +406,16 @@ public class FormulaEditor extends AbstractWidget {
     //? >=26.1 {
     @Override
     protected void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        drawEditor(GuiCompat.of(graphics));
+        drawEditor(GuiCompat.of(graphics), mouseX, mouseY);
     }
     //?} else {
     @Override
     protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        drawEditor(GuiCompat.of(graphics));
+        drawEditor(GuiCompat.of(graphics), mouseX, mouseY);
     }
     //?}
 
-    private void drawEditor(GuiCompat.Draw t) {
+    private void drawEditor(GuiCompat.Draw t, int mouseX, int mouseY) {
         this.scrollLine = clampScroll(this.scrollLine);
         int x = getX();
         int y = getY();
@@ -362,7 +442,7 @@ public class FormulaEditor extends AbstractWidget {
         } finally {
             t.popClip();
         }
-        drawScrollbar(t, x, y, w, h);
+        drawScrollbar(t, mouseX, mouseY);
     }
 
     private void drawPlaceholder(GuiCompat.Draw t, int ix, int iy, int ih) {
@@ -452,15 +532,12 @@ public class FormulaEditor extends AbstractWidget {
         t.fill(cx, y - 1, cx + 1, y + lineH + 1, COLOR_CURSOR);
     }
 
-    private void drawScrollbar(GuiCompat.Draw t, int x, int y, int w, int h) {
-        int max = maxScrollLine();
-        int count = this.model.lines().size();
-        if (max <= 0 || count <= 0) return;
-        int trackTop = y + PAD;
-        int trackH = Math.max(1, h - PAD * 2);
-        int thumbH = Math.max(8, (int) ((long) trackH * visibleLines() / count));
-        int thumbY = trackTop + (int) ((long) (trackH - thumbH) * this.scrollLine / max);
-        int sx = x + w - PAD - SCROLLBAR_W;
-        t.fill(sx, thumbY, sx + SCROLLBAR_W, thumbY + thumbH, COLOR_SCROLLBAR);
+    private void drawScrollbar(GuiCompat.Draw t, int mouseX, int mouseY) {
+        if (!scrollbarVisibleNow()) return;
+        boolean active = this.scrollDragging || isOverScrollbar(mouseX, mouseY);
+        int sx = scrollbarX();
+        int top = thumbY();
+        t.fill(sx, top, sx + SCROLLBAR_W, top + thumbHeight(),
+                active ? COLOR_SCROLLBAR_HOVER : COLOR_SCROLLBAR);
     }
 }
