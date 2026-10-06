@@ -215,12 +215,24 @@ public class FormulaEditor extends AbstractWidget {
         boolean wasFocused = isFocused();
         super.setFocused(focused);
         if (focused && !wasFocused) this.focusedTime = System.currentTimeMillis();
+        //? >=26.1 {
+        // 26.x 的文本/输入法输入按焦点开关：不通知就收不到字符（原版编辑框同样处理）
+        Minecraft.getInstance().onTextInputFocusChange(this, focused);
+        //?}
     }
 
     @Override
     protected void updateWidgetNarration(NarrationElementOutput output) {
         output.add(NarratedElementType.TITLE, this.createNarrationMessage());
     }
+
+    //? >=26.3 {
+    @Override
+    public boolean capturesInput() {
+        // 26.3 起聚焦的文本控件需声明捕获输入（文本输入模式与全局快捷键让位均以此判断）
+        return this.visible && isFocused();
+    }
+    //?}
 
     // ---------------------------------------------------------------- 键盘
 
@@ -560,11 +572,17 @@ public class FormulaEditor extends AbstractWidget {
 
     private void drawCursor(GuiCompat.Draw t, int ix, int iy) {
         if (!isFocused()) return;
-        long phase = System.currentTimeMillis() - this.focusedTime;
-        if (phase > 350 && (phase / 350) % 2 == 1) return;
         int lineH = lineHeight();
         int y = iy + (this.model.cursorLine() - this.scrollLine) * lineH;
         int cx = ix + this.model.cursorX();
+        //? >=26.3 {
+        // 告诉输入法光标在哪：候选窗定位用（原版多行框在渲染时做同样的事）
+        if (capturesInput()) {
+            Minecraft.getInstance().textInputManager().setTextInputArea(cx, y, cx + 1, y + lineH + 1);
+        }
+        //?}
+        long phase = System.currentTimeMillis() - this.focusedTime;
+        if (phase > 350 && (phase / 350) % 2 == 1) return;
         t.fill(cx, y - 1, cx + 1, y + lineH + 1, COLOR_CURSOR);
     }
 
