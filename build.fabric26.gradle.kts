@@ -31,9 +31,9 @@ val mcRangeSpec = nodeSpec["mcRange"] as? Map<String, Any?> ?: emptyMap()
 val mcRangeFrom = (mcRangeSpec["from"] as? String) ?: mcVersion
 val mcRangeToExclusive = mcRangeSpec["toExclusive"] as? String
 val minecraftRange = if (mcRangeToExclusive == null) mcRangeFrom else ">=$mcRangeFrom <$mcRangeToExclusive"
-// Fabric API 依赖：单版本用精确版本；跨版本时放宽为 >=（API 版本号随 MC 版本递增，
-// 用户会装上与其 MC 版本对应的那份）。
-val fabricApiRange = if (mcRangeToExclusive == null) fabricApiVersion else ">=$fabricApiMin"
+// Fabric API 依赖：统一用 >= 下限（裸版本会被 Fabric 当成「精确匹配」，
+// 新 API 一发布就会误报依赖不满足；跨版本节点可用 fabricApiMin 指定更低的下限）。
+val fabricApiRange = ">=$fabricApiMin"
 
 plugins {
     // 26.1 起 MC 不再混淆：使用非重映射版 Loom（由 settings.gradle.kts 按版本选择本脚本）。
