@@ -78,6 +78,7 @@ public class FullFormulaScreen extends Screen {
         FormulaParser.DimensionParseResult parsed = FormulaParser.parseDimensionsWithErrors(input);
         this.result = parsed;
         this.errors = parsed.errors();
+        this.formulaBox.setErrorSpans(FormulaErrorLocator.locate(input, this.errors));
     }
 
     /** 把文本写回来源屏幕并返回（来源屏幕会在 init 时读取 pendingFormula）。 */

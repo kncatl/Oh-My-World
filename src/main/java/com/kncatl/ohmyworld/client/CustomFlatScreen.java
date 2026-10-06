@@ -240,6 +240,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(input);
         this.currentResult = result;
         this.currentErrors = result.errors();
+        this.formulaBox.setErrorSpans(FormulaErrorLocator.locate(input, this.currentErrors));
         this.previewDueAt = System.currentTimeMillis() + PREVIEW_DEBOUNCE_MS;
         // 预览维度选择：失效/未选时退回第一个可用维度；只有一个可用维度时隐藏切换按钮
         List<String> available = availablePreviewDimensions();

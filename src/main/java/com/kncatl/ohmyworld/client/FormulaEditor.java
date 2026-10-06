@@ -36,11 +36,14 @@ public class FormulaEditor extends AbstractWidget {
     private static final int COLOR_BG = 0xFF0A0A0A;
     private static final int COLOR_BORDER = 0xFF4A4A4A;
     private static final int COLOR_BORDER_FOCUSED = 0xFF6E6E6E;
+    private static final int COLOR_BORDER_ERROR = 0xFF8A4A4A;
     private static final int COLOR_PLACEHOLDER = 0xFF6E6E6E;
     private static final int COLOR_SELECTION = 0x7A3B6EA5;
     private static final int COLOR_CURSOR = 0xFFD0D0D0;
     private static final int COLOR_SCROLLBAR = 0xFF5A5A5A;
     private static final int COLOR_SCROLLBAR_HOVER = 0xFF9A9A9A;
+    private static final int COLOR_ERROR_BG = 0x33FF5555;
+    private static final int COLOR_ERROR_UNDERLINE = 0xB0FF5555;
 
     private static final int K_LEFT = InputConstants.KEY_LEFT;
     private static final int K_RIGHT = InputConstants.KEY_RIGHT;
@@ -60,6 +63,8 @@ public class FormulaEditor extends AbstractWidget {
 
     /** 视口第一条可见行的行号（滚动以整行为步长）。 */
     private int scrollLine;
+    /** 校验错误对应的原文区间（可能重叠），由屏幕在校验后写入。 */
+    private List<int[]> errorSpans = List.of();
     private boolean dragging;
     private boolean scrollDragging;
     /** 按住滑块时，光标相对滑块顶部的偏移；点轨道时为滑块高度一半（滑块居中跳过去）。 */
@@ -89,6 +94,11 @@ public class FormulaEditor extends AbstractWidget {
 
     public void setResponder(Consumer<String> responder) {
         this.model.setValueListener(responder);
+    }
+
+    /** 设置错误标注区间（原文坐标）；空列表表示没有错误。 */
+    public void setErrorSpans(List<int[]> spans) {
+        this.errorSpans = spans == null || spans.isEmpty() ? List.of() : spans;
     }
 
     // ---------------------------------------------------------------- 滚动
@@ -422,7 +432,9 @@ public class FormulaEditor extends AbstractWidget {
         int w = getWidth();
         int h = getHeight();
 
-        t.fill(x, y, x + w, y + h, isFocused() ? COLOR_BORDER_FOCUSED : COLOR_BORDER);
+        int borderColor = !this.errorSpans.isEmpty() ? COLOR_BORDER_ERROR
+                : isFocused() ? COLOR_BORDER_FOCUSED : COLOR_BORDER;
+        t.fill(x, y, x + w, y + h, borderColor);
         t.fill(x + 1, y + 1, x + w - 1, y + h - 1, COLOR_BG);
 
         int ix = x + PAD;
@@ -436,6 +448,7 @@ public class FormulaEditor extends AbstractWidget {
                 drawPlaceholder(t, ix, iy, ih);
             } else {
                 drawSelection(t, ix, iy);
+                drawErrors(t, ix, iy);
                 drawText(t, value, ix, iy);
                 drawCursor(t, ix, iy);
             }
@@ -464,6 +477,29 @@ public class FormulaEditor extends AbstractWidget {
             t.text(this.font, text.substring(start, end), ix, y, COLOR_PLACEHOLDER);
             start = end < text.length() && text.charAt(end) == '\n' ? end + 1 : Math.max(end, start + 1);
             y += lineH;
+        }
+    }
+
+    private void drawErrors(GuiCompat.Draw t, int ix, int iy) {
+        if (this.errorSpans.isEmpty()) return;
+        int valueLength = this.model.value().length();
+        int lineH = lineHeight();
+        List<FormulaTextModel.Line> lines = this.model.lines();
+        for (int[] span : this.errorSpans) {
+            int from = Math.max(0, span[0]);
+            int to = Math.min(valueLength, span[1]);
+            if (from >= to) continue;
+            for (int i = this.scrollLine; i < lines.size() && i <= this.scrollLine + visibleLines(); i++) {
+                FormulaTextModel.Line line = lines.get(i);
+                int s = Math.max(from, line.start());
+                int e = Math.min(to, line.end());
+                if (s >= e) continue;
+                int y = iy + (i - this.scrollLine) * lineH;
+                int x1 = ix + this.model.xInLine(i, s);
+                int x2 = ix + this.model.xInLine(i, e);
+                t.fill(x1, y, x2, y + lineH, COLOR_ERROR_BG);
+                t.fill(x1, y + lineH - 1, x2, y + lineH + 1, COLOR_ERROR_UNDERLINE);
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 package com.kncatl.ohmyworld.compat;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 import net.minecraft.client.gui.Font;
@@ -26,6 +27,9 @@ public final class MultiLineBox {
         void setValue(String value);
 
         void setResponder(Consumer<String> responder);
+
+        /** 标注错误区间（原文坐标），用于「可能出错的位置」提示。 */
+        void setErrorSpans(List<int[]> spans);
     }
 
     private MultiLineBox() {}
@@ -54,6 +58,11 @@ public final class MultiLineBox {
             @Override
             public void setResponder(Consumer<String> newResponder) {
                 editor.setResponder(newResponder);
+            }
+
+            @Override
+            public void setErrorSpans(List<int[]> spans) {
+                editor.setErrorSpans(spans);
             }
         };
     }

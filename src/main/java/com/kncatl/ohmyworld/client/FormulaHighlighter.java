@@ -1,13 +1,10 @@
 package com.kncatl.ohmyworld.client;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
-import com.kncatl.ohmyworld.expr.BlockResolver;
 import com.kncatl.ohmyworld.expr.ExprEvaluator;
 
 /**
@@ -41,9 +38,6 @@ public final class FormulaHighlighter {
     private static final Set<String> DIRECTIVE_NAMES = Set.of("structure", "biome", "features");
     private static final Set<String> DIRECTIVE_MODES = Set.of("all", "none", "only", "except", "vanilla");
     private static final Set<String> DIMENSIONS = Set.of("overworld", "nether", "the_nether", "end", "the_end");
-
-    /** 裸名字是否可解析为方块；含否定结果，避免每次按键都查注册表。 */
-    private static final Map<String, Boolean> BLOCK_NAME_CACHE = new HashMap<>();
 
     private static String cachedText;
     private static List<Span> cachedSpans = List.of();
@@ -156,19 +150,7 @@ public final class FormulaHighlighter {
         }
         if (word.equals("y") || VARIABLES.contains(word) || letNames.contains(word)) return COLOR_VARIABLE;
         if (DIMENSIONS.contains(word)) return COLOR_KEYWORD;
-        if (isKnownBlockWord(word)) return COLOR_ID;
         return COLOR_DEFAULT;
-    }
-
-    /** 小写 [a-z0-9_] 形式的裸名字才查方块表（带缓存的注册表查询）。 */
-    private static boolean isKnownBlockWord(String word) {
-        char first = word.charAt(0);
-        if (first < 'a' || first > 'z') return false;
-        for (int i = 1; i < word.length(); i++) {
-            char c = word.charAt(i);
-            if (!((c >= 'a' && c <= 'z') || isDigit(c) || c == '_')) return false;
-        }
-        return BLOCK_NAME_CACHE.computeIfAbsent(word, w -> BlockResolver.exists("minecraft:" + w));
     }
 
     private static boolean isIdentStart(char c) {
