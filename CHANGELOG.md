@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.2.3-beta.1
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Syntax highlighting** in the formula editor: the field is now a custom-drawn editor that colours directives/keywords, numbers, block and dimension ids, variables (`x`, `z`, `ly`, `seed` and `let` bindings), function names and operators. Editing behaviour is unchanged (selection, clipboard, word jumps, double-click word select, soft wrapping, in-field scrolling).
+- **Error marks**: validation errors are mapped back to the text and highlighted with a translucent red background plus a red underline (the field border also turns red while errors exist); whole-formula problems carry no marks.
+- **Preview interaction**: drag the preview to pan, scroll or use -/+/Reset to zoom (1/2/4/8/16 blocks per cell), with X/Z coordinate rulers outside the frame; when zoomed past 1x the preview samples at double density for finer detail.
+
+### Fixed
+- 26.x (SDL input backend): the preview map could not be dragged and Ctrl+Enter did nothing; typing into the formula editor produced nothing (text input is focus-driven since 26.1, and 26.3 additionally expects a capture declaration - the editor now announces itself like the vanilla text fields).
+- 1.21.1: unknown block names were silently accepted (that version's block registry falls back to air for unknown ids instead of returning null), so a wrong block name produced neither an error message nor an error mark.
+- The formula editor scrollbar is now draggable: drag the thumb, or click the track to jump there.
+
+### Compatibility
+- Editor/UI only: formula syntax, parsing, world generation and save formats are unchanged; existing worlds, formulas and saved files keep working.
+- Server-side generation is unchanged: servers may stay on an earlier version, but upgrading both sides together is recommended.
+
 ## v1.2.2-beta.1
 
 > Beta release — please report any issue on GitHub.
