@@ -150,7 +150,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     @Override
     protected void init() {
         int maxW = Math.min(CARD_MAX_W, this.width - 16);
-        boolean wantPreview = maxW - 32 - (PREVIEW_BOX + PREVIEW_ZRULER_W + 12) >= 360;
+        boolean wantPreview = maxW - 32 - (PREVIEW_BOX + PREVIEW_ZRULER_W + 28) >= 360;
         this.cardW = wantPreview ? maxW : Math.min(maxW, 480);
         this.cardH = Math.min(CARD_H, Math.max(220, this.height - 8));
         this.cardX = (this.width - this.cardW) / 2;
@@ -160,7 +160,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int formulaH = Math.max(36, 84 - deficit);
         this.formulaY = this.cardY + 66;
         this.previewVisible = wantPreview && this.formulaY + 238 <= this.cardY + this.cardH;
-        int leftW = this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0);
+        int leftW = this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + PREVIEW_ZRULER_W + 28 : 0);
         int fx = this.cardX + 16;
 
         this.formulaBox = MultiLineBox.create(this.font, fx, this.formulaY, leftW, formulaH,
