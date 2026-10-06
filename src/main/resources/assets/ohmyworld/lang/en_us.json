@@ -17,6 +17,8 @@
   "ohmyworld.custom_screen.example.multi": "Multi-dimension + seedhash",
   "ohmyworld.custom_screen.preview": "Preview - %s",
   "ohmyworld.custom_screen.preview_switch": "Switch dimension",
+  "ohmyworld.custom_screen.preview_reset": "Reset",
+  "ohmyworld.custom_screen.preview_hint": "Drag to pan · wheel to zoom",
   "ohmyworld.custom_screen.expand": "Expand",
   "ohmyworld.custom_screen.fullscreen_title": "Edit formula (fullscreen)",
   "ohmyworld.custom_screen.rename": "Rename",

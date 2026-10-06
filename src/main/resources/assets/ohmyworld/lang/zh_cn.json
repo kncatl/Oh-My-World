@@ -17,6 +17,8 @@
   "ohmyworld.custom_screen.example.multi": "多维度 + 种子哈希",
   "ohmyworld.custom_screen.preview": "预览 · %s",
   "ohmyworld.custom_screen.preview_switch": "切换维度",
+  "ohmyworld.custom_screen.preview_reset": "复位",
+  "ohmyworld.custom_screen.preview_hint": "拖动平移 · 滚轮缩放",
   "ohmyworld.custom_screen.expand": "全屏编辑",
   "ohmyworld.custom_screen.fullscreen_title": "编辑公式（全屏）",
   "ohmyworld.custom_screen.rename": "重命名",

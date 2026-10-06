@@ -14,16 +14,13 @@ import com.kncatl.ohmyworld.PatternData;
  * 公式俯视预览：对每列取顶部非空气方块、按地图色着色。
  *
  * <p>纯计算、无副作用，可在后台线程调用；由屏幕侧做防抖与缓存。
- * 采样区域为以 (0,0) 为中心的 {@link #SIZE}×{@link #SIZE} 列（间距 1 方块），
- * 适合棋盘格/条纹/局部条件这类公式；正弦波等大尺度图案在小窗口内看着较平是预期行为。
+ * 采样区域为以 ({@code centerX},{@code centerZ}) 为中心的 {@link #SIZE}×{@link #SIZE} 个采样点，
+ * 相邻采样点相距 {@code spacing} 个方块（间距 1 = 逐方块；间距 2/4/8… = 缩小视野看大格局）。
  */
 public final class FormulaPreview {
 
     /** 采样网格边长（列数）。 */
     public static final int SIZE = 36;
-
-    /** 采样区域起点（以 (0,0) 为中心）。 */
-    private static final int ORIGIN = -SIZE / 2;
 
     /** 空列（全空气）的显示色。 */
     private static final int EMPTY_COLOR = 0xFF141414;
@@ -32,8 +29,9 @@ public final class FormulaPreview {
 
     private FormulaPreview() {}
 
-    /** 计算指定维度的预览；该维度不在公式里时返回 null。 */
-    public static Result compute(FormulaParser.DimensionParseResult parsed, String dimension) {
+    /** 计算指定维度、指定视野的预览；该维度不在公式里时返回 null。 */
+    public static Result compute(FormulaParser.DimensionParseResult parsed, String dimension,
+                                 int centerX, int centerZ, int spacing) {
         if (dimension == null) return null;
         FormulaParser.ParsedDimension parsedDim = parsed.dimensions().get(dimension);
         if (parsedDim == null || parsedDim.layers().isEmpty()) return null;
@@ -43,12 +41,15 @@ public final class FormulaPreview {
         // 与各维度实际高度保持一致（超世界 -64 起、384 高；下界/末地 0 起、256 高）
         int minY = FormulaParser.DIM_OVERWORLD.equals(dimension) ? -64 : 0;
         int total = FormulaParser.DIM_OVERWORLD.equals(dimension) ? 384 : 256;
+        int step = Math.max(1, spacing);
+        int origin = -SIZE / 2;
 
         int[] colors = new int[SIZE * SIZE];
         for (int dz = 0; dz < SIZE; dz++) {
             for (int dx = 0; dx < SIZE; dx++) {
-                BlockState[] column = PatternData.buildColumn(snapshot, ORIGIN + dx, ORIGIN + dz,
-                        minY, total);
+                int worldX = centerX + (origin + dx) * step;
+                int worldZ = centerZ + (origin + dz) * step;
+                BlockState[] column = PatternData.buildColumn(snapshot, worldX, worldZ, minY, total);
                 colors[dz * SIZE + dx] = topColor(column);
             }
         }

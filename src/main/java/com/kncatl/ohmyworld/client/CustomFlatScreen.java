@@ -44,6 +44,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final int WARN_COLOR = 0xFFFFAA00;
     private static final int MUTED_COLOR = 0xFF9A9A9A;
     private static final long PREVIEW_DEBOUNCE_MS = 500;
+    private static final int PREVIEW_LIMIT = 30_000_000;
+    private static final int[] PREVIEW_ZOOM_LEVELS = {1, 2, 4, 8, 16};
+    /** 顶部 X 标尺 / 左侧 Z 标尺的采样格子（36 格，中心为 18）。 */
+    private static final int[] PREVIEW_X_RULER_CELLS = {4, 12, 20, 28};
+    private static final int[] PREVIEW_Z_RULER_CELLS = {8, 16, 24};
     private static final int KEY_ENTER = 257;   // GLFW_KEY_ENTER（26.x 编译路径不暴露 LWJGL，直接用数值）
     private static final int MOD_CONTROL = 2;   // GLFW_MOD_CONTROL
 
@@ -88,6 +93,17 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private long previewDueAt;
     private boolean previewRunning;
     private Button switchBtn;
+    private Button zoomOutBtn;
+    private Button zoomInBtn;
+    private Button resetBtn;
+    private int previewCenterX;
+    private int previewCenterZ;
+    private int previewSpacing = 1;
+    private boolean previewDragging;
+    private double dragStartMouseX;
+    private double dragStartMouseY;
+    private int dragStartCenterX;
+    private int dragStartCenterZ;
     private String pendingFormula;
     private String pendingName;
 
@@ -101,6 +117,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final Component EXAMPLES_BTN = Component.translatable("ohmyworld.custom_screen.examples");
     private static final Component EXAMPLES_TITLE = Component.translatable("ohmyworld.custom_screen.examples_title");
     private static final Component PREVIEW_SWITCH = Component.translatable("ohmyworld.custom_screen.preview_switch");
+    private static final Component PREVIEW_RESET = Component.translatable("ohmyworld.custom_screen.preview_reset");
     private static final Component EXPAND = Component.translatable("ohmyworld.custom_screen.expand");
     private static final Component RENAME = Component.translatable("ohmyworld.custom_screen.rename");
     private static final Component DELETE = Component.translatable("ohmyworld.custom_screen.delete");
@@ -139,7 +156,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int deficit = CARD_H - this.cardH;
         int formulaH = Math.max(36, 84 - deficit);
         this.formulaY = this.cardY + 66;
-        this.previewVisible = wantPreview && this.formulaY + 206 <= this.cardY + this.cardH;
+        this.previewVisible = wantPreview && this.formulaY + 232 <= this.cardY + this.cardH;
         int leftW = this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0);
         int fx = this.cardX + 16;
 
@@ -157,12 +174,28 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
         this.statusY = this.nameY + 40;
         this.switchBtn = null;
+        this.zoomOutBtn = null;
+        this.zoomInBtn = null;
+        this.resetBtn = null;
         if (this.previewVisible) {
             this.previewX = this.cardX + this.cardW - 16 - PREVIEW_BOX + 2;
             this.previewY = this.formulaY + 2;
+            int row1 = this.previewY + PREVIEW_PX + 6;
+            int gap = 4;
+            int small = (PREVIEW_BOX - 2 * gap) / 3;
+            this.zoomOutBtn = Button.builder(Component.literal("−"), b -> adjustPreviewZoom(-1))
+                    .bounds(this.previewX, row1, small, 20).build();
+            this.zoomInBtn = Button.builder(Component.literal("＋"), b -> adjustPreviewZoom(1))
+                    .bounds(this.previewX + small + gap, row1, small, 20).build();
+            this.resetBtn = Button.builder(PREVIEW_RESET, b -> resetPreviewView())
+                    .bounds(this.previewX + 2 * (small + gap), row1, small, 20).build();
+            this.addRenderableWidget(this.zoomOutBtn);
+            this.addRenderableWidget(this.zoomInBtn);
+            this.addRenderableWidget(this.resetBtn);
             this.switchBtn = Button.builder(PREVIEW_SWITCH, b -> cyclePreviewDimension())
-                    .bounds(this.previewX, this.previewY + PREVIEW_PX + 6, PREVIEW_BOX, 20).build();
+                    .bounds(this.previewX, row1 + 24, PREVIEW_BOX, 20).build();
             this.addRenderableWidget(this.switchBtn);
+            updatePreviewButtons();
         }
 
         int right = this.cardX + this.cardW - 16;
@@ -231,9 +264,67 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         if (available.size() < 2) return;
         int index = available.indexOf(this.previewSelectedDim);
         this.previewSelectedDim = available.get((index + 1) % available.size());
-        this.previewColors = null; // 旧维度的画面先清掉，避免误导
+        invalidatePreview(true); // 旧维度的画面先清掉，避免误导
+    }
+
+    /** 预览缩放级别（1/2/4/8/16：每格代表的方块数）；direction 为 -1 放大 / +1 缩小。 */
+    private void adjustPreviewZoom(int direction) {
+        int index = 0;
+        for (int i = 0; i < PREVIEW_ZOOM_LEVELS.length; i++) {
+            if (PREVIEW_ZOOM_LEVELS[i] == this.previewSpacing) index = i;
+        }
+        int next = Math.max(0, Math.min(PREVIEW_ZOOM_LEVELS.length - 1, index + direction));
+        if (PREVIEW_ZOOM_LEVELS[next] == this.previewSpacing) return;
+        this.previewSpacing = PREVIEW_ZOOM_LEVELS[next];
+        invalidatePreview(true);
+        updatePreviewButtons();
+    }
+
+    /** 复位预览视野（回到原点、间距 1）。 */
+    private void resetPreviewView() {
+        this.previewCenterX = 0;
+        this.previewCenterZ = 0;
+        this.previewSpacing = 1;
+        invalidatePreview(true);
+        updatePreviewButtons();
+    }
+
+    /** 让预览立即重建；clearImage=true 时先清空旧图（缩放/复位/切维度用，避免比例误导）。 */
+    private void invalidatePreview(boolean clearImage) {
+        if (clearImage) this.previewColors = null;
         this.previewComputedFor = null;
         this.previewDueAt = System.currentTimeMillis();
+    }
+
+    private void updatePreviewButtons() {
+        if (this.zoomOutBtn != null) this.zoomOutBtn.active = this.previewSpacing > PREVIEW_ZOOM_LEVELS[0];
+        if (this.zoomInBtn != null) {
+            this.zoomInBtn.active = this.previewSpacing < PREVIEW_ZOOM_LEVELS[PREVIEW_ZOOM_LEVELS.length - 1];
+        }
+    }
+
+    private boolean isOverPreview(double mouseX, double mouseY) {
+        return mouseX >= this.previewX - 2 && mouseX < this.previewX + PREVIEW_BOX - 2
+                && mouseY >= this.previewY - 2 && mouseY < this.previewY + PREVIEW_PX + 2;
+    }
+
+    /** 鼠标拖拽平移：按拖动格数移动采样中心（内容跟随光标）。 */
+    private void updatePreviewPan(double mouseX, double mouseY) {
+        double cellsX = (mouseX - this.dragStartMouseX) / PREVIEW_CELL;
+        double cellsZ = (mouseY - this.dragStartMouseY) / PREVIEW_CELL;
+        int newCenterX = clampPreviewCenter(
+                this.dragStartCenterX - (int) Math.round(cellsX) * this.previewSpacing);
+        int newCenterZ = clampPreviewCenter(
+                this.dragStartCenterZ - (int) Math.round(cellsZ) * this.previewSpacing);
+        if (newCenterX != this.previewCenterX || newCenterZ != this.previewCenterZ) {
+            this.previewCenterX = newCenterX;
+            this.previewCenterZ = newCenterZ;
+            invalidatePreview(false); // 拖动时保留旧图，异步换成新图，避免闪烁
+        }
+    }
+
+    private static int clampPreviewCenter(int value) {
+        return Math.max(-PREVIEW_LIMIT, Math.min(PREVIEW_LIMIT, value));
     }
 
     private void updateButtonState() {
@@ -639,6 +730,81 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
     //?}
 
+    //? >=1.21.11 {
+    @Override
+    public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubled) {
+        if (this.previewVisible && event.button() == 0 && isOverPreview(event.x(), event.y())) {
+            this.previewDragging = true;
+            this.dragStartMouseX = event.x();
+            this.dragStartMouseY = event.y();
+            this.dragStartCenterX = this.previewCenterX;
+            this.dragStartCenterZ = this.previewCenterZ;
+            return true;
+        }
+        return super.mouseClicked(event, doubled);
+    }
+
+    @Override
+    public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent event, double dragX, double dragY) {
+        if (this.previewDragging) {
+            updatePreviewPan(event.x(), event.y());
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent event) {
+        if (this.previewDragging && event.button() == 0) {
+            this.previewDragging = false;
+            updatePreviewPan(event.x(), event.y());
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+    //?} else {
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (this.previewVisible && button == 0 && isOverPreview(mouseX, mouseY)) {
+            this.previewDragging = true;
+            this.dragStartMouseX = mouseX;
+            this.dragStartMouseY = mouseY;
+            this.dragStartCenterX = this.previewCenterX;
+            this.dragStartCenterZ = this.previewCenterZ;
+            return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.previewDragging) {
+            updatePreviewPan(mouseX, mouseY);
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (this.previewDragging && button == 0) {
+            this.previewDragging = false;
+            updatePreviewPan(mouseX, mouseY);
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+    //?}
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (this.previewVisible && verticalAmount != 0 && isOverPreview(mouseX, mouseY)) {
+            adjustPreviewZoom(verticalAmount > 0 ? -1 : 1); // 滚轮上 = 放大
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
     //? >=26.1 {
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
@@ -701,7 +867,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         drawStatus(t, fx, this.statusY, this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0));
     }
 
-    /** 预览区（含外框与标题）；未就绪时只画框。 */
+    /** 预览区（含外框、坐标标尺与标题）；未就绪时只画框与提示。 */
     private void drawPreview(GuiCompat.Draw t) {
         if (!this.previewVisible) return;
         int px = this.previewX;
@@ -710,18 +876,48 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         t.fill(px - 1, py - 1, px + PREVIEW_PX + 1, py + PREVIEW_PX + 1, 0xFF0A0A0A);
         String dim = this.previewSelectedDim;
         if (dim == null) dim = FormulaParser.DIM_OVERWORLD;
-        t.text(this.font, Component.translatable("ohmyworld.custom_screen.preview",
-                Component.translatable("ohmyworld.dimension." + dim)), px, this.formulaY - 12, MUTED_COLOR);
+        String info = Component.translatable("ohmyworld.dimension." + dim).getString()
+                + (this.previewSpacing > 1 ? " ×" + this.previewSpacing : "");
+        Component caption = Component.translatable("ohmyworld.custom_screen.preview", info);
+        t.text(this.font, caption, px + PREVIEW_BOX - this.font.width(caption), this.formulaY - 12, MUTED_COLOR);
+
         int[] colors = this.previewColors;
-        if (colors == null) return;
-        for (int dz = 0; dz < FormulaPreview.SIZE; dz++) {
-            for (int dx = 0; dx < FormulaPreview.SIZE; dx++) {
-                int color = colors[dz * FormulaPreview.SIZE + dx];
-                int cx = px + dx * PREVIEW_CELL;
-                int cy = py + dz * PREVIEW_CELL;
-                t.fill(cx, cy, cx + PREVIEW_CELL, cy + PREVIEW_CELL, color);
+        if (colors == null) {
+            // 尚未计算：在框内给一行操作提示
+            t.text(this.font, Component.translatable("ohmyworld.custom_screen.preview_hint"),
+                    px + 6, py + PREVIEW_PX / 2 - 8, 0xFF6E6E6E);
+        } else {
+            for (int dz = 0; dz < FormulaPreview.SIZE; dz++) {
+                for (int dx = 0; dx < FormulaPreview.SIZE; dx++) {
+                    int color = colors[dz * FormulaPreview.SIZE + dx];
+                    int cx = px + dx * PREVIEW_CELL;
+                    int cy = py + dz * PREVIEW_CELL;
+                    t.fill(cx, cy, cx + PREVIEW_CELL, cy + PREVIEW_CELL, color);
+                }
             }
         }
+
+        // 坐标标尺（随拖动/缩放动态变化）：顶部 X、左侧 Z
+        int half = FormulaPreview.SIZE / 2;
+        int step = this.previewSpacing;
+        t.fill(px, py, px + PREVIEW_PX, py + 10, 0xA0000000);
+        for (int ix : PREVIEW_X_RULER_CELLS) {
+            String text = formatCoord(this.previewCenterX + (ix - half) * step);
+            int center = px + ix * PREVIEW_CELL + PREVIEW_CELL / 2;
+            t.text(this.font, text, center - this.font.width(text) / 2, py + 1, 0xFFCFCFCF);
+        }
+        t.fill(px, py + 10, px + 34, py + PREVIEW_PX, 0xA0000000);
+        for (int iz : PREVIEW_Z_RULER_CELLS) {
+            String text = formatCoord(this.previewCenterZ + (iz - half) * step);
+            int center = py + iz * PREVIEW_CELL + PREVIEW_CELL / 2;
+            t.text(this.font, text, px + 2, center - 4, 0xFFCFCFCF);
+        }
+    }
+
+    /** 标尺文字：十万以内显示整数，更大用 k 缩写（避免文字超出标尺条）。 */
+    private static String formatCoord(int value) {
+        if (Math.abs(value) < 100_000) return Integer.toString(value);
+        return Math.round(value / 1000f) + "k";
     }
 
     /** 预览的防抖重建：公式停下约 0.5 秒后在后台线程采样，结果回主线程。 */
@@ -732,14 +928,17 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         String formula = this.formulaBox.value();
         String dimension = this.previewSelectedDim;
         if (formula.isBlank() || !this.currentErrors.isEmpty() || dimension == null) return;
-        String key = formula + "\u0000" + dimension;
+        int centerX = this.previewCenterX;
+        int centerZ = this.previewCenterZ;
+        int spacing = this.previewSpacing;
+        String key = formula + "\u0000" + dimension + "\u0000" + centerX + "," + centerZ + "," + spacing;
         if (key.equals(this.previewComputedFor)) return;
         FormulaParser.DimensionParseResult parsed = this.currentResult;
         this.previewRunning = true;
         Thread worker = new Thread(() -> {
             FormulaPreview.Result result = null;
             try {
-                result = FormulaPreview.compute(parsed, dimension);
+                result = FormulaPreview.compute(parsed, dimension, centerX, centerZ, spacing);
             } catch (Exception ignored) {}
             FormulaPreview.Result computed = result;
             Minecraft.getInstance().execute(() -> {
