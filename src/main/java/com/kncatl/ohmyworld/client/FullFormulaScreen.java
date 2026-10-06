@@ -28,6 +28,7 @@ public class FullFormulaScreen extends Screen {
     private static final int ERROR_COLOR = 0xFFFF5555;
     private static final int OK_COLOR = 0xFF7FE07F;
     private static final int MUTED_COLOR = 0xFF9A9A9A;
+    // 旧事件分支（<1.21.11）的键码：GLFW 值；新事件分支用 isConfirmation()/hasControlDown() 由事件自适应
     private static final int KEY_ENTER = 257;   // GLFW_KEY_ENTER
     private static final int MOD_CONTROL = 2;   // GLFW_MOD_CONTROL
 
@@ -88,7 +89,7 @@ public class FullFormulaScreen extends Screen {
     //? >=1.21.11 {
     @Override
     public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-        if (event.key() == KEY_ENTER && (event.modifiers() & MOD_CONTROL) != 0) {
+        if (event.isConfirmation() && event.hasControlDown()) {
             finish();
             return true;
         }

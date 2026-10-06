@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 //? >=26.1 {
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -51,7 +52,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     /** 标尺文字在视图内的像素位置（横向/纵向各 4 个，均匀分布）。 */
     private static final int[] PREVIEW_X_RULER_PX = {PREVIEW_PX / 8, PREVIEW_PX * 3 / 8, PREVIEW_PX * 5 / 8, PREVIEW_PX * 7 / 8};
     private static final int[] PREVIEW_Z_RULER_PX = {PREVIEW_PX / 8, PREVIEW_PX * 3 / 8, PREVIEW_PX * 5 / 8, PREVIEW_PX * 7 / 8};
-    private static final int KEY_ENTER = 257;   // GLFW_KEY_ENTER（26.x 编译路径不暴露 LWJGL，直接用数值）
+    // 旧事件分支（<1.21.11）的键码：GLFW 值；新事件分支用 isConfirmation()/hasControlDown() 由事件自适应
+    private static final int KEY_ENTER = 257;   // GLFW_KEY_ENTER
     private static final int MOD_CONTROL = 2;   // GLFW_MOD_CONTROL
 
     /** 示例公式：名称文案键 + 公式内容（与指南示例保持一致）。 */
@@ -718,7 +720,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     //? >=1.21.11 {
     @Override
     public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-        if (event.key() == KEY_ENTER && (event.modifiers() & MOD_CONTROL) != 0) {
+        if (event.isConfirmation() && event.hasControlDown()) {
             if (this.doneBtn.active) onDone();
             return true;
         }
@@ -738,7 +740,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     //? >=1.21.11 {
     @Override
     public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubled) {
-        if (this.previewVisible && event.button() == 0 && isOverPreview(event.x(), event.y())) {
+        if (this.previewVisible && event.button() == InputConstants.MOUSE_BUTTON_LEFT && isOverPreview(event.x(), event.y())) {
             this.previewDragging = true;
             this.dragStartMouseX = event.x();
             this.dragStartMouseY = event.y();
@@ -760,7 +762,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     @Override
     public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent event) {
-        if (this.previewDragging && event.button() == 0) {
+        if (this.previewDragging && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             this.previewDragging = false;
             updatePreviewPan(event.x(), event.y());
             return true;
@@ -770,7 +772,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     //?} else {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (this.previewVisible && button == 0 && isOverPreview(mouseX, mouseY)) {
+        if (this.previewVisible && button == InputConstants.MOUSE_BUTTON_LEFT && isOverPreview(mouseX, mouseY)) {
             this.previewDragging = true;
             this.dragStartMouseX = mouseX;
             this.dragStartMouseY = mouseY;
@@ -792,7 +794,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (this.previewDragging && button == 0) {
+        if (this.previewDragging && button == InputConstants.MOUSE_BUTTON_LEFT) {
             this.previewDragging = false;
             updatePreviewPan(mouseX, mouseY);
             return true;
