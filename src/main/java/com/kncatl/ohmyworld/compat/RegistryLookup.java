@@ -35,7 +35,10 @@ public final class RegistryLookup {
         //? >=1.21.2 {
         return BuiltInRegistries.BLOCK.get(loc).map(h -> h.value()).orElse(null);
         //?} else {
-        return BuiltInRegistries.BLOCK.get(loc);
+        // 1.21.1 的方块注册表是 DefaultedRegistry：get() 对未知 ID 会「回落成空气」
+        // 而不是返回 null（getOptional 同理），直接返回会把未知方块当成合法。
+        // 因此先判存在性，再取值。
+        return BuiltInRegistries.BLOCK.containsKey(loc) ? BuiltInRegistries.BLOCK.get(loc) : null;
         //?}
     }
 }
