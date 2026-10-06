@@ -44,6 +44,11 @@ public class ExprEvaluator {
             Map.entry("seedhash", -1),
             Map.entry("rand", -1), Map.entry("randexcept", -1));
 
+    /** 是否是已知函数名（语法高亮与校验共用同一张表）。 */
+    public static boolean isFunctionName(String name) {
+        return FUNCTION_ARITY.containsKey(name);
+    }
+
     // 编译后的函数编号。ExprCompiler 在编译期把函数名解析成这些常量，
     // 运行期因此不再对函数名做字符串比较与哈希查找（每次调用都可观）。
     public static final int FN_FLOORDIV = 0, FN_FLOORMOD = 1, FN_ABS = 2, FN_MAX = 3, FN_MIN = 4,

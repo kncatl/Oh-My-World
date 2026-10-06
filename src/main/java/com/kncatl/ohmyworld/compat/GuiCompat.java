@@ -28,6 +28,12 @@ public final class GuiCompat {
 
         /** 填充矩形（含端点，参数顺序与 {@code GuiGraphics.fill} 一致）。 */
         void fill(int x1, int y1, int x2, int y2, int color);
+
+        /** 压入矩形裁剪区（与 {@code GuiGraphics.enableScissor} 语义一致）。 */
+        void pushClip(int x1, int y1, int x2, int y2);
+
+        /** 弹出最近一次 {@link #pushClip} 压入的裁剪区。 */
+        void popClip();
     }
 
     private GuiCompat() {}
@@ -53,6 +59,16 @@ public final class GuiCompat {
             @Override
             public void fill(int x1, int y1, int x2, int y2, int color) {
                 graphics.fill(x1, y1, x2, y2, color);
+            }
+
+            @Override
+            public void pushClip(int x1, int y1, int x2, int y2) {
+                graphics.enableScissor(x1, y1, x2, y2);
+            }
+
+            @Override
+            public void popClip() {
+                graphics.disableScissor();
             }
         };
     }
@@ -83,6 +99,16 @@ public final class GuiCompat {
             @Override
             public void fill(int x1, int y1, int x2, int y2, int color) {
                 graphics.fill(x1, y1, x2, y2, color);
+            }
+
+            @Override
+            public void pushClip(int x1, int y1, int x2, int y2) {
+                graphics.enableScissor(x1, y1, x2, y2);
+            }
+
+            @Override
+            public void popClip() {
+                graphics.disableScissor();
             }
         };
     }
