@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.3-beta.2
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- Fabric builds no longer pin an exact Fabric API version: the metadata for 1.21.1 / 1.21.11 / 26.3 required the exact Fabric API build they were compiled against (e.g. `0.161.0+26.3`), so the mod refused to load once a newer Fabric API was released (`0.162.0+26.3`). Every node now declares an open lower bound, and future Fabric API releases on those lines will keep working.
+
+### Compatibility
+- Only the Fabric dependency metadata changed; all other files are identical to v1.2.3-beta.1. Worlds, formulas and saved files are unaffected.
+
 ## v1.2.3-beta.1
 
 > Beta release — please report any issue on GitHub.
