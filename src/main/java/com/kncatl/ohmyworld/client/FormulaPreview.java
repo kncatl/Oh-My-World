@@ -19,13 +19,18 @@ import com.kncatl.ohmyworld.PatternData;
  */
 public final class FormulaPreview {
 
-    /** 采样网格边长（列数）。 */
+    /** 采样网格边长（缩放 1 倍时的列数）。 */
     public static final int SIZE = 36;
 
     /** 空列（全空气）的显示色。 */
     private static final int EMPTY_COLOR = 0xFF141414;
 
-    public record Result(int[] colors, String dimensionKey) {}
+    /** 给定缩放时的采样网格边长：缩放 >1 用双倍密度（像素减半，提升显示精度）。 */
+    public static int cellsFor(int spacing) {
+        return spacing > 1 ? SIZE * 2 : SIZE;
+    }
+
+    public record Result(int[] colors, String dimensionKey, int cells) {}
 
     private FormulaPreview() {}
 
@@ -42,18 +47,19 @@ public final class FormulaPreview {
         int minY = FormulaParser.DIM_OVERWORLD.equals(dimension) ? -64 : 0;
         int total = FormulaParser.DIM_OVERWORLD.equals(dimension) ? 384 : 256;
         int step = Math.max(1, spacing);
-        int origin = -SIZE / 2;
+        int cells = cellsFor(step);
+        int origin = -cells / 2;
 
-        int[] colors = new int[SIZE * SIZE];
-        for (int dz = 0; dz < SIZE; dz++) {
-            for (int dx = 0; dx < SIZE; dx++) {
+        int[] colors = new int[cells * cells];
+        for (int dz = 0; dz < cells; dz++) {
+            for (int dx = 0; dx < cells; dx++) {
                 int worldX = centerX + (origin + dx) * step;
                 int worldZ = centerZ + (origin + dz) * step;
                 BlockState[] column = PatternData.buildColumn(snapshot, worldX, worldZ, minY, total);
-                colors[dz * SIZE + dx] = topColor(column);
+                colors[dz * cells + dx] = topColor(column);
             }
         }
-        return new Result(colors, dimension);
+        return new Result(colors, dimension, cells);
     }
 
     private static int topColor(BlockState[] column) {

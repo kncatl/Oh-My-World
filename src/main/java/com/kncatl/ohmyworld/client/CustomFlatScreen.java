@@ -35,7 +35,7 @@ import com.kncatl.ohmyworld.compat.MultiLineBox;
 public class CustomFlatScreen extends Screen implements PresetEditor {
 
     private static final int CARD_MAX_W = 640;
-    private static final int CARD_H = 300;
+    private static final int CARD_H = 324;
     private static final int PREVIEW_CELL = 4;
     private static final int PREVIEW_PX = FormulaPreview.SIZE * PREVIEW_CELL;
     private static final int PREVIEW_BOX = PREVIEW_PX + 4;
@@ -46,9 +46,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final long PREVIEW_DEBOUNCE_MS = 500;
     private static final int PREVIEW_LIMIT = 30_000_000;
     private static final int[] PREVIEW_ZOOM_LEVELS = {1, 2, 4, 8, 16};
-    /** 顶部 X 标尺 / 左侧 Z 标尺的采样格子（36 格，中心为 18）。 */
-    private static final int[] PREVIEW_X_RULER_CELLS = {4, 12, 20, 28};
-    private static final int[] PREVIEW_Z_RULER_CELLS = {8, 16, 24};
+    /** Z 标尺占用的左侧宽度（视图框外）。 */
+    private static final int PREVIEW_ZRULER_W = 36;
+    /** 标尺文字在视图内的像素位置（横向/纵向各 4 个，均匀分布）。 */
+    private static final int[] PREVIEW_X_RULER_PX = {PREVIEW_PX / 8, PREVIEW_PX * 3 / 8, PREVIEW_PX * 5 / 8, PREVIEW_PX * 7 / 8};
+    private static final int[] PREVIEW_Z_RULER_PX = {PREVIEW_PX / 8, PREVIEW_PX * 3 / 8, PREVIEW_PX * 5 / 8, PREVIEW_PX * 7 / 8};
     private static final int KEY_ENTER = 257;   // GLFW_KEY_ENTER（26.x 编译路径不暴露 LWJGL，直接用数值）
     private static final int MOD_CONTROL = 2;   // GLFW_MOD_CONTROL
 
@@ -88,6 +90,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private int statusColor = OK_COLOR;
     private long statusUntil;
     private int[] previewColors;
+    private int previewColorsCells;
     private String previewSelectedDim;
     private String previewComputedFor;
     private long previewDueAt;
@@ -147,7 +150,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     @Override
     protected void init() {
         int maxW = Math.min(CARD_MAX_W, this.width - 16);
-        boolean wantPreview = maxW - 32 - (PREVIEW_BOX + 12) >= 360;
+        boolean wantPreview = maxW - 32 - (PREVIEW_BOX + PREVIEW_ZRULER_W + 12) >= 360;
         this.cardW = wantPreview ? maxW : Math.min(maxW, 480);
         this.cardH = Math.min(CARD_H, Math.max(220, this.height - 8));
         this.cardX = (this.width - this.cardW) / 2;
@@ -156,7 +159,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int deficit = CARD_H - this.cardH;
         int formulaH = Math.max(36, 84 - deficit);
         this.formulaY = this.cardY + 66;
-        this.previewVisible = wantPreview && this.formulaY + 232 <= this.cardY + this.cardH;
+        this.previewVisible = wantPreview && this.formulaY + 238 <= this.cardY + this.cardH;
         int leftW = this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0);
         int fx = this.cardX + 16;
 
@@ -180,9 +183,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         if (this.previewVisible) {
             this.previewX = this.cardX + this.cardW - 16 - PREVIEW_BOX + 2;
             this.previewY = this.formulaY + 2;
-            int row1 = this.previewY + PREVIEW_PX + 6;
             int gap = 4;
             int small = (PREVIEW_BOX - 2 * gap) / 3;
+            int rulerY = this.previewY + PREVIEW_PX + 4; // X 标尺文字行（框外）
+            int row1 = rulerY + 11;
             this.zoomOutBtn = Button.builder(Component.literal("−"), b -> adjustPreviewZoom(-1))
                     .bounds(this.previewX, row1, small, 20).build();
             this.zoomInBtn = Button.builder(Component.literal("＋"), b -> adjustPreviewZoom(1))
@@ -310,8 +314,9 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     /** 鼠标拖拽平移：按拖动格数移动采样中心（内容跟随光标）。 */
     private void updatePreviewPan(double mouseX, double mouseY) {
-        double cellsX = (mouseX - this.dragStartMouseX) / PREVIEW_CELL;
-        double cellsZ = (mouseY - this.dragStartMouseY) / PREVIEW_CELL;
+        int cellPx = PREVIEW_PX / FormulaPreview.cellsFor(this.previewSpacing);
+        double cellsX = (mouseX - this.dragStartMouseX) / cellPx;
+        double cellsZ = (mouseY - this.dragStartMouseY) / cellPx;
         int newCenterX = clampPreviewCenter(
                 this.dragStartCenterX - (int) Math.round(cellsX) * this.previewSpacing);
         int newCenterZ = clampPreviewCenter(
@@ -867,7 +872,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         drawStatus(t, fx, this.statusY, this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0));
     }
 
-    /** 预览区（含外框、坐标标尺与标题）；未就绪时只画框与提示。 */
+    /** 预览区（含外框、框外坐标标尺与标题）；未就绪时只画框与提示。 */
     private void drawPreview(GuiCompat.Draw t) {
         if (!this.previewVisible) return;
         int px = this.previewX;
@@ -881,36 +886,36 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         Component caption = Component.translatable("ohmyworld.custom_screen.preview", info);
         t.text(this.font, caption, px + PREVIEW_BOX - this.font.width(caption), this.formulaY - 12, MUTED_COLOR);
 
+        int cells = FormulaPreview.cellsFor(this.previewSpacing);
+        int cellPx = PREVIEW_PX / cells;
         int[] colors = this.previewColors;
-        if (colors == null) {
-            // 尚未计算：在框内给一行操作提示
+        if (colors == null || this.previewColorsCells != cells) {
+            // 尚未计算（或缩放级别刚变化）：在框内给一行操作提示
             t.text(this.font, Component.translatable("ohmyworld.custom_screen.preview_hint"),
                     px + 6, py + PREVIEW_PX / 2 - 8, 0xFF6E6E6E);
         } else {
-            for (int dz = 0; dz < FormulaPreview.SIZE; dz++) {
-                for (int dx = 0; dx < FormulaPreview.SIZE; dx++) {
-                    int color = colors[dz * FormulaPreview.SIZE + dx];
-                    int cx = px + dx * PREVIEW_CELL;
-                    int cy = py + dz * PREVIEW_CELL;
-                    t.fill(cx, cy, cx + PREVIEW_CELL, cy + PREVIEW_CELL, color);
+            for (int dz = 0; dz < cells; dz++) {
+                for (int dx = 0; dx < cells; dx++) {
+                    int color = colors[dz * cells + dx];
+                    int cx = px + dx * cellPx;
+                    int cy = py + dz * cellPx;
+                    t.fill(cx, cy, cx + cellPx, cy + cellPx, color);
                 }
             }
         }
 
-        // 坐标标尺（随拖动/缩放动态变化）：顶部 X、左侧 Z
-        int half = FormulaPreview.SIZE / 2;
-        int step = this.previewSpacing;
-        t.fill(px, py, px + PREVIEW_PX, py + 10, 0xA0000000);
-        for (int ix : PREVIEW_X_RULER_CELLS) {
-            String text = formatCoord(this.previewCenterX + (ix - half) * step);
-            int center = px + ix * PREVIEW_CELL + PREVIEW_CELL / 2;
-            t.text(this.font, text, center - this.font.width(text) / 2, py + 1, 0xFFCFCFCF);
+        // 框外坐标标尺（随拖动/缩放动态变化）：下侧 X、左侧 Z，各 4 个
+        double blocksPerPx = (double) this.previewSpacing / cellPx;
+        int centerPx = PREVIEW_PX / 2;
+        for (int rulerPx : PREVIEW_X_RULER_PX) {
+            String text = formatCoord(this.previewCenterX
+                    + (int) Math.round((rulerPx - centerPx) * blocksPerPx));
+            t.text(this.font, text, px + rulerPx - this.font.width(text) / 2, py + PREVIEW_PX + 4, MUTED_COLOR);
         }
-        t.fill(px, py + 10, px + 34, py + PREVIEW_PX, 0xA0000000);
-        for (int iz : PREVIEW_Z_RULER_CELLS) {
-            String text = formatCoord(this.previewCenterZ + (iz - half) * step);
-            int center = py + iz * PREVIEW_CELL + PREVIEW_CELL / 2;
-            t.text(this.font, text, px + 2, center - 4, 0xFFCFCFCF);
+        for (int rulerPx : PREVIEW_Z_RULER_PX) {
+            String text = formatCoord(this.previewCenterZ
+                    + (int) Math.round((rulerPx - centerPx) * blocksPerPx));
+            t.text(this.font, text, px - 5 - this.font.width(text), py + rulerPx - 4, MUTED_COLOR);
         }
     }
 
@@ -945,6 +950,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                 this.previewRunning = false;
                 if (computed != null) {
                     this.previewColors = computed.colors();
+                    this.previewColorsCells = computed.cells();
                 }
                 this.previewComputedFor = key;
             });
