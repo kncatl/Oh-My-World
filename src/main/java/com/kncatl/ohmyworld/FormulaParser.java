@@ -947,17 +947,21 @@ public class FormulaParser {
                     return ExprEvaluator.ValueType.BOOLEAN;
                 }
                 if (f.name().equals("biomeis")) {
-                    // biomeMode == false（biome 模式已在上面拦截）
+                    // biomeMode == false（biome 模式已在上面拦截）；末位是群系表达式：
+                    // 单个群系字面量，或三元等组合（按群系语义校验）。
                     for (int i = 0; i < f.args().size() - 1; i++) {
                         requireNumber(validateNode(f.args().get(i), errors, variables, false),
                                 "argument of biomeis", errors);
                     }
                     ExprNode biomeArg = f.args().get(f.args().size() - 1);
-                    if (biomeArg instanceof ExprNode.BlockNode b) {
-                        if (!isKnownBiome(b.blockId())) errors.add("Unknown biome: " + b.blockId());
-                    } else {
-                        errors.add("Function 'biomeis' expects a single biome literal as its last argument");
-                        validateNode(biomeArg, errors, variables, true);
+                    if (usesTerrainQuery(biomeArg)) {
+                        errors.add("Function 'biomeis' cannot use terrain queries in its biome expression"
+                                + " (terrain queries are limited to biome lines)");
+                    }
+                    ExprEvaluator.ValueType biomeType = validateNode(biomeArg, errors, variables, true);
+                    if (biomeType != ExprEvaluator.ValueType.BLOCK && biomeType != ExprEvaluator.ValueType.UNKNOWN) {
+                        errors.add("Function 'biomeis' expects a biome (literal or biome expression)"
+                                + " as its last argument, got " + biomeType);
                     }
                     return ExprEvaluator.ValueType.BOOLEAN;
                 }

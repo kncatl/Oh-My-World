@@ -116,7 +116,9 @@ public class ExprEvaluator {
             Map.entry("worley2", 4), Map.entry("worley3", 5),
             // 1.2.6：样条映射（分段线性 / Catmull-Rom）与水位助手
             Map.entry("spline", -1), Map.entry("cspline", -1),
-            Map.entry("waterline", 3));
+            Map.entry("waterline", 3),
+            // 1.2.6：worley 变体（F2 / 边缘线）
+            Map.entry("worley2f2", 4), Map.entry("worley2edge", 4));
 
     /** 是否是已知函数名（语法高亮与校验共用同一张表）。 */
     public static boolean isFunctionName(String name) {
@@ -136,6 +138,7 @@ public class ExprEvaluator {
     public static final int FN_NOISE2 = 111, FN_NOISE3 = 112, FN_FBM2 = 113, FN_FBM3 = 114;
     public static final int FN_WORLEY2 = 115, FN_WORLEY3 = 116;
     public static final int FN_SPLINE = 117, FN_CSPLINE = 118, FN_WATERLINE = 119;
+    public static final int FN_WORLEY2F2 = 120, FN_WORLEY2EDGE = 121;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -187,6 +190,8 @@ public class ExprEvaluator {
             case "spline" -> FN_SPLINE;
             case "cspline" -> FN_CSPLINE;
             case "waterline" -> FN_WATERLINE;
+            case "worley2f2" -> FN_WORLEY2F2;
+            case "worley2edge" -> FN_WORLEY2EDGE;
             default -> FN_UNKNOWN;
         };
     }
@@ -554,6 +559,12 @@ public class ExprEvaluator {
             case "spline" -> splineLinear(args, x, z, ly, context);
             case "cspline" -> splineCatmullRom(args, x, z, ly, context);
             case "waterline" -> waterline(args, x, z, ly, context);
+            case "worley2f2" -> worley2f2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
+            case "worley2edge" -> worley2edge(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
             case "terrain" -> terrainHeight(args, x, z, ly, context);
             case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
@@ -644,6 +655,12 @@ public class ExprEvaluator {
             case FN_SPLINE -> splineLinear(args, x, z, ly, context);
             case FN_CSPLINE -> splineCatmullRom(args, x, z, ly, context);
             case FN_WATERLINE -> waterline(args, x, z, ly, context);
+            case FN_WORLEY2F2 -> worley2f2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
+            case FN_WORLEY2EDGE -> worley2edge(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -708,15 +725,40 @@ public class ExprEvaluator {
 
     // ---------------------------------------------------------- 方块层的群系查询
 
-    /** {@code biomeis(x, z, y, 群系)}：指定位置的"已存储群系"是否该群系（末位须为群系字面量）。 */
+    /** {@code biomeis(x, z, y, 群系)}：指定位置的"已存储群系"是否该群系（末位是群系字面量或群系表达式）。 */
     private static boolean biomeIs(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
         BiomeView view = BIOME_VIEW.get();
         if (view == null) return false;
-        if (!(args.get(3) instanceof ExprNode.BlockNode biome)) return false;
+        String biomeId = biomeIdValue(args.get(3), x, z, ly, context);
+        if (biomeId == null) return false;
         return view.isBiome(blockCoord(args.get(0), x, z, ly, context),
                 blockCoord(args.get(2), x, z, ly, context),
                 blockCoord(args.get(1), x, z, ly, context),
-                biome.blockId());
+                biomeId);
+    }
+
+    /**
+     * 群系实参（{@code biomeis} 第 4 参）：按"群系字面量"语义求值并取 id 字符串——
+     * 单个字面量或三元等群系表达式都支持。
+     *
+     * <p>方块层求值时字面量本会解析成方块，这里临时装一个恒等 resolver，
+     * 把字面量解析成它自己的 id（与 biome 表达式里的字面量解析同路径）。
+     */
+    private static String biomeIdValue(ExprNode arg, int x, int z, int ly, EvalContext context) {
+        Object value;
+        if (arg instanceof ExprNode.BlockNode b) {
+            value = b.blockId();
+        } else {
+            Function<String, Object> saved = BIOME_RESOLVER.get();
+            BIOME_RESOLVER.set(id -> id);
+            try {
+                value = eval(arg, x, z, ly, context);
+            } finally {
+                if (saved != null) BIOME_RESOLVER.set(saved);
+                else BIOME_RESOLVER.remove();
+            }
+        }
+        return value instanceof String id ? id : null;
     }
 
     private static int pickIndex(int x, int z, int y, int bound) {
@@ -946,6 +988,76 @@ public class ExprEvaluator {
     }
 
     /** {@code worley3(x, y, z, scale, salt)}：3D 细胞噪声的最近特征点距离（截断到 [0, 1]）。 */
+    /**
+     * {@code worley2f2(x, z, 尺度, 盐)}：2D 细胞噪声的**第二近**特征点距离（F2），
+     * 与 {@code worley2} 同量纲（细胞单位、[0,1] 截断）。
+     *
+     * <p>单独用能做"双点距离"场；与 {@code worley2edge} 配合可做边缘线。
+     * 算法冻结：发布后不得更改。
+     */
+    private static double worley2f2(double x, double z, double scale, double salt) {
+        double s = scale > 0 ? scale : 1;
+        double fx = x / s;
+        double fz = z / s;
+        int cx = (int) Math.floor(fx);
+        int cz = (int) Math.floor(fz);
+        double best1 = 2;
+        double best2 = 2;
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                int gx = cx + dx;
+                int gz = cz + dz;
+                long h = latticeHash(salt, gx, gz);
+                double px = gx + unit(h);
+                double pz = gz + unit(mix64(h + 0x9E3779B97F4A7C15L));
+                double ddx = px - fx;
+                double ddz = pz - fz;
+                double d = Math.sqrt(ddx * ddx + ddz * ddz);
+                if (d < best1) {
+                    best2 = best1;
+                    best1 = d;
+                } else if (d < best2) {
+                    best2 = d;
+                }
+            }
+        }
+        return clamp(best2, 0, 1);
+    }
+
+    /**
+     * {@code worley2edge(x, z, 尺度, 盐)}：F2 - F1（细胞边缘线）——越接近 0 越靠近
+     * 两个特征点的等分边界，适合"裂纹 / 领地边界 / 冰裂缝"；细胞内部远离边界时更大。
+     * 算法冻结：发布后不得更改。
+     */
+    private static double worley2edge(double x, double z, double scale, double salt) {
+        double s = scale > 0 ? scale : 1;
+        double fx = x / s;
+        double fz = z / s;
+        int cx = (int) Math.floor(fx);
+        int cz = (int) Math.floor(fz);
+        double best1 = 2;
+        double best2 = 2;
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                int gx = cx + dx;
+                int gz = cz + dz;
+                long h = latticeHash(salt, gx, gz);
+                double px = gx + unit(h);
+                double pz = gz + unit(mix64(h + 0x9E3779B97F4A7C15L));
+                double ddx = px - fx;
+                double ddz = pz - fz;
+                double d = Math.sqrt(ddx * ddx + ddz * ddz);
+                if (d < best1) {
+                    best2 = best1;
+                    best1 = d;
+                } else if (d < best2) {
+                    best2 = d;
+                }
+            }
+        }
+        return clamp(best2 - best1, 0, 1);
+    }
+
     private static double worley3(double x, double y, double z, double scale, double salt) {
         double s = scale > 0 ? scale : 1;
         double fx = x / s;

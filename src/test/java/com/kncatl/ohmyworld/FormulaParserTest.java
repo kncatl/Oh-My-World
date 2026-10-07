@@ -134,6 +134,25 @@ class FormulaParserTest {
         assertTrue(ok.errors().isEmpty(), ok.errors().toString());
     }
 
+    /** biomeis 末位支持群系表达式；非群系（数字）与地形查询会报错。 */
+    @Test
+    void biomeisBiomeExpressionForms() {
+        FormulaParser.ParseResult ok = FormulaParser.parseWithErrors(
+                "y=0: biomeis(x, z, 0, y > 0 ? minecraft:desert : minecraft:ocean) ? rand() : rand()");
+        assertTrue(ok.errors().isEmpty(), ok.errors().toString());
+
+        FormulaParser.ParseResult number = FormulaParser.parseWithErrors(
+                "y=0: biomeis(x, z, 0, 1 > 0 ? 1 : 2) ? rand() : rand()");
+        assertTrue(number.errors().stream().anyMatch(e -> e.contains("expects a biome")),
+                number.errors().toString());
+
+        FormulaParser.ParseResult terrain = FormulaParser.parseWithErrors(
+                "y=0: biomeis(x, z, 0, terrain(x, z) > 0 ? minecraft:desert : minecraft:ocean)"
+                        + " ? rand() : rand()");
+        assertTrue(terrain.errors().stream().anyMatch(e -> e.contains("cannot use terrain queries")),
+                terrain.errors().toString());
+    }
+
     // ── 分节语法（多维度，P3） ──────────────────────────────────────────────
 
     /** 正例：单节公式解析成功（rand() 不依赖方块注册表，可用于纯 JUnit 正例）。 */
@@ -528,11 +547,11 @@ class FormulaParserTest {
         assertTrue(inBiomeRow.errors().stream().anyMatch(e -> e.contains("can only be used in block layers")),
                 inBiomeRow.errors().toString());
 
-        // 末位必须是单个群系字面量
-        FormulaParser.DimensionParseResult notLiteral = FormulaParser.parseDimensionsWithErrors(
+        // 末位必须是群系（字面量或群系表达式）；方块语义的 rand() 会被拒绝
+        FormulaParser.DimensionParseResult notBiome = FormulaParser.parseDimensionsWithErrors(
                 "{overworld=[biome:vanilla] y=0: biomeis(x, z, 64, rand()) ? rand() : rand()}");
-        assertTrue(notLiteral.errors().stream().anyMatch(e -> e.contains("expects a single biome literal")),
-                notLiteral.errors().toString());
+        assertTrue(notBiome.errors().stream().anyMatch(e -> e.contains("cannot be used in a biome expression")),
+                notBiome.errors().toString());
 
         // 未知群系
         FormulaParser.DimensionParseResult unknown = FormulaParser.parseDimensionsWithErrors(
@@ -669,6 +688,12 @@ class FormulaParserTest {
                         + " y=..: { let cave = noise3(x, y, z, 84, 7) > 0.34;"
                         + " (y <= h && !cave) ? (y > h - 5 ? rand() : rand())"
                         + " : (y <= w ? rand() : rand()) }}",
+                // 14. 冰裂缝（worley2edge + 开区间）
+                "{overworld=y=-64..: worley2edge(x, z, 90, 3) < 0.06 ? rand() : rand()}",
+                // 15. biomeis 群系表达式（配合 [biome:vanilla]）
+                "{overworld=[biome:vanilla] y=-63..64:"
+                        + " biomeis(x, z, 64, y > 0 ? minecraft:ocean : minecraft:desert)"
+                        + " ? rand() : rand()}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);

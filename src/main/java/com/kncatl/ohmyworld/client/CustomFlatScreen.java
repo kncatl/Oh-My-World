@@ -32,6 +32,7 @@ import com.kncatl.ohmyworld.compat.ClientScreens;
 import com.kncatl.ohmyworld.compat.FileOpen;
 import com.kncatl.ohmyworld.compat.GuiCompat;
 import com.kncatl.ohmyworld.compat.MultiLineBox;
+import com.kncatl.ohmyworld.expr.ExprEvaluator;
 
 public class CustomFlatScreen extends Screen implements PresetEditor {
 
@@ -142,6 +143,13 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     public CustomFlatScreen(CreateWorldScreen parent, WorldCreationContext context) {
         super(TITLE);
         this.parent = parent;
+        // 预览种子：把创建界面的种子交给求值器——预览里的噪声/seedhash 与
+        // 最终创建的世界一致（空种子 = 界面当前的随机种子，创建时用的就是它；
+        // 改过种子后重新打开编辑器即可同步）。进入世界后 WorldLoadHandler
+        // 会按真实种子再设一次。
+        if (context != null) {
+            ExprEvaluator.setWorldSeed(context.options().seed());
+        }
     }
 
     @Override

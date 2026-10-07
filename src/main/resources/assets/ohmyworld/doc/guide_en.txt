@@ -204,11 +204,15 @@ Default preset:
       biomeis(x, z, y, <biome>)  is the biome at that position the given one?
     Example (surface material by biome):
       y=-63..64: biomeis(x, z, 64, minecraft:desert) ? minecraft:sandstone : minecraft:stone
+    The last argument can also be a biome expression (ternary etc.), e.g.
+    switching the target by height:
+      y=-63..64: biomeis(x, z, 64, y > 0 ? minecraft:desert : minecraft:ocean) ? ...
     Works with [biome:vanilla], [biome:<single biome>] and biome lines alike
     (it reads the biome actually in effect at that position). Block layers
     only; it cannot be combined with biome lines that read the terrain
     (cycle), nor with [biome-fallback:2d] (its reference height needs biomes
-    that are not filled yet). The editor preview cannot evaluate biomeis
+    that are not filled yet). The biome expression cannot use terrain queries
+    (terrain/surfis/blockis). The editor preview cannot evaluate biomeis
     (it shows the false branch).
 
   * [biome-fallback:...] decides what happens above/below your biome lines
@@ -359,11 +363,16 @@ Default preset:
   fbm3(x, y, z, scale, octaves, salt)     3D fractal sum, [-1,1]
   worley2(x, z, scale, salt)              cellular distance to nearest point, [0,1]
   worley3(x, y, z, scale, salt)           3D cellular distance, [0,1]
+  worley2f2(x, z, scale, salt)            distance to the 2nd nearest point (F2), [0,1]
+  worley2edge(x, z, scale, salt)          F2 - F1: cellular edge lines (~0 at borders), [0,1]
 
     ★ scale = feature size in blocks: larger scale, larger features; change
       "salt" for another pattern.
     ★ Division of labour: seedhash/rand for per-block speckle; noise/fbm/worley
       for smooth terrain, caves and islands.
+    ★ worley2f2 / worley2edge are for cellular borders/cracks: edge is ~0 near
+      the border lines (e.g. paint cracks where < 0.06); f2 alone is a
+      "two-point distance" field. 2D only for now.
     ★ The algorithms are frozen: the same formula + seed generates the same
       world in every version.
 
@@ -582,6 +591,13 @@ Default preset:
     · y=..: is the open range: the whole dimension (ly starts at the dimension
       minimum y).
 
+  ▸ Ice cracks / edge lines (worley2edge):
+
+    y=-64..: worley2edge(x, z, 90, 3) < 0.06 ? minecraft:blue_ice : minecraft:packed_ice
+
+    worley2edge is ~0 near the cell borders; change scale/salt for another
+    crack network.
+
   Rules and performance:
     · Noise/cellular functions are a frozen contract: same formula + seed gives
       the same world in every version;
@@ -599,10 +615,11 @@ Default preset:
       but only for columns that reach the branch);
     · layer order (later overrides earlier) does not affect cost -- the layer's
       y range and the branch structure do;
-    · the editor preview renders with the current seed: while the seed is not
-      fixed yet (world-creation screen), the preview may differ from the final
-      world; after entering a world the preview matches the real seed. The same
-      applies to rand()/seedhash.
+    · the editor preview renders with the current seed: in the world-creation
+      screen it reads the seed box when the editor is opened (an empty box uses
+      the screen's current random seed, which is also used at creation); change
+      the seed and reopen the editor to re-sync. Inside a world the preview
+      matches the real seed. rand() does not depend on the seed.
 
 
 7. Blocks

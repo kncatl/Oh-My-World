@@ -40,7 +40,8 @@
   4 = [biome-fallback:3d]：低段深暗之域 + 其余按实际 y 交还原版分布。
 --biome-terrain：地形联动冒烟（biome 行调用 terrain/surfis/blockis）；
   配合 smoke-check-world.py --biome-smoke 5 判定（三类群系都出现才算通过）。
---biome-biomeis：[biome:vanilla] + 方块层 biomeis 冒烟；配合
+--biome-biomeis：[biome:vanilla] + 方块层 biomeis 冒烟（末位为**群系表达式**，
+  y>0 ? ocean : desert，同时覆盖命中与不命中）；配合
   smoke-check-world.py --biome-smoke 6 判定（两种"按群系铺的方块"都要出现）。
 --natural：自然世界冒烟（1.2.5：noise/fbm + y 变量 + 洞穴）；配合
   smoke-check-world.py --biome-smoke 7 判定（地表材质方块都要出现）。
@@ -216,6 +217,8 @@ BIOME_TERRAIN_FORMULA = (
 
 # 群系回读冒烟（配合 smoke-check-world.py --biome-smoke 6）：
 # [biome:vanilla] + 方块层 biomeis。
+#   · biomeis 末位使用**群系表达式**（y>0 ? ocean : desert）覆盖两种路径：
+#     命中（ocean → 海晶灯）与不命中（desert/plains → 不铺）；
 #   · 出生区 y=64 稳定有海洋（各大版本都是）：应铺海晶灯；
 #   · 沙漠在出生区不该命中：金块必须一个都不出现——这条用来抓住
 #     "biomeis 恒真" 的实现错误；
@@ -223,8 +226,8 @@ BIOME_TERRAIN_FORMULA = (
 BIOME_BIOMEIS_FORMULA = (
     "{overworld=[biome:vanilla] "
     "y=-64: minecraft:bedrock;"
-    "y=-63..64: biomeis(x, z, 64, minecraft:desert) ? minecraft:gold_block"
-    " : (biomeis(x, z, 64, minecraft:ocean) ? minecraft:sea_lantern"
+    "y=-63..64: biomeis(x, z, 64, y > 0 ? minecraft:desert : minecraft:plains) ? minecraft:gold_block"
+    " : (biomeis(x, z, 64, y > 0 ? minecraft:ocean : minecraft:desert) ? minecraft:sea_lantern"
     " : minecraft:polished_blackstone_bricks)}"
 )
 

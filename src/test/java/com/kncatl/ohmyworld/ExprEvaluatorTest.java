@@ -121,6 +121,41 @@ class ExprEvaluatorTest {
     }
 
     @Test
+    void biomeIsAcceptsBiomeExpressions() {
+        ExprEvaluator.setBiomeView((x, y, z, biomeId) -> biomeId.equals("minecraft:ocean"));
+        try {
+            assertEquals(1.0, eval("biomeis(0, 0, 0, minecraft:ocean)", 0, 0, 0));
+            assertEquals(0.0, eval("biomeis(0, 0, 0, minecraft:desert)", 0, 0, 0));
+            assertEquals(1.0, eval("biomeis(0, 0, 0, 1 > 0 ? minecraft:ocean : minecraft:desert)", 0, 0, 0));
+            assertEquals(0.0, eval("biomeis(0, 0, 0, 1 > 0 ? minecraft:desert : minecraft:ocean)", 0, 0, 0));
+            // 编译路径同样支持（恒等 resolver 取 id）
+            ExprNode compiled = ExprCompiler.compile(
+                    parse("biomeis(0, 0, 0, 1 > 0 ? minecraft:ocean : minecraft:desert)"));
+            assertEquals(1.0, ((Number) ExprEvaluator.eval(compiled, 0, 0, 0)).doubleValue());
+        } finally {
+            ExprEvaluator.setBiomeView(null);
+        }
+    }
+
+    @Test
+    void worleyVariantsBehave() {
+        ExprEvaluator.setWorldSeed(12345L);
+        for (int x = -30; x <= 30; x += 11) {
+            double f1 = eval("worley2(x, 5, 40, 6)", x, 5, 0);
+            double f2 = eval("worley2f2(x, 5, 40, 6)", x, 5, 0);
+            double edge = eval("worley2edge(x, 5, 40, 6)", x, 5, 0);
+            assertTrue(f2 >= 0 && f2 <= 1, "worley2f2 out of range: " + f2);
+            assertTrue(edge >= 0 && edge <= 1, "worley2edge out of range: " + edge);
+            assertTrue(f2 >= f1, "F2 should be >= F1: " + f2 + " vs " + f1);
+            assertTrue(edge <= f2 + 1e-9, "edge should be <= F2: " + edge + " vs " + f2);
+        }
+        // 确定性
+        assertEquals(eval("worley2f2(3, 5, 40, 6)", 0, 0, 0), eval("worley2f2(3, 5, 40, 6)", 0, 0, 0));
+        // 换盐换图案
+        assertNotEquals(eval("worley2f2(3, 5, 40, 6)", 0, 0, 0), eval("worley2f2(3, 5, 40, 7)", 0, 0, 0));
+    }
+
+    @Test
     void waterlineStaysNearLevel() {
         for (int x = -500; x <= 500; x += 250) {
             double w = eval("waterline(x, 3, 63)", x, 3, 0);
@@ -150,6 +185,7 @@ class ExprEvaluatorTest {
                 "spline(0.3, -1, -30, -0.2, -6, 0.2, 8, 1, 60)",
                 "cspline(0.3, -1, -30, -0.2, -6, 0.2, 8, 1, 60)",
                 "waterline(x, z, 63)",
+                "worley2f2(x, z, 40, 1)", "worley2edge(x, z, 40, 1)",
         };
         int[][] points = {{0, 0, 0}, {3, 7, -4}, {-9, 2, 5}};
         for (String expression : expressions) {
