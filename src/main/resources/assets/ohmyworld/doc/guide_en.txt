@@ -19,6 +19,19 @@ Separate layers with semicolons ";". Two formats are supported:
   Variables declared with 'let' are scoped to the { } block.
   They shadow x/z/ly if names match, and restore on exit.
 
+[shared let (optional)]
+  Write `let var = <expression>;` directly in the formula content (outside any
+  layer). Every layer and biome line of that dimension can use it. Bindings are
+  evaluated in declaration order (later ones may use earlier ones); a layer-local
+  let may shadow a shared variable. Example:
+
+    {overworld=
+      let sea = 62;
+      let hills = seedhash(floordiv(x, 40), floordiv(z, 40), 7);
+      y=0..sea: hills < 0.4 ? minecraft:sandstone : minecraft:stone;
+      biome: hills < 0.5 ? minecraft:desert : minecraft:plains
+    }
+
 [Cyclic expression]
   y=<start>..<end>: <count>*[<expr>],<count>*[<expr>],...
 
@@ -130,6 +143,39 @@ Default preset:
     ...) generate with the new biomes as usual (the flat Overworld base grows
     vanilla vegetation too once its biomes change). Only newly generated
     chunks are affected (existing chunks keep their biomes).
+
+  * biome lines -- per-height biome control (3D: the same x/z can use different
+    biomes at different y):
+
+      {overworld=
+        [biome-fallback:3d]
+        biome y=-64..30: minecraft:deep_dark;
+        biome y=31..60: minecraft:lush_caves;
+        biome: minecraft:desert
+      }
+
+      biome: <expression>                  covers the whole dimension (shortest)
+      biome y=<start>..<end>: <expression> covers that height range only
+                                           (y=<layer> for a single layer)
+
+    The expression returns a biome id (write namespace:name, e.g.
+    minecraft:desert; let / ternaries / all functions work, shared lets apply).
+    On the same height, later lines override earlier ones. Biomes are stored per
+    4x4x4 cell (sampled at the cell's origin coordinates).
+
+  * [biome-fallback:...] decides what happens above/below your biome lines
+    (default none):
+      [biome-fallback:none]  no takeover: biome lines must cover the whole
+                             dimension, otherwise the formula fails to parse
+      [biome-fallback:3d]    defer to vanilla at the actual height (keeps the
+                             vanilla vertical layout: surface bands, cave biomes)
+      [biome-fallback:2d]    sample vanilla once at the column's formula terrain
+                             surface height, then reuse it for the whole column
+
+    Notes: biome lines and [biome:...] cannot be combined (mutually exclusive);
+    namespaced custom biomes are resolved against the registry at runtime and
+    when missing the biome source is not applied for that dimension (a log
+    entry is written). Only newly generated chunks are affected.
 
   * [features:...] controls the dimension's biome decoration features
     (trees, flowers, ores, glowstone, basalt patches and columns, ...;

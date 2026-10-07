@@ -19,6 +19,21 @@
   在 { } 内声明的局部变量可在后续 let 和最终表达式中使用。
   变量覆盖当前块的 x / z / ly 同名变量，退出块后恢复。
 
+【共享 let（可选）】
+  在公式内容里直接写（不放进层里）：
+
+    let 变量 = <表达式>;
+
+  该变量可被本维度的全部层与 biome 行复用；按声明顺序求值（后面的可以引用
+  前面的），层内 let 可以覆盖同名共享变量。例：
+
+    {overworld=
+      let sea = 62;
+      let hills = seedhash(floordiv(x, 40), floordiv(z, 40), 7);
+      y=0..sea: hills < 0.4 ? minecraft:sandstone : minecraft:stone;
+      biome: hills < 0.5 ? minecraft:desert : minecraft:plains
+    }
+
 【循环格式】
   y=<起始>..<结束>: <厚度>*[<表达式>],<厚度>*[<表达式>],...
 
@@ -112,6 +127,33 @@
     使用 [biome:...] 后：群系专属结构（沙漠神殿、丛林神庙、冰屋…）会按群系自然生成，
     刷怪、天气、水色随群系变化；装饰特性（树/花草/矿物等）也跟随新群系照常生成
     （超平坦基座换群系后同样会生长原版植被）。只影响新生成的区块（已生成区块不变）。
+
+  ★ biome 行——按高度精细控制群系（3D：同一 xz 不同 y 可以是不同群系）：
+
+      {overworld=
+        [biome-fallback:3d]
+        biome y=-64..30: minecraft:deep_dark;
+        biome y=31..60: minecraft:lush_caves;
+        biome: minecraft:desert
+      }
+
+      biome: <表达式>                    覆盖整个维度（最简写法）
+      biome y=<起始>..<结束>: <表达式>   只覆盖这段高度（y=<层> 单层亦可）
+
+    表达式返回群系 id（写 命名空间:名称，如 minecraft:desert；支持 let / 三元 /
+    全部函数，共享 let 通用）；同一高度上后写的行覆盖先写的行。群系是 4×4×4
+    一格（以格子起点坐标判定）。
+
+  ★ [biome-fallback:...] 决定 biome 行没覆盖到的高度怎么办（默认 none）：
+      [biome-fallback:none] 不接管：biome 行必须覆盖整个维度，否则解析报错
+      [biome-fallback:3d]   按实际高度交还原版（保留原版纵向分布：地表群系带、
+                            深处洞穴群系）
+      [biome-fallback:2d]   取该列公式地形的表面高度，采样一次原版后覆盖整列
+                            （适合"表面按原版、深层自定"的分层玩法）
+
+    注意：biome 行与 [biome:...] 不能同时写（互斥）；带命名空间的自定义群系在
+    运行时向注册表解析，不存在时该维度的群系不接管（日志会提示）。只影响新生成
+    的区块。
 
   ★ [features:...] 控制该维度的群系装饰特性（树/花草/矿物/荧石/玄武岩斑块与石柱…；
     开或关都只留公式地形与结构，不细分具体装饰物）：
