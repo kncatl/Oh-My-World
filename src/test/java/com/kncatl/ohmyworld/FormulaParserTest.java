@@ -412,6 +412,32 @@ class FormulaParserTest {
                 mode.errors().toString());
     }
 
+    /** 指南/抽查清单里给出的组合示例（方块层用 rand() 替代，避免触碰注册表）。 */
+    @Test
+    void documentedExamplesParse() {
+        String[] valid = {
+                // 1. 两段全覆盖 + none（纵向分层）
+                "{overworld=y=-64: rand();y=-63..64: rand();"
+                        + "biome y=-64..30: minecraft:deep_dark;biome y=31..319: minecraft:desert}",
+                // 2. 3d 回退 + 三维度独立
+                "{overworld=[biome-fallback:3d] y=-64: rand();y=-63..64: rand();"
+                        + "biome y=-64..30: minecraft:deep_dark}"
+                        + "{the_nether=[biome-fallback:3d] y=0..40: rand();biome y=0..20: minecraft:basalt_deltas}"
+                        + "{the_end=[biome-fallback:3d] y=0..60: rand();biome y=0..30: minecraft:the_end}",
+                // 3. 2d 回退（表面采样、整列覆盖）
+                "{overworld=[biome-fallback:2d] y=-64: rand();y=-63..64: rand();biome y=-64..0: minecraft:lush_caves}",
+                // 4. 共享 let 参与群系三元
+                "{overworld=let warm = seedhash(floordiv(x, 64), floordiv(z, 64), 5);"
+                        + "y=-64: rand();y=-63..64: rand();"
+                        + "biome y=-64..30: warm < 0.5 ? minecraft:lush_caves : minecraft:dripstone_caves;"
+                        + "biome y=31..319: warm < 0.5 ? minecraft:desert : minecraft:plains}",
+        };
+        for (String formula : valid) {
+            FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);
+            assertTrue(result.errors().isEmpty(), formula + " => " + result.errors());
+        }
+    }
+
     /** fallback=none（缺省）要求群系行覆盖整维；简写与多段拼接都可以。 */
     @Test
     void biomeFallbackNoneRequiresFullCoverage() {
@@ -428,5 +454,24 @@ class FormulaParserTest {
                 "biome y=0..319: minecraft:plains; y=0: rand()");
         assertTrue(topLevel.errors().stream().anyMatch(e -> e.contains("must cover the whole dimension")),
                 topLevel.errors().toString());
+    }
+
+    /** 实测回归：指令单独一行、换行剥除后直接紧跟 biome 行（无需分隔符）。
+     *  方块层用 rand() 替身：单元测试 JVM 不初始化方块注册表。 */
+    @Test
+    void biomeFallbackDirectiveOnItsOwnLine() {
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=\n"
+                        + "[biome-fallback:none]\n"
+                        + "biome y=-64..30: minecraft:deep_dark;\n"
+                        + "biome y=31..60: minecraft:lush_caves;\n"
+                        + "biome y=61..319: minecraft:plains;\n"
+                        + "y=-64: rand();\n"
+                        + "y=-63..64: rand()\n"
+                        + "}");
+        assertTrue(result.errors().isEmpty(), result.errors().toString());
+        FormulaParser.ParsedDimension overworld = result.dimensions().get(FormulaParser.DIM_OVERWORLD);
+        assertEquals(3, overworld.biomeLayers().size());
+        assertSame(DimensionRules.BiomeFallback.NONE, overworld.biomeFallback());
     }
 }
