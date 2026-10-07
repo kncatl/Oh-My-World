@@ -598,6 +598,27 @@ Default preset:
     worley2edge is ~0 near the cell borders; change scale/salt for another
     crack network.
 
+  ▸ Rivers (vanilla-style: meandering channels that join seas/lakes):
+
+    {overworld=
+      let base = 63 + fbm2(x, z, 900, 4, 1) * 26;      // rolling land (below the water level = sea/lake)
+      let w = noise2(x, z, 700, 7);                     // river line = the zero contour of this noise
+      let t = 1 - smoothstep(abs(w) / 0.012);           // valley strength: 1 on the line, 0 outside
+      let h = lerp(base, 57, t * t);                    // carve the bed down to 57 (5 below the water 62)
+      y=..: y <= h
+        ? (y > h - 3 ? minecraft:sand : (y > h - 8 ? minecraft:gravel : minecraft:stone))
+        : (y <= 62 ? minecraft:water : minecraft:air)
+    }
+
+    Vanilla rivers come from the "valley slice" of the weirdness parameter
+    ([-0.05, 0.05]); the formula equivalent is simply **the zero contour of a
+    2D noise**. Tuning:
+      · river spacing ≈ the scale (700 = one every few hundred blocks; salt changes the layout);
+      · total valley width ≈ 3 × threshold × scale (0.012 × 700 ≈ 25 blocks; lower the threshold for narrower);
+      · the water surface is automatically narrower than the valley (gorges in highlands, wide rivers in lowlands);
+      · water 62 / bed 57 gives 5 blocks of depth; change 57 to taste;
+      · land below 62 becomes sea/lake and connects to the rivers (same as vanilla).
+
   Rules and performance:
     · Noise/cellular functions are a frozen contract: same formula + seed gives
       the same world in every version;

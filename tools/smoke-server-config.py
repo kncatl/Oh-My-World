@@ -64,6 +64,10 @@
   地表铺海晶灯、内部黑石砖、水位以下灌水。配合 --require-all；
   再用 stats 核对水域存在且没有"高海拔水体"。
 
+--river：河流配方冒烟（原版式河谷）：基础地形 fbm + 河道线（noise2 零等值线，
+  对应原版的"谷地切片"）+ 河床插值 + 水位以下淹没。带宽 ≈ 3×阈值×尺度；
+  配合 --require-all（河床沙/岩石两块都在）；水体宽度再用逐列扫描复核。
+
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
@@ -130,6 +134,24 @@ WATER_FORMULA = (
     "y=..: y <= h"
     " ? (y > h - 4 ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks)"
     " : (y <= w ? minecraft:water : minecraft:air)}"
+)
+
+# 河流配方冒烟（原版式河谷：噪声零等值线 + 地形插值 + 水位淹没）：
+#  · 基础地形 base（fbm）；
+#  · 河道线 = noise2 的零等值线（对应原版 weirdness∈[-0.05,0.05] 的谷地切片）；
+#  · 河谷强度 t：中心 1、带宽外侧 0（带宽 ≈ 3×阈值×尺度）；
+#  · 河床压到 57（水面 62 以下），低地/海同样会被淹没（水系连通）。
+# 判定：海晶灯（河床沙）+ 黑石砖（岩石）都在 → 公式跑通；水体宽度另用 stats/扫描。
+RIVER_FORMULA = (
+    "{overworld="
+    "let base = 63 + fbm2(x, z, 900, 4, 1) * 26;"
+    "let w = noise2(x, z, 700, 7);"
+    "let t = 1 - smoothstep(clamp(abs(w) / 0.012, 0, 1));"
+    "let h = lerp(base, 57, t * t);"
+    "y=..: y <= h"
+    " ? (y > h - 3 ? minecraft:sea_lantern : (y > h - 8 ? minecraft:polished_blackstone_bricks"
+    " : minecraft:stone))"
+    " : (y <= 62 ? minecraft:water : minecraft:air)}"
 )
 
 # 分节冒烟（1）：主世界 + 下界各写公式，末地不写（必须保持原版）。
@@ -293,6 +315,7 @@ def main():
     spawn_formula = "--spawn-formula" in sys.argv
     open_ranges = "--open-ranges" in sys.argv
     water = "--water" in sys.argv
+    river = "--river" in sys.argv
     dimension_formula = "--dimension-formula" in sys.argv
     dimension_alias = "--dimension-alias" in sys.argv
     marker_formula = "--marker-formula" in sys.argv
@@ -398,11 +421,13 @@ def main():
         formula = OPEN_RANGES_FORMULA
     elif water:
         formula = WATER_FORMULA
+    elif river:
+        formula = RIVER_FORMULA
     else:
         formula = FORMULA
 
     config = server / "config" / "ohmyworld.json"
-    wrote_formula = (force or seed_formula or spawn_formula or open_ranges or water
+    wrote_formula = (force or seed_formula or spawn_formula or open_ranges or water or river
                      or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
@@ -480,6 +505,8 @@ def main():
         label = "使用开区间层冒烟公式（y=.. / y=..60 / y=61..）"
     elif water:
         label = "使用水域冒烟公式（spline 地形 + waterline 水位）"
+    elif river:
+        label = "使用河流冒烟公式（噪声零等值线河谷 + 水位淹没）"
     elif wrote_formula:
         label = "使用冒烟公式"
     else:

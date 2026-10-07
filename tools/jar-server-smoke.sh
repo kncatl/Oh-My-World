@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -168,6 +168,7 @@ case "$CHECK_MODE" in
     spawn)           SMOKE_CONFIG_MODE="--spawn-formula" ;;
     open-ranges)     SMOKE_CONFIG_MODE="--open-ranges" ;;
     water)           SMOKE_CONFIG_MODE="--water" ;;
+    river)           SMOKE_CONFIG_MODE="--river" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
 # 先清世界再写配置：marker 模式会在配置阶段预置 world/ohmyworld_marker.txt
@@ -330,9 +331,9 @@ case "$CHECK_MODE" in
         python3 "$TOOLS/smoke-check-world.py" --require-all "$SRV" \
             || fail "出生点冒烟核验失败：公式特征方块缺失"
         ;;
-    open-ranges|water)
+    open-ranges|water|river)
         python3 "$TOOLS/smoke-check-world.py" --require-all "$SRV" \
-            || fail "开区间/水域冒烟核验失败：公式特征方块缺失"
+            || fail "开区间/水域/河流冒烟核验失败：公式特征方块缺失"
         ;;
     *)
         python3 "$TOOLS/smoke-check-world.py" "$SRV" || fail "世界里没有公式特征方块（公式没有生效）"

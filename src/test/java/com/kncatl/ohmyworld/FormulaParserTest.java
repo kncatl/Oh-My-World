@@ -694,6 +694,13 @@ class FormulaParserTest {
                 "{overworld=[biome:vanilla] y=-63..64:"
                         + " biomeis(x, z, 64, y > 0 ? minecraft:ocean : minecraft:desert)"
                         + " ? rand() : rand()}",
+                // 16. 河流（噪声零等值线 + 河床插值 + 水位淹没）
+                "{overworld=let base = 63 + fbm2(x, z, 900, 4, 1) * 26;"
+                        + " let w = noise2(x, z, 700, 7);"
+                        + " let t = 1 - smoothstep(abs(w) / 0.012);"
+                        + " let h = lerp(base, 57, t * t);"
+                        + " y=..: y <= h ? (y > h - 3 ? rand() : rand())"
+                        + " : (y <= 62 ? rand() : rand())}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);
