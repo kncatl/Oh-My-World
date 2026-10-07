@@ -421,18 +421,15 @@ Default preset:
 
   ▸ Deepslate-style strata transition (hash noise x height ramp, like vanilla):
 
-    y=-64..8: { let yy = ly - 64;
-      seedhash(x, yy, z, 11) < min(max((8 - yy) / 8, 0), 1)
-        ? minecraft:deepslate : minecraft:stone };
-    y=9..64: minecraft:stone
+    y=-64..64: seedhash(x, y, z, 11) < clamp(map(y, 0, 8, 1, 0), 0, 1)
+      ? minecraft:deepslate : minecraft:stone
 
     Same principle as vanilla deepslate: per-block hash noise compared to a
     probability that is 1 at y<=0, 0 at y>=8 and linear in between, so the
     band interleaves block by block instead of forming a hard line. Tuning:
-    change the 8 (band top) together with the denominator; change the last
-    hash argument (11) for another random pattern; the same shape makes any
-    strata (weathered/mortar layers) -- just swap the two blocks. Note y must
-    be derived from ly (ly counts from the layer's start).
+    the 0 and 8 inside map() are the bottom/top of the transition band; change
+    the last hash argument (11) for another random pattern; the same shape
+    makes any strata (weathered/mortar layers) -- just swap the block.
 
 
 6. Natural World Recipes
