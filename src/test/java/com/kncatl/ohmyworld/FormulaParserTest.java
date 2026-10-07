@@ -319,4 +319,35 @@ class FormulaParserTest {
                 result.dimensions().get(FormulaParser.DIM_END).structure().mode());
         assertTrue(result.dimensions().get(FormulaParser.DIM_END).biome().vanilla());
     }
+
+    /** 共享节级 let：供所有层复用，支持链式引用与循环层条目。 */
+    @Test
+    void sharedSectionLetsAreUsableFromLayers() {
+        assertOnlyReturnsBlockTypeError("let a = 2 + 3; y=0: a * seed");
+        assertOnlyReturnsBlockTypeError("let a = 2; let b = a * 3; y=0: b + seed");
+
+        FormulaParser.ParseResult cyclic = FormulaParser.parseWithErrors(
+                "let a = 2; y=0..4: 1*[a * seed], 1*[a + seed]");
+        assertFalse(cyclic.errors().isEmpty());
+        assertTrue(cyclic.errors().stream().allMatch(e -> e.contains("must return a block")),
+                cyclic.errors().toString());
+    }
+
+    /** 层内 let 可以遮蔽同名共享绑定（作用域规则与嵌套 let 一致）。 */
+    @Test
+    void layerLocalLetShadowsSharedLet() {
+        assertOnlyReturnsBlockTypeError("let a = 2; y=0: { let a = 5; a * seed }");
+    }
+
+    /** 共享 let 自身写错时报专门错误；绑定内部的未知变量照常报告。 */
+    @Test
+    void brokenSharedLetsReportClearly() {
+        FormulaParser.ParseResult noName = FormulaParser.parseWithErrors("let = 5; y=0: 1");
+        assertEquals(1, noName.errors().size(), noName.errors().toString());
+        assertTrue(noName.errors().get(0).contains("variable name"), noName.errors().toString());
+
+        FormulaParser.ParseResult unknown = FormulaParser.parseWithErrors("let a = zzz; y=0: a * seed");
+        assertTrue(unknown.errors().stream().anyMatch(e -> e.contains("Unknown variable: zzz")),
+                unknown.errors().toString());
+    }
 }

@@ -372,18 +372,33 @@ public class FormulaParser {
         return new DimensionParseResult(Map.of(), List.of(error), false);
     }
 
-    /** 旧入口的层解析主体（含 smartSplit 分段与逐层校验）。 */
+    /** 旧入口的层解析主体（含 smartSplit 分段、共享 let 收集与逐层校验）。 */
     private static ParseResult parseLayers(String cleaned) {
         List<Object> layers = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         String[] lines = smartSplit(cleaned);
+
+        // 第一遍：收集共享节级 let（`let 名称 = 表达式`），供本段所有层/群系行复用。
+        // 任一共享 let 解析失败即整体报错返回：它坏掉时所有层都会连带报错，噪声很大。
+        List<ExprNode.LetBinding> shared = new ArrayList<>();
+        for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+            String raw = lines[lineIdx].trim();
+            if (raw.isEmpty() || !isSharedLet(raw)) continue;
+            try {
+                shared.add(parseSharedLet(raw));
+            } catch (Exception e) {
+                errors.add("Shared let (segment " + (lineIdx + 1) + "): " + e.getMessage());
+            }
+        }
+        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors));
+
         for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             if (layers.size() + errors.size() >= MAX_LAYERS) {
                 errors.add("Formula contains too many layers; maximum is " + MAX_LAYERS);
                 break;
             }
             String line = lines[lineIdx].trim();
-            if (line.isEmpty()) continue;
+            if (line.isEmpty() || isSharedLet(line)) continue;
 
             try {
                 int colonIdx = findColon(line);
@@ -425,13 +440,16 @@ public class FormulaParser {
                 }
 
                 if (exprPart.contains("*[")) {
-                    List<CyclicLayerDef.Entry> entries = parseCyclic(exprPart);
-                    if (entries.isEmpty()) {
+                    List<CyclicEntry> srcEntries = parseCyclic(exprPart, shared);
+                    if (srcEntries.isEmpty()) {
                         errors.add(layerError(lineIdx, "cyclic layer has no valid entries", line));
                         continue;
                     }
+                    // 先按未编译 AST 做语义校验，再编译：编译后的 let 块会变成
+                    // CompiledBlockNode，校验器看不到内部结构（旧实现就是先编译后校验，
+                    // 这里顺带修掉那个盲区）。
                     List<String> valErrors = new ArrayList<>();
-                    for (CyclicLayerDef.Entry e : entries) {
+                    for (CyclicEntry e : srcEntries) {
                         ExprEvaluator.ValueType type = validateNode(e.expression(), valErrors, new HashMap<>());
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                             valErrors.add("Cyclic layer expression must return a block, got " + type);
@@ -441,9 +459,14 @@ public class FormulaParser {
                         for (String ve : valErrors) errors.add(layerError(lineIdx, ve, line));
                         continue;
                     }
+                    List<CyclicLayerDef.Entry> entries = new ArrayList<>(srcEntries.size());
+                    for (CyclicEntry e : srcEntries) {
+                        entries.add(new CyclicLayerDef.Entry(e.thickness(),
+                                ExprCompiler.compile(e.expression()), e.lyDependent()));
+                    }
                     layers.add(new CyclicLayerDef(yStart, yEnd, entries));
                 } else {
-                    ExprNode expr = new ExprParser(ExprLexer.tokenize(exprPart)).parse();
+                    ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(exprPart)).parse());
                     List<String> valErrors = new ArrayList<>();
                     ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>());
                     if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
@@ -602,8 +625,11 @@ public class FormulaParser {
         }
     }
 
-    private static List<CyclicLayerDef.Entry> parseCyclic(String exprPart) {
-        List<CyclicLayerDef.Entry> entries = new ArrayList<>();
+    /** 循环层条目（未编译；语义校验与编译由 parseLayers 统一做）。 */
+    private record CyclicEntry(int thickness, ExprNode expression, boolean lyDependent) {}
+
+    private static List<CyclicEntry> parseCyclic(String exprPart, List<ExprNode.LetBinding> shared) {
+        List<CyclicEntry> entries = new ArrayList<>();
         int pos = 0;
         while (pos < exprPart.length()) {
             while (pos < exprPart.length() && (exprPart.charAt(pos) == ' ' || exprPart.charAt(pos) == ',')) {
@@ -637,12 +663,49 @@ public class FormulaParser {
             String inner = exprPart.substring(start, pos).trim();
             pos++;
 
-            ExprNode expr = new ExprParser(ExprLexer.tokenize(inner)).parse();
+            ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(inner)).parse());
             // 与整层同理：依赖判定必须在编译前、且在未编译的 AST 上完成
             boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
-            entries.add(new CyclicLayerDef.Entry(t, ExprCompiler.compile(expr), lyDependent));
+            entries.add(new CyclicEntry(t, expr, lyDependent));
         }
         return entries;
+    }
+
+    // ---------------------------------------------------------------- 共享 let
+
+    /** 段是否是共享节级 let：`let` 后不跟标识符字符（空白 / `=` / 行尾都算）。 */
+    private static boolean isSharedLet(String line) {
+        if (!line.startsWith("let")) return false;
+        if (line.length() == 3) return true;
+        char c = line.charAt(3);
+        return !(Character.isLetterOrDigit(c) || c == '_');
+    }
+
+    /** 解析 `let 名称 = 表达式`（一个分号段一条；绑定按声明顺序依次求值）。 */
+    private static ExprNode.LetBinding parseSharedLet(String line) {
+        String rest = line.substring(3).trim();
+        int i = 0;
+        while (i < rest.length() && (Character.isLetterOrDigit(rest.charAt(i)) || rest.charAt(i) == '_')) i++;
+        char first = rest.isEmpty() ? '\0' : rest.charAt(0);
+        if (i == 0 || !(Character.isLetter(first) || first == '_')) {
+            throw new IllegalArgumentException("expected a variable name after 'let'");
+        }
+        String name = rest.substring(0, i);
+        String tail = rest.substring(i).trim();
+        if (!tail.startsWith("=")) {
+            throw new IllegalArgumentException("expected '=' after 'let " + name + "'");
+        }
+        String valueText = tail.substring(1).trim();
+        if (valueText.isEmpty()) {
+            throw new IllegalArgumentException("expected an expression after 'let " + name + " ='");
+        }
+        return new ExprNode.LetBinding(name, new ExprParser(ExprLexer.tokenize(valueText)).parse());
+    }
+
+    /** 把共享绑定前置到层表达式外：{ 共享绑定...; 原表达式 }。 */
+    private static ExprNode wrapShared(List<ExprNode.LetBinding> shared, ExprNode body) {
+        if (shared.isEmpty()) return body;
+        return new ExprNode.BlockExprNode(List.copyOf(shared), body);
     }
 
     private static String[] smartSplit(String input) {
