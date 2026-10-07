@@ -503,6 +503,10 @@ class FormulaParserTest {
                         + "y=-64: rand();y=-63..64: rand();"
                         + "biome y=-64..30: warm < 0.5 ? minecraft:lush_caves : minecraft:dripstone_caves;"
                         + "biome y=31..319: warm < 0.5 ? minecraft:desert : minecraft:plains}",
+                // 5. 深板岩过渡：逐方块哈希噪声 vs 高度斜坡（y 用 ly 换算）
+                "{overworld=y=-64..8: { let yy = ly - 64;"
+                        + " seedhash(x, yy, z, 11) < min(max((8 - yy) / 8, 0), 1) ? rand() : rand() };"
+                        + "y=9..63: rand()}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);
