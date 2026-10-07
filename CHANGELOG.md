@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.2.6-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Flat worlds can run the vanilla carvers with `[carvers:vanilla]`** (flat generators had none before): the mod borrows the vanilla carving code through a throwaway "dry" noise generator built from the dimension's own settings, so the same caves/canyons appear in the formula terrain. Caves stay dry (no aquifer water; lava below y=-54 remains, matching vanilla depth lava). Real-jar A/B in y 10..70: air 2.8% on 1.21.1, 2.7% on 26.2 and 26.3, vs 0.0% with carvers off.
+- **26.3 is now fully supported** — including `[carvers:vanilla]` on noise-generator dimensions (the "not supported" warning is gone).
+- **`spawnx` / `spawnz`**: built-in variables for the world spawn (the spawn-chunk centre — identical in every chunk and every dimension, normally within one chunk of the final respawn point). Handy for spawn-centred landmarks.
+- **Open-ended layer ranges**: `y=a..` (to the dimension top), `y=..b` (from the bottom) and `y=..` (whole dimension) — for block layers, cyclic layers and biome rows alike. `ly` starts at the explicit start, or at the dimension minimum y when omitted. Overlap semantics are unchanged (later layers override earlier ones).
+- **Spline helpers**: `spline(v, p0, v0, p1, v1, ...)` piecewise linear and `cspline(...)` Catmull-Rom (smoother curve, may slightly overshoot) — map noise through custom curves for terrain heights and strata.
+- **Water helper `waterline(x, z, level)`**: a seed-dependent, slowly varying water surface (feature ~512 blocks, ~±3 blocks). The guide has a "water" recipe that floods lowlands below the waterline and stores water in caves.
+- **`biomeis` accepts biome expressions**: the last argument may be a ternary etc., e.g. `biomeis(x, z, 64, y > 0 ? minecraft:ocean : minecraft:desert)`.
+- **Worley variants**: `worley2f2` (distance to the 2nd nearest point) and `worley2edge` (F2 - F1, ~0 on cell borders) for cracks, borders and cell patterns.
+- **The editor preview now uses the creation screen's seed**: opening the formula editor from the world-creation screen renders the preview with the seed box's seed (an empty box uses the screen's current random seed, which is also used at creation), so preview and world match.
+
+### Guide
+- New recipes (water, spline terrain, ice cracks) and documentation for everything above, including the open-range overlap rule.
+
+### Notes
+- All new primitives are **frozen contracts** (same formula + seed gives the same world in every version). Existing formulas are unaffected.
+
 ## v1.2.5-beta.2
 
 > Beta release — please report any issue on GitHub.
