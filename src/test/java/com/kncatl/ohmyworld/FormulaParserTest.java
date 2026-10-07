@@ -578,6 +578,13 @@ class FormulaParserTest {
                         + " let edge = fbm2(x, z, 120, 3, 5) * 6;"
                         + " let top = 90 - r * 0.10 + edge;"
                         + " y=0..255: y <= top * smoothstep(0.55 - islands * 1.6) ? rand() : rand()}",
+                // 10. 自然世界配方：球形构造的毛绒边缘（包围盒守卫 + 分支内重计算）
+                "{overworld=y=70..130: (abs(x) > 32 || abs(z) > 32 || abs(y - 100) > 32)"
+                        + " ? rand() : { let dy = y - 100;"
+                        + " let r = sqrt(x * x + dy * dy + z * z);"
+                        + " let wobble = fbm3(x, y, z, 40, 3, 7) * 4;"
+                        + " let p = clamp((20 + wobble - r) / 5, 0, 1);"
+                        + " r <= 15 + wobble ? rand() : (seedhash(x, y, z, 11) < p ? rand() : rand()) }}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);
