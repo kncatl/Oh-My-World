@@ -150,7 +150,7 @@ BIOME_TERRAIN_FORMULA = (
     " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks;"
     "y=-20: (floormod(x, 8) == 0 && floormod(z, 8) == 0)"
     " ? minecraft:gold_block : minecraft:iron_block;"
-    "biome: blockis(x, 0, -20, minecraft:gold_block) ? minecraft:ice_spikes"
+    "biome: blockis(x, z, -20, minecraft:gold_block) ? minecraft:ice_spikes"
     " : ((terrain(x, z) == 64) && surfis(x, z, minecraft:sea_lantern)"
     " ? minecraft:desert : minecraft:badlands)}"
 )
