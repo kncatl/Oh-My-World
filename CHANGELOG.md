@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.6-beta.2
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Guide: a vanilla-style river recipe** — carve meandering rivers with the formula language: the river line is the zero contour of a 2D noise (the formula equivalent of vanilla's "valley slice" of the weirdness parameter), the bed is interpolated below the water level, and land below the water level becomes seas/lakes that the rivers join. Includes tuning rules measured from a probe (valley width ≈ 3 × threshold × scale).
+
+### Notes
+- Everything else is identical to v1.2.6-beta.
+
 ## v1.2.6-beta
 
 > Beta release — please report any issue on GitHub.
