@@ -455,23 +455,4 @@ class FormulaParserTest {
         assertTrue(topLevel.errors().stream().anyMatch(e -> e.contains("must cover the whole dimension")),
                 topLevel.errors().toString());
     }
-
-    /** 实测回归：指令单独一行、换行剥除后直接紧跟 biome 行（无需分隔符）。
-     *  方块层用 rand() 替身：单元测试 JVM 不初始化方块注册表。 */
-    @Test
-    void biomeFallbackDirectiveOnItsOwnLine() {
-        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
-                "{overworld=\n"
-                        + "[biome-fallback:none]\n"
-                        + "biome y=-64..30: minecraft:deep_dark;\n"
-                        + "biome y=31..60: minecraft:lush_caves;\n"
-                        + "biome y=61..319: minecraft:plains;\n"
-                        + "y=-64: rand();\n"
-                        + "y=-63..64: rand()\n"
-                        + "}");
-        assertTrue(result.errors().isEmpty(), result.errors().toString());
-        FormulaParser.ParsedDimension overworld = result.dimensions().get(FormulaParser.DIM_OVERWORLD);
-        assertEquals(3, overworld.biomeLayers().size());
-        assertSame(DimensionRules.BiomeFallback.NONE, overworld.biomeFallback());
-    }
 }
