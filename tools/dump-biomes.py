@@ -13,8 +13,9 @@
       以 4 格为单元打印某 y 层的示意图（每格两个字符）。
   dump-biomes.py verify <目录>
       扫描全部区块：整列不一致的单元数 + 出现的群系统计。
-  dump-biomes.py zoom <目录> <世界种子> <y> <x0> <z0> <x1> <z1>
-      逐格复刻 F3 的显示（BiomeManager 模糊缩放）并与存储对比。
+  dump-biomes.py zoom <目录> <y> <x0> <z0> <x1> <z1> [种子]
+      逐格复刻 F3 的显示（BiomeManager 模糊缩放）并与存储对比；
+      种子省略时自动从 level.dat 读取。
 
 目录可给 versions/<节点>/run 或直接给 world 目录；自动识别两代
 region 布局（1.21.x: world/region；26.x: world/dimensions/.../overworld/region）。
@@ -157,11 +158,24 @@ def section_for(chunk, y):
 
 def region_dirs(root):
     root = Path(root)
-    world = root if root.name == "world" else root / "world"
-    dirs = [d for d in world.rglob("region") if d.is_dir()]
-    # 只取主世界：1.21.x = world/region；26.x = world/dimensions/minecraft/overworld/region
-    main = [d for d in dirs if "overworld" in str(d) or d.parent == world]
-    return main
+    candidates = []
+    for world in (root, root / "world"):
+        if not world.is_dir():
+            continue
+        # 1.21.x：world/region；26.x：world/dimensions/minecraft/overworld/region
+        if (world / "region").is_dir():
+            candidates.append(world / "region")
+        dimensions = world / "dimensions"
+        if dimensions.is_dir():
+            candidates.extend(d for d in dimensions.rglob("region")
+                              if d.is_dir() and "overworld" in str(d))
+    if candidates:
+        return candidates
+    # 兜底：递归找 region 目录，优先主世界/最上层
+    found = [d for d in root.rglob("region") if d.is_dir()]
+    main = [d for d in found
+            if "overworld" in str(d) or d.parent.name == root.name or d.parent.name == "world"]
+    return main or found
 
 
 def load_chunks(directory):
@@ -328,7 +342,23 @@ def cmd_verify(directory):
         print(f"  {count:6d}  {name}")
 
 
+def world_seed(directory):
+    """从存档的 level.dat 读世界种子（zoom 模式用）。"""
+    import gzip
+    level_dat = Path(directory).parent / "level.dat"
+    data = level_dat.read_bytes()
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    root = parse_chunk(data)["Data"]
+    settings = root.get("WorldGenSettings")
+    if isinstance(settings, dict) and "seed" in settings:
+        return settings["seed"]
+    return root.get("RandomSeed")
+
+
 def cmd_zoom(directory, seed, y, x0, z0, x1, z1):
+    if seed is None:
+        seed = world_seed(directory)
     chunks = {}
     for cx, cz, chunk in load_chunks(directory):
         prepare(chunk)
@@ -389,9 +419,10 @@ def main(argv):
     elif mode == "grid" and len(argv) == 8:
         cmd_grid(directory, int(argv[3]), int(argv[4]), int(argv[5]),
                  int(argv[6]), int(argv[7]))
-    elif mode == "zoom" and len(argv) == 9:
-        cmd_zoom(directory, int(argv[3]), int(argv[4]), int(argv[5]),
-                 int(argv[6]), int(argv[7]), int(argv[8]))
+    elif mode == "zoom" and len(argv) in (8, 9):
+        seed = int(argv[8]) if len(argv) == 9 else None
+        cmd_zoom(directory, seed, int(argv[3]), int(argv[4]), int(argv[5]),
+                 int(argv[6]), int(argv[7]))
     elif mode == "verify" and len(argv) == 3:
         cmd_verify(directory)
     else:
