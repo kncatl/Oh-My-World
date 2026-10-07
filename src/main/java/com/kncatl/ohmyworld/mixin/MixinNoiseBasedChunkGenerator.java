@@ -19,6 +19,7 @@ import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
+import com.kncatl.ohmyworld.OhMyWorldConfig;
 import com.kncatl.ohmyworld.PatternData;
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
@@ -51,6 +52,9 @@ public class MixinNoiseBasedChunkGenerator {
     /** 26.3 上 [carvers:vanilla] 不受支持，只提示一次。 */
     private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_WARNED =
             new java.util.concurrent.atomic.AtomicBoolean();
+    /** 调试日志：applyCarvers 是否被调用/是否放行，只记录一次。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     //? >=26.3 {
     // 26.3 把地形构建重做成单入口 buildTerrain：(fillFromNoise + buildSurface +
@@ -81,6 +85,10 @@ public class MixinNoiseBasedChunkGenerator {
     @Inject(method = "applyCarvers", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onApplyCarvers(CallbackInfo ci) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (OhMyWorldConfig.debugLogsEnabled() && CARVERS_LOGGED.compareAndSet(false, true)) {
+            LOGGER.info("ohmyworld: applyCarvers seen (formula bound={}, carversVanilla={})",
+                    snapshot != null, snapshot != null && snapshot.carversVanilla());
+        }
         if (snapshot != null && !snapshot.carversVanilla()) ci.cancel();
     }
     //?}

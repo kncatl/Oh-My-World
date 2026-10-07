@@ -214,6 +214,12 @@ public class PatternData {
         return snapshot == null ? DimensionRules.BiomeFallback.NONE : snapshot.biomeFallback();
     }
 
+    /** [carvers:vanilla] 是否生效；未绑定 / 缺省 → false。 */
+    public static boolean carversVanillaFor(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot != null && snapshot.carversVanilla();
+    }
+
     /** [features:none] 是否生效；未绑定 / 缺省 → false（零行为变化）。 */
     public static boolean suppressFeatures(ChunkGenerator generator) {
         PatternSnapshot snapshot = snapshotFor(generator);

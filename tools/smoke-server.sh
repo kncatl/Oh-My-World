@@ -56,8 +56,16 @@ case "$MODE" in
         CONFIG_FLAGS="--natural"
         CHECK_ARGS="--biome-smoke 7"
         ;;
+    carvers)
+        CONFIG_FLAGS="--carvers"
+        CHECK_ARGS="--biome-smoke 8"
+        ;;
+    carvers-off)
+        CONFIG_FLAGS="--carvers-off"
+        CHECK_ARGS="--biome-smoke 8"
+        ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off）" >&2
         exit 2
         ;;
 esac

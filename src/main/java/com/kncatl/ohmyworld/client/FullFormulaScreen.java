@@ -33,7 +33,7 @@ public class FullFormulaScreen extends Screen {
     private static final int MOD_CONTROL = 2;   // GLFW_MOD_CONTROL
 
     private final CustomFlatScreen parent;
-    private final String initial;
+    private String initial;
     private MultiLineBox.Handle formulaBox;
     private int statusY;
     private List<String> errors = new ArrayList<>();
@@ -53,6 +53,10 @@ public class FullFormulaScreen extends Screen {
 
     @Override
     protected void init() {
+        // 窗口刷新会重新执行 init：保留未保存的编辑
+        if (this.formulaBox != null) {
+            this.initial = this.formulaBox.value();
+        }
         int boxX = 16;
         int boxY = 30;
         int boxW = this.width - 32;

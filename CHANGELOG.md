@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.2.5-beta.2
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- **The formula editor no longer loses unsaved text when the window refreshes** (leaving fullscreen, resizing, backgrounding a fullscreen game, ...): the formula box, the name field, the fullscreen editor and the rename dialog now restore whatever was typed instead of falling back to the last saved formula or preset.
+- `[carvers:vanilla]` on a flat world now logs one explanatory message (flat generators have no carvers at all). The directive itself was verified with real jars on MC 1.21.11 and 26.2: carved tunnels/canyons appear on noise-generator dimensions (deep air 1.6% with the directive vs 0.0% with it off, terrain cut from y=80 down to y=69) -- see the guide for where it applies (normal-world dimensions under server_mode, or the Nether/End sections of a flat world).
+
+### Notes
+- Everything else is identical to v1.2.5-beta.
+
 ## v1.2.5-beta
 
 > Beta release — please report any issue on GitHub.

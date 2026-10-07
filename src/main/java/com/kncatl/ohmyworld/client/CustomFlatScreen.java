@@ -151,6 +151,15 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
     @Override
     protected void init() {
+        // 调整窗口 / 切全屏 / 失焦等会重新执行 init：先用输入框里的现有文本兜底，
+        // 避免未保存的编辑被重置为已保存公式（显式设置的 pending 仍然优先）。
+        if (this.formulaBox != null && this.pendingFormula == null) {
+            this.pendingFormula = this.formulaBox.value();
+        }
+        if (this.nameInput != null && this.pendingName == null) {
+            this.pendingName = this.nameInput.getValue();
+        }
+
         int maxW = Math.min(CARD_MAX_W, this.width - 16);
         boolean wantPreview = maxW - 32 - (PREVIEW_BOX + PREVIEW_ZRULER_W + 10) >= 360;
         this.cardW = wantPreview ? maxW : Math.min(maxW, 480);
@@ -554,12 +563,15 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.showScreen(new Screen(RENAME_TITLE) {
             private EditBox input;
             private Component error;
+            /** 窗口刷新时保留已输入的名字。 */
+            private String typed;
 
             @Override
             protected void init() {
+                if (this.input != null) this.typed = this.input.getValue();
                 this.input = new EditBox(this.font, this.width / 2 - 100, this.height / 2 - 10, 200, 20, RENAME_HINT);
                 this.input.setMaxLength(64);
-                this.input.setValue(oldName);
+                this.input.setValue(this.typed != null ? this.typed : oldName);
                 this.addRenderableWidget(this.input);
                 this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> apply())
                         .bounds(this.width / 2 - 104, this.height / 2 + 16, 100, 20).build());

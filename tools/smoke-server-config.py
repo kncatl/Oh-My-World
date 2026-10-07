@@ -39,6 +39,9 @@
   smoke-check-world.py --biome-smoke 6 判定（两种"按群系铺的方块"都要出现）。
 --natural：自然世界冒烟（1.2.5：noise/fbm + y 变量 + 洞穴）；配合
   smoke-check-world.py --biome-smoke 7 判定（地表材质方块都要出现）。
+--carvers / --carvers-off：雕刻器 A/B 冒烟（**普通世界**类型；超平坦没有雕刻器）；
+  公式为整块石头 + [carvers:vanilla|none]；配合 --biome-smoke 8，再用
+  dump-biomes.py stats 对比 y 段空气率判定是否真的被掏空。
 --features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
   装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
 
@@ -185,6 +188,16 @@ NATURAL_FORMULA = (
     " : (y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air)}"
 )
 
+# 雕刻器 A/B 冒烟（--carvers / --carvers-off；配合 smoke-check-world.py --biome-smoke 8）：
+# 普通（噪声）世界里铺整块石头到 y=80，开/关原版雕刻器各跑一次，
+# 用 dump-biomes.py stats 比较 y∈[10,70] 的空气率（开 = 有隧道/峡谷被挖出）。
+CARVERS_FORMULA = (
+    "{overworld=[carvers:vanilla] y=-64..319: y <= 80 ? minecraft:stone : minecraft:air}"
+)
+CARVERS_OFF_FORMULA = (
+    "{overworld=[carvers:none] y=-64..319: y <= 80 ? minecraft:stone : minecraft:air}"
+)
+
 BIOME_STRUCTURES_FORMULA = (
     "{overworld=[biome:minecraft:desert] [structure:only=desert_pyramids] "
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
@@ -229,6 +242,8 @@ def main():
     biome_terrain = "--biome-terrain" in sys.argv
     biome_biomeis = "--biome-biomeis" in sys.argv
     natural = "--natural" in sys.argv
+    carvers = "--carvers" in sys.argv
+    carvers_off = "--carvers-off" in sys.argv
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     if len(args) != 2:
@@ -249,6 +264,9 @@ def main():
                 key, _, value = line.partition("=")
                 props[key.strip()] = value.strip()
     props.update(PROPERTIES)
+    if carvers or carvers_off:
+        # 雕刻器只存在于噪声生成器：必须用普通世界类型
+        props["level-type"] = "minecraft\\:normal"
     if structure_none or structure_only:
         # 结构冒烟要真正生成结构：
         # - 用我们自己的预设（结构覆盖表已移除 → 候选=全部结构）；
@@ -291,6 +309,10 @@ def main():
         formula = BIOME_BIOMEIS_FORMULA
     elif natural:
         formula = NATURAL_FORMULA
+    elif carvers:
+        formula = CARVERS_FORMULA
+    elif carvers_off:
+        formula = CARVERS_OFF_FORMULA
     elif features_all:
         formula = FEATURES_ALL_FORMULA
     elif features_none:
@@ -304,7 +326,8 @@ def main():
     wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
-                     or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural
+                     or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
+                     or carvers or carvers_off
                      or features_all or features_none
                      or not config.exists())
     if not wrote_formula:
@@ -357,6 +380,10 @@ def main():
         label = "使用群系回读冒烟（[biome:vanilla] + 方块层 biomeis）"
     elif natural:
         label = "使用自然世界冒烟（噪声地形 + 洞穴 + y 变量）"
+    elif carvers:
+        label = "使用雕刻器冒烟（普通世界 + [carvers:vanilla]）"
+    elif carvers_off:
+        label = "使用雕刻器对照冒烟（普通世界 + [carvers:none]）"
     elif features_all:
         label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
     elif features_none:
