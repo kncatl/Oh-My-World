@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.4-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Biome control by formula** — three linked features:
+  - **Biome lines** in dimension sections: `biome: <expression>` covers the whole dimension and `biome y=a..b: <expression>` a height range, so the same x/z can use different biomes at different heights (3D). Biome ids are written `namespace:name`, later lines override earlier ones, and `let` blocks, ternaries and every function work.
+  - **`[biome-fallback:none|2d|3d]`** decides what happens where no biome line matches: `none` (default) requires the lines to cover the whole dimension (parsing otherwise reports the first uncovered y), `3d` defers to the vanilla distribution at the actual height, and `2d` samples vanilla once at the formula terrain's surface height and reuses it for the whole column.
+  - **Biomes and terrain can read each other**: shared section-level `let` bindings; biome lines can query the formula terrain (`terrain(x, z)`, `surfis(x, z, <block>)`, `blockis(x, z, y, <block>)` — computed from the formula, so they are available while biomes are being filled); block layers can query biomes (`biomeis(x, z, y, <biome>)`) and that works with `[biome:vanilla]`, `[biome:<single biome>]` and biome lines alike.
+- The in-game guide documents all of the above.
+
+### Compatibility
+- Formulas without biome lines keep their exact previous behaviour; biome lines only affect newly generated chunks. Worlds, formulas and saved files are unaffected.
+- Combination rules (parse-time errors): biome lines cannot be combined with `[biome:...]`; terrain queries are biome-line only and `biomeis` is block-layer only, and the two cannot be mixed (they would form a cycle); `[biome-fallback:2d]` cannot be combined with `biomeis`; the editor preview cannot evaluate `biomeis` (it shows the non-matching branch).
+
 ## v1.2.3-beta.2
 
 > Beta release — please report any issue on GitHub.
