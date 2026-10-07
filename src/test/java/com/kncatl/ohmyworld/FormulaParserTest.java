@@ -63,6 +63,15 @@ class FormulaParserTest {
                 function.errors().toString());
     }
 
+    /** 出生点变量：spawnx / spawnz 是内置变量，解析通过。 */
+    @Test
+    void spawnVariablesParse() {
+        FormulaParser.ParseResult result = FormulaParser.parseWithErrors(
+                "y=0: (x - spawnx) * (x - spawnx) + (z - spawnz) * (z - spawnz) < 400"
+                        + " ? rand() : rand()");
+        assertTrue(result.errors().isEmpty(), result.errors().toString());
+    }
+
     // ── 分节语法（多维度，P3） ──────────────────────────────────────────────
 
     /** 正例：单节公式解析成功（rand() 不依赖方块注册表，可用于纯 JUnit 正例）。 */
@@ -585,6 +594,9 @@ class FormulaParserTest {
                         + " let wobble = fbm3(x, y, z, 40, 3, 7) * 4;"
                         + " let p = clamp((20 + wobble - r) / 5, 0, 1);"
                         + " r <= 15 + wobble ? rand() : (seedhash(x, y, z, 11) < p ? rand() : rand()) }}",
+                // 11. 出生点附近的圆盘（spawnx/spawnz）
+                "{overworld=y=-64..319: { let dx = x - spawnx; let dz = z - spawnz;"
+                        + " dx * dx + dz * dz < 400 ? rand() : rand() }}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);

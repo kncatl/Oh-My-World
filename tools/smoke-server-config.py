@@ -17,6 +17,11 @@
   切换。seed 读错 → 世界无特征方块；seedhash 退化成常量 → 只剩一种特征方块。
   因此该模式要用 smoke-check-world.py --require-all 判定。
 
+--spawn-formula：改用"出生点专项"冒烟公式：以 (spawnx, spawnz) 为圆心、半径 12
+  的圆盘铺海晶灯，其余铺黑石砖。出生点读错（例如恒为 0）时灯盘不会落在
+  level.dat 的 SpawnX/SpawnZ 上——配合 smoke-check-world.py --require-all，
+  再用 dump-biomes.py spawn 与块扫描复核灯盘圆心。
+
 --dimension-formula：分节冒烟（1）：{overworld=...}{the_nether=...}——末地未写
   按原版；配合控制台 forceload 生成下界/末地区块后用
   smoke-check-world.py --dimension-smoke 1 判定。
@@ -81,6 +86,16 @@ SEED_FORMULA = (
     "y=-63..64: (seed == 12345)"
     " ? (seedhash(x, z, 0) < 0.5 ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks)"
     " : minecraft:air"
+)
+
+# 出生点专项冒烟：以出生点（出生区块中心）为圆心、半径 12 的圆盘铺海晶灯，
+# 其余铺黑石砖。出生点读错（如恒为 0）→ 灯盘不在预期中心；
+# 配合 --require-all（两块都要出现）+ dump-biomes.py spawn 复核圆心
+# （预期中心 = 出生区块中心 = 存档出生点所在区块的中点）。
+SPAWN_FORMULA = (
+    "y=-64: minecraft:bedrock;"
+    "y=-63..64: ((x - spawnx) * (x - spawnx) + (z - spawnz) * (z - spawnz) <= 144)"
+    " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks"
 )
 
 # 分节冒烟（1）：主世界 + 下界各写公式，末地不写（必须保持原版）。
@@ -239,6 +254,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     force = "--force-formula" in sys.argv
     seed_formula = "--seed-formula" in sys.argv
+    spawn_formula = "--spawn-formula" in sys.argv
     dimension_formula = "--dimension-formula" in sys.argv
     dimension_alias = "--dimension-alias" in sys.argv
     marker_formula = "--marker-formula" in sys.argv
@@ -276,8 +292,10 @@ def main():
                 key, _, value = line.partition("=")
                 props[key.strip()] = value.strip()
     props.update(PROPERTIES)
-    if carvers or carvers_off:
-        # 雕刻器只存在于噪声生成器：必须用普通世界类型
+    if carvers or carvers_off or spawn_formula:
+        # 雕刻器只存在于噪声生成器：必须用普通世界类型。
+        # 出生点专项同理：超平坦世界的出生点固定在 (0,0)，噪声世界的出生点随种子变化，
+        # 才能区分"读到真实出生点"与"恒为 0"。
         props["level-type"] = "minecraft\\:normal"
     if structure_none or structure_only:
         # 结构冒烟要真正生成结构：
@@ -336,11 +354,13 @@ def main():
         formula = FEATURES_NONE_FORMULA
     elif seed_formula:
         formula = SEED_FORMULA
+    elif spawn_formula:
+        formula = SPAWN_FORMULA
     else:
         formula = FORMULA
 
     config = server / "config" / "ohmyworld.json"
-    wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
+    wrote_formula = (force or seed_formula or spawn_formula or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
@@ -411,6 +431,8 @@ def main():
         label = "使用特性冒烟公式（下界 [features:none] + 玄武岩三角洲）"
     elif seed_formula:
         label = "使用种子专项冒烟公式"
+    elif spawn_formula:
+        label = "使用出生点专项冒烟公式（spawnx/spawnz 圆盘）"
     elif wrote_formula:
         label = "使用冒烟公式"
     else:

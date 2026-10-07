@@ -79,6 +79,20 @@ public class ExprEvaluator {
     /** 设置世界种子；除世界加载外，单元测试也可直接调用。 */
     public static void setWorldSeed(long seed) { worldSeed = seed; }
 
+    /**
+     * 出生点坐标（出生区块中心）；由 {@code WorldLoadHandler} 在维度加载时设置。
+     *
+     * <p>取"出生区块中心"而不是最终重生点：原版创建世界时先把出生区块中心写进
+     * 存档（作为搜索起点），随后扫描一个安全落点并改写——而搜索本身会生成出生点
+     * 周边的区块，那些区块读到的正是中心值。用中心值可保证全图一致（新世界的
+     * 首批区块与之后的所有区块用同一个值）；它与最终重生点通常相差不超过一个区块。
+     */
+    private static volatile int spawnX;
+    private static volatile int spawnZ;
+
+    /** 设置出生点（出生区块中心）；除世界加载外，单元测试也可直接调用。 */
+    public static void setWorldSpawn(int x, int z) { spawnX = x; spawnZ = z; }
+
     private static final Map<String, Integer> FUNCTION_ARITY = Map.ofEntries(
             Map.entry("floordiv", 2), Map.entry("floormod", 2),
             Map.entry("abs", 1), Map.entry("max", 2), Map.entry("min", 2),
@@ -262,6 +276,8 @@ public class ExprEvaluator {
             case 2 -> ly;
             case 3 -> (double) worldSeed;
             case 4 -> globalY;
+            case 5 -> spawnX;
+            case 6 -> spawnZ;
             default -> 0;
         };
     }
@@ -347,6 +363,8 @@ public class ExprEvaluator {
             case "ly" -> ly;
             case "y" -> globalY;
             case "seed" -> (double) worldSeed;
+            case "spawnx" -> spawnX;
+            case "spawnz" -> spawnZ;
             default -> 0;
         };
     }

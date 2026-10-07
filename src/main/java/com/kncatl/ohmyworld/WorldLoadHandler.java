@@ -4,7 +4,9 @@ import java.util.List;
 
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
@@ -28,6 +30,15 @@ public final class WorldLoadHandler {
         // 世界种子：公式内置变量 seed 的来源。加载事件早于任何区块生成
         // （各维度的公式绑定同样依赖这个时机）；各维度同值，先到先设。
         PatternData.setWorldSeed(sl.getSeed());
+
+        // 出生点：公式内置变量 spawnx/spawnz 的来源。取"出生区块中心"——原版创建
+        // 世界时先写入这个值再扫安全落点，而搜索本身会生成出生点周边的区块，
+        // 那些区块读到的就是中心值；用中心值可保证全图一致（说明见 ExprEvaluator）。
+        // 只按主世界计算：出生数据全局共享（各维度同值）。
+        if (sl.dimension() == Level.OVERWORLD) {
+            ChunkPos spawnChunk = spawnAnchorChunk(sl);
+            PatternData.setWorldSpawn(spawnChunk.getMiddleBlockX(), spawnChunk.getMiddleBlockZ());
+        }
 
         // 每次世界加载时重新读取配置文件
         OhMyWorldConfig config = OhMyWorldConfig.reload();
@@ -108,6 +119,20 @@ public final class WorldLoadHandler {
     private static void bindDimension(ServerLevel sl, ChunkGenerator generator) {
         PatternData.bindGenerator(sl.dimension(), generator);
         BiomeControl.apply(sl, generator);
+    }
+
+    /** 出生区块（原版出生点搜索的起点；取法与各版本 setInitialSpawn 一致）。 */
+    private static ChunkPos spawnAnchorChunk(ServerLevel level) {
+        ServerChunkCache chunkSource = level.getChunkSource();
+        //? >=26.3 {
+        return chunkSource.getGenerator().getOrigin(chunkSource.randomState());
+        //?} else {
+        //? >=26.1 {
+        return ChunkPos.containing(chunkSource.randomState().sampler().findSpawnPosition());
+        //?} else {
+        return new ChunkPos(chunkSource.randomState().sampler().findSpawnPosition());
+        //?}
+        //?}
     }
 
     /** 运行中热加载：server_mode 下每 5 秒检查一次配置文件，变化时立即应用新公式。 */

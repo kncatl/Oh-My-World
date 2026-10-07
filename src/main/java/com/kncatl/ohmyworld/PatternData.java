@@ -280,6 +280,14 @@ public class PatternData {
         ExprEvaluator.setWorldSeed(seed);
     }
 
+    /**
+     * 把世界出生点（出生区块中心）转给求值器（公式内置变量 {@code spawnx}/{@code spawnz}
+     * 的来源）。各维度同值；单元测试可直接调用 {@code ExprEvaluator.setWorldSpawn}。
+     */
+    public static void setWorldSpawn(int x, int z) {
+        ExprEvaluator.setWorldSpawn(x, z);
+    }
+
     public static void setCreated() { created = true; }
     public static boolean isCreated() { return created; }
     public static void clearCreated() { created = false; }

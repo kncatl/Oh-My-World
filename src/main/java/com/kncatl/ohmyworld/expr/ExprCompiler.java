@@ -178,6 +178,8 @@ public final class ExprCompiler {
             case "ly" -> new ExprNode.BuiltinNode(2);
             case "seed" -> new ExprNode.BuiltinNode(3);
             case "y" -> new ExprNode.BuiltinNode(4);
+            case "spawnx" -> new ExprNode.BuiltinNode(5);
+            case "spawnz" -> new ExprNode.BuiltinNode(6);
             // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };

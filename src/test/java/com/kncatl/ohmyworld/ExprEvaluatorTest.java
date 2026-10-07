@@ -51,6 +51,15 @@ class ExprEvaluatorTest {
     }
 
     @Test
+    void spawnVariablesAreBuiltIn() {
+        ExprEvaluator.setWorldSpawn(321, -654);
+        assertEquals(321.0, eval("spawnx", 7, 9, 4));
+        assertEquals(-654.0, eval("spawnz", 7, 9, 4));
+        assertEquals(7.0 - 321.0, eval("x - spawnx", 7, 9, 4));
+        assertEquals(-981.0, eval("spawnz * 1.5", 7, 9, 4));
+    }
+
+    @Test
     void noiseStaysInRangeAndIsDeterministic() {
         ExprEvaluator.setWorldSeed(12345L);
         for (int x = -40; x <= 40; x += 9) {
@@ -90,11 +99,14 @@ class ExprEvaluatorTest {
     @Test
     void compiledPathMatchesUncompiled() {
         ExprEvaluator.setWorldSeed(12345L);
+        ExprEvaluator.setWorldSpawn(123, -456);
         String[] expressions = {
                 "clamp(seed, 0, 0.5)", "lerp(seed, 5, 0.3)", "smoothstep(seed)",
                 "map(seed, 0, 1, 10, 20)", "noise2(x, z, 40, 2)", "noise3(x, y, z, 40, 2)",
                 "fbm2(x, z, 80, 3, 4)", "fbm3(x, y, z, 80, 3, 4)",
                 "worley2(x, z, 40, 1)", "worley3(x, y, z, 40, 1)",
+                "spawnx + spawnz", "(x - spawnx) * (x - spawnx) + (z - spawnz)",
+                "{ let dx = x - spawnx; dx * dx < 400 ? seedhash(dx, spawnz, 3) : spawnx }",
         };
         int[][] points = {{0, 0, 0}, {3, 7, -4}, {-9, 2, 5}};
         for (String expression : expressions) {

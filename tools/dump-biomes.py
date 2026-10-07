@@ -16,6 +16,10 @@
   dump-biomes.py zoom <目录> <y> <x0> <z0> <x1> <z1> [种子]
       逐格复刻 F3 的显示（BiomeManager 模糊缩放）并与存储对比；
       种子省略时自动从 level.dat 读取。
+  dump-biomes.py spawn <目录>
+      打印存档的出生点（level.dat 的 SpawnX/SpawnZ）与"出生区块中心"
+      （= 公式 spawnx/spawnz 的预期值；从 region 目录向上找 level.dat，兼容
+      1.21.x 与 26.x 两种布局）。
   dump-biomes.py stats <目录> [y0 y1]
       全图体检：地表高度 min/max/均值/σ、方块统计、（可选）y 段空气率。
 
@@ -473,6 +477,44 @@ def world_seed(directory):
     return root.get("RandomSeed")
 
 
+def world_spawn(directory):
+    """从存档的 level.dat 读世界出生点 (x, z)。
+
+    1.21.x：SpawnX/SpawnZ 两个整数；
+    26.x：`spawn` 复合（RespawnData：dimension/pos/yaw/pitch）。
+    26.x 的 region 目录在 world/dimensions/.../overworld/region 下，
+    level.dat 在世界根目录；因此从 region 目录向上逐级找 level.dat。
+    """
+    import gzip
+    path = Path(directory)
+    level_dat = None
+    for candidate in [path.parent, path.parent.parent,
+                      path.parent.parent.parent, path.parent.parent.parent.parent]:
+        f = candidate / "level.dat"
+        if f.is_file():
+            level_dat = f
+            break
+    if level_dat is None:
+        raise FileNotFoundError(f"找不到 level.dat（从 {directory} 向上查找）")
+    data = level_dat.read_bytes()
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    root = parse_chunk(data)["Data"]
+    spawn = root.get("spawn")
+    if isinstance(spawn, dict) and "pos" in spawn:
+        pos = spawn["pos"]
+        return pos[0], pos[2]
+    return root.get("SpawnX"), root.get("SpawnZ")
+
+
+def cmd_spawn(directory):
+    """打印存档的出生点与"出生区块中心"（公式 spawnx/spawnz 的预期值）。"""
+    x, z = world_spawn(directory)
+    ax, az = (x // 16) * 16 + 8, (z // 16) * 16 + 8
+    print(f"存档出生点：x={x} z={z}")
+    print(f"出生区块中心（公式 spawnx/spawnz 的预期值）：x={ax} z={az}")
+
+
 def cmd_zoom(directory, seed, y, x0, z0, x1, z1):
     if seed is None:
         seed = world_seed(directory)
@@ -545,6 +587,8 @@ def main(argv):
         cmd_stats(directory, band)
     elif mode == "verify" and len(argv) == 3:
         cmd_verify(directory)
+    elif mode == "spawn" and len(argv) == 3:
+        cmd_spawn(directory)
     else:
         print(__doc__)
         return 2
