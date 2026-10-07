@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.IntBinaryOperator;
 import java.util.stream.Stream;
 
 import com.kncatl.ohmyworld.compat.LevelHeights;
@@ -50,20 +49,20 @@ public class FormulaBiomeSource extends BiomeSource {
     private final Map<String, Holder<Biome>> biomes;
     private final BiomeSource fallback;
     private final boolean fallback2d;
-    private final IntBinaryOperator referenceY;
+    private final ExprEvaluator.TerrainView terrain;
     private final AtomicBoolean warned = new AtomicBoolean();
 
     /**
      * @param fallback    未覆盖处的原版回退源；{@code null} = {@code none}
-     * @param fallback2d  true = 2d（按 {@code referenceY} 采样一次后覆盖整列）
-     * @param referenceY  2d 的参考高度（x, z → y，公式地形表面）；none/3d 可为 null
+     * @param fallback2d  true = 2d（按地形表面高度采样一次后覆盖整列）
+     * @param terrain     biome 行的公式地形视图（terrain/surfis/blockis 与 2d 参考高度共用）
      * @throws RuntimeException 表达式引用了注册表里不存在的群系（由调用方记日志并保持原状）
      */
     public FormulaBiomeSource(ServerLevel level, List<BiomeLayerDef> defs, BiomeSource fallback,
-                              boolean fallback2d, IntBinaryOperator referenceY) {
+                              boolean fallback2d, ExprEvaluator.TerrainView terrain) {
         this.fallback = fallback;
         this.fallback2d = fallback2d;
-        this.referenceY = referenceY;
+        this.terrain = terrain;
 
         int minY = LevelHeights.minY(level);
         int maxY = LevelHeights.maxY(level) - 1;
@@ -126,10 +125,10 @@ public class FormulaBiomeSource extends BiomeSource {
     }
     //?}
 
-    /** 2d 时把 y 换成该列参考高度对应的 quart y；3d/none 原样。 */
+    /** 2d 时把 y 换成该列地形表面高度对应的 quart y；3d/none 原样。 */
     private int referenceQuartY(int qx, int qz, int qy) {
-        if (!fallback2d || referenceY == null) return qy;
-        return referenceY.applyAsInt(qx << 2, qz << 2) >> 2;
+        if (!fallback2d || terrain == null) return qy;
+        return terrain.surfaceY(qx << 2, qz << 2) >> 2;
     }
 
     /** 找到覆盖该格（4×4×4 单元起点）的最后一个 biome 行并求值；无命中返回 null。 */
@@ -148,7 +147,7 @@ public class FormulaBiomeSource extends BiomeSource {
 
     private Holder<Biome> biomeAt(Layer layer, int x, int y, int z) {
         Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(),
-                this::resolveBiomeLiteral);
+                this::resolveBiomeLiteral, terrain);
         if (result instanceof Holder<?> holder && holder.value() instanceof Biome) {
             @SuppressWarnings("unchecked")
             Holder<Biome> biome = (Holder<Biome>) holder;
@@ -187,6 +186,23 @@ public class FormulaBiomeSource extends BiomeSource {
         return ids;
     }
 
+    /**
+     * surfis / blockis 的方块参数位（这些位置的 BlockNode 是方块，不是群系）：
+     * 未编译形态按名字判断；其余函数返回 -1。
+     */
+    private static int blockArgumentIndex(String functionName) {
+        if (functionName.equals("surfis")) return 2;
+        if (functionName.equals("blockis")) return 3;
+        return -1;
+    }
+
+    /** 编译形态按函数编号判断方块参数位。 */
+    private static int blockArgumentIndex(int functionId) {
+        if (functionId == ExprEvaluator.FN_SURFIS) return 2;
+        if (functionId == ExprEvaluator.FN_BLOCKIS) return 3;
+        return -1;
+    }
+
     private static void collectBiomeIds(ExprNode node, Set<String> ids) {
         switch (node) {
             case ExprNode.NumberNode ignored -> {}
@@ -203,7 +219,11 @@ public class FormulaBiomeSource extends BiomeSource {
                 collectBiomeIds(conditional.elseExpr(), ids);
             }
             case ExprNode.FuncCallNode call -> {
-                for (ExprNode arg : call.args()) collectBiomeIds(arg, ids);
+                int blockArg = blockArgumentIndex(call.name());
+                List<ExprNode> args = call.args();
+                for (int i = 0; i < args.size(); i++) {
+                    if (i != blockArg) collectBiomeIds(args.get(i), ids);
+                }
             }
             case ExprNode.BlockExprNode block -> {
                 for (ExprNode.LetBinding binding : block.bindings()) collectBiomeIds(binding.value(), ids);
@@ -212,7 +232,11 @@ public class FormulaBiomeSource extends BiomeSource {
             case ExprNode.BuiltinNode ignored -> {}
             case ExprNode.SlotNode ignored -> {}
             case ExprNode.CompiledFuncCallNode call -> {
-                for (ExprNode arg : call.args()) collectBiomeIds(arg, ids);
+                int blockArg = blockArgumentIndex(call.id());
+                List<ExprNode> args = call.args();
+                for (int i = 0; i < args.size(); i++) {
+                    if (i != blockArg) collectBiomeIds(args.get(i), ids);
+                }
             }
             case ExprNode.CompiledBlockNode block -> {
                 for (ExprNode value : block.values()) collectBiomeIds(value, ids);

@@ -44,8 +44,12 @@ case "$MODE" in
         CONFIG_FLAGS="--biome-formula-fallback"
         CHECK_ARGS="--biome-smoke 4"
         ;;
+    biome-terrain)
+        CONFIG_FLAGS="--biome-terrain"
+        CHECK_ARGS="--biome-smoke 5"
+        ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | biome-formula | biome-formula-fallback）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | biome-formula | biome-formula-fallback | biome-terrain）" >&2
         exit 2
         ;;
 esac

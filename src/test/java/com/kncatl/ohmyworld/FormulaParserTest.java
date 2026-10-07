@@ -412,6 +412,35 @@ class FormulaParserTest {
                 mode.errors().toString());
     }
 
+    /** biome 行的地形查询：只允许出现在 biome 行；参数类型与个数按参数位校验。 */
+    @Test
+    void biomeTerrainQueriesValidate() {
+        // biome 行可用（方块实参用 rand() 替身，测试 JVM 不碰注册表）
+        FormulaParser.DimensionParseResult ok = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] y=0: rand();"
+                        + "biome: terrain(x, z) > 0 ? (surfis(x, z, rand()) ? minecraft:desert : minecraft:plains)"
+                        + " : (blockis(x, 0, terrain(x, z) - 1, rand()) ? minecraft:badlands : minecraft:savanna)}");
+        assertTrue(ok.errors().isEmpty(), ok.errors().toString());
+
+        // 方块层不能用（方块分支同样用 rand() 替身）
+        FormulaParser.DimensionParseResult blockLayer = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=0: terrain(x, z) > 0 ? rand() : rand()}");
+        assertTrue(blockLayer.errors().stream().anyMatch(e -> e.contains("can only be used in biome lines")),
+                blockLayer.errors().toString());
+
+        // 坐标参数必须是数字
+        FormulaParser.DimensionParseResult badArg = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: surfis(minecraft:desert, z, rand()) ? minecraft:desert : minecraft:plains; y=0: rand()}");
+        assertTrue(badArg.errors().stream().anyMatch(e -> e.contains("Expected a number")),
+                badArg.errors().toString());
+
+        // 参数个数
+        FormulaParser.DimensionParseResult arity = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: terrain(x) > 0 ? minecraft:desert : minecraft:plains; y=0: rand()}");
+        assertTrue(arity.errors().stream().anyMatch(e -> e.contains("expects 2 argument")),
+                arity.errors().toString());
+    }
+
     /** 指南/抽查清单里给出的组合示例（方块层用 rand() 替代，避免触碰注册表）。 */
     @Test
     void documentedExamplesParse() {

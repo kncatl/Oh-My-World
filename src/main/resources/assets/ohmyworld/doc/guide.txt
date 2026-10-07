@@ -144,6 +144,16 @@
     全部函数，共享 let 通用）；同一高度上后写的行覆盖先写的行。群系是 4×4×4
     一格（以格子起点坐标判定）。
 
+  ★ biome 行可以读"公式地形"（只按公式层计算、不读已生成的方块，所以群系填充
+    时就能用；循环层同样支持）：
+      terrain(x, z)              该列表面方块的 y（含水面；全空列 = 世界最低 y - 1）
+      surfis(x, z, <方块>)       表面方块是否指定方块 → 真 / 假
+      blockis(x, z, y, <方块>)   指定高度处是否指定方块 → 真 / 假
+    例（按地表材质分群系）：
+      biome: surfis(x, z, minecraft:sand) ? minecraft:desert : minecraft:plains
+    末位方块参数按方块校验（可写三元等方块表达式）；这三个函数只能出现在
+    biome 行里，写进方块层会报错。
+
   ★ [biome-fallback:...] 决定 biome 行没覆盖到的高度怎么办（默认 none）：
       [biome-fallback:none] 不接管：biome 行必须覆盖整个维度，否则解析报错
       [biome-fallback:3d]   按实际高度交还原版（保留原版纵向分布：地表群系带、

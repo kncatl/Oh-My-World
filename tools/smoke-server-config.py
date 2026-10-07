@@ -33,6 +33,8 @@
   配合 smoke-check-world.py --biome-smoke 3|4 判定。
   3 = 两段全覆盖（y=-64..30 深暗之域 / y=31..319 沙漠，fallback 缺省 none）；
   4 = [biome-fallback:3d]：低段深暗之域 + 其余按实际 y 交还原版分布。
+--biome-terrain：地形联动冒烟（biome 行调用 terrain/surfis/blockis）；
+  配合 smoke-check-world.py --biome-smoke 5 判定（三类群系都出现才算通过）。
 --features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
   装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
 
@@ -136,6 +138,23 @@ BIOME_FORMULA_FALLBACK_FORMULA = (
     "biome y=-64..30: minecraft:deep_dark}"
 )
 
+# 地形联动冒烟（配合 smoke-check-world.py --biome-smoke 5）：
+# 群系由"公式地形"决定——blockis 命中网格点 → 冰刺之地；否则按 surfis 的
+# 4 格棋盘 → 沙漠/恶地；并且要求 terrain(x,z) 确实等于表面高度 64。
+# 三个函数任一失效都会导致某类群系缺失（读的是公式而不是已生成方块，
+# 若实现改读区块方块，群系填充阶段还是空气 → 也会缺失）。
+BIOME_TERRAIN_FORMULA = (
+    "{overworld="
+    "y=-64: minecraft:bedrock;"
+    "y=-63..64: (floordiv(x, 4) + floordiv(z, 4)) % 2 == 0"
+    " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks;"
+    "y=-20: (floormod(x, 8) == 0 && floormod(z, 8) == 0)"
+    " ? minecraft:gold_block : minecraft:iron_block;"
+    "biome: blockis(x, 0, -20, minecraft:gold_block) ? minecraft:ice_spikes"
+    " : ((terrain(x, z) == 64) && surfis(x, z, minecraft:sea_lantern)"
+    " ? minecraft:desert : minecraft:badlands)}"
+)
+
 BIOME_STRUCTURES_FORMULA = (
     "{overworld=[biome:minecraft:desert] [structure:only=desert_pyramids] "
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
@@ -177,6 +196,7 @@ def main():
     biome_structures = "--biome-structures" in sys.argv
     biome_formula = "--biome-formula" in sys.argv
     biome_formula_fallback = "--biome-formula-fallback" in sys.argv
+    biome_terrain = "--biome-terrain" in sys.argv
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     if len(args) != 2:
@@ -204,7 +224,7 @@ def main():
         props["level-type"] = "ohmyworld\\:flat_plus"
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
-            or features_all or features_none:
+            or biome_terrain or features_all or features_none:
         # 群系/特性冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -233,6 +253,8 @@ def main():
         formula = BIOME_FORMULA_FORMULA
     elif biome_formula_fallback:
         formula = BIOME_FORMULA_FALLBACK_FORMULA
+    elif biome_terrain:
+        formula = BIOME_TERRAIN_FORMULA
     elif features_all:
         formula = FEATURES_ALL_FORMULA
     elif features_none:
@@ -246,7 +268,7 @@ def main():
     wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
-                     or biome_formula or biome_formula_fallback
+                     or biome_formula or biome_formula_fallback or biome_terrain
                      or features_all or features_none
                      or not config.exists())
     if not wrote_formula:
@@ -293,6 +315,8 @@ def main():
         label = "使用公式群系冒烟（主世界 biome 行两段全覆盖、fallback=none）"
     elif biome_formula_fallback:
         label = "使用公式群系冒烟（主世界 biome 行 + [biome-fallback:3d]）"
+    elif biome_terrain:
+        label = "使用地形联动冒烟（biome 行调用 terrain/surfis/blockis）"
     elif features_all:
         label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
     elif features_none:

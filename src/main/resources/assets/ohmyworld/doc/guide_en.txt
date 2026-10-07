@@ -163,6 +163,19 @@ Default preset:
     On the same height, later lines override earlier ones. Biomes are stored per
     4x4x4 cell (sampled at the cell's origin coordinates).
 
+  * Biome lines can read the formula terrain (computed from the formula layers
+    only -- never from already generated blocks -- so it is available during
+    biome fill; cyclic layers included):
+      terrain(x, z)              surface block y of that column (water counts;
+                                 an empty column yields world min y - 1)
+      surfis(x, z, <block>)      is the surface block the given block? true/false
+      blockis(x, z, y, <block>)  is the block at that height the given block?
+    Example (biomes by surface material):
+      biome: surfis(x, z, minecraft:sand) ? minecraft:desert : minecraft:plains
+    The block argument is validated as a block (ternaries and other block-valued
+    expressions work). These three functions can only appear in biome lines;
+    using them in block layers is an error.
+
   * [biome-fallback:...] decides what happens above/below your biome lines
     (default none):
       [biome-fallback:none]  no takeover: biome lines must cover the whole

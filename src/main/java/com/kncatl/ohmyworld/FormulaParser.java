@@ -599,6 +599,11 @@ public class FormulaParser {
         return normalized.contains(":") || KNOWN_BIOME_NAMES.contains(normalized);
     }
 
+    /** biome 行的地形查询函数（只能出现在 biome 行；方块参数位按方块语义校验）。 */
+    private static boolean isTerrainQueryFunction(String name) {
+        return name.equals("terrain") || name.equals("surfis") || name.equals("blockis");
+    }
+
     /** 原版维度最低高度（含）。分节语法只支持原版三维度，与预览的假设一致。 */
     public static int vanillaMinY(String dimension) {
         return DIM_OVERWORLD.equals(dimension) ? -64 : 0;
@@ -777,6 +782,12 @@ public class FormulaParser {
                 return thenType == ExprEvaluator.ValueType.UNKNOWN ? elseType : thenType;
             }
             case ExprNode.FuncCallNode f -> {
+                boolean terrainQuery = isTerrainQueryFunction(f.name());
+                if (terrainQuery && !biomeMode) {
+                    errors.add("Function '" + f.name() + "' can only be used in biome lines");
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, false);
+                    return ExprEvaluator.ValueType.UNKNOWN;
+                }
                 if (biomeMode && (f.name().equals("rand") || f.name().equals("randexcept"))) {
                     errors.add("Function '" + f.name() + "' cannot be used in a biome expression");
                     for (ExprNode a : f.args()) validateNode(a, errors, variables, true);
@@ -787,6 +798,29 @@ public class FormulaParser {
                     errors.add(msg);
                     for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode);
                     return ExprEvaluator.ValueType.UNKNOWN;
+                }
+                if (terrainQuery) {
+                    // biomeMode == true（非 biome 模式已在上面拦截）
+                    if (f.name().equals("terrain")) {
+                        for (ExprNode a : f.args()) {
+                            requireNumber(validateNode(a, errors, variables, true), "argument of terrain", errors);
+                        }
+                        return ExprEvaluator.ValueType.NUMBER;
+                    }
+                    // surfis(x, z, 方块) / blockis(x, z, y, 方块)：最后一个参数按方块校验
+                    int blockArg = f.name().equals("surfis") ? 2 : 3;
+                    for (int i = 0; i < f.args().size(); i++) {
+                        ExprEvaluator.ValueType type = validateNode(f.args().get(i), errors, variables,
+                                i != blockArg);
+                        if (i == blockArg) {
+                            if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
+                                errors.add("Function '" + f.name() + "' expects a block as its last argument, got " + type);
+                            }
+                        } else {
+                            requireNumber(type, "argument of " + f.name(), errors);
+                        }
+                    }
+                    return ExprEvaluator.ValueType.BOOLEAN;
                 }
                 if (f.name().equals("rand") || f.name().equals("randexcept")) {
                     for (ExprNode a : f.args()) {

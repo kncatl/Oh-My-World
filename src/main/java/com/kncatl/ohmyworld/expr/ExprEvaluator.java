@@ -26,10 +26,29 @@ public class ExprEvaluator {
 
     /**
      * 群系求值模式：非 null 时，表达式里的字面量交给它解析（返回群系 Holder），
-     * 不触碰方块注册表。由 {@link #evalToBiome} 设置/清除；同一线程内嵌套求值
-     * （例如未来 biome 行里的地形查询）需要在进入方块求值前自行清空。
+     * 不触碰方块注册表。由 {@link #evalToBiome} 设置/清除；嵌套的方块求值
+     * （biome 行的地形查询）会由 {@link #evalToBlock} / {@link #evalBlockArg}
+     * 临时摘除。
      */
     private static final ThreadLocal<Function<String, Object>> BIOME_RESOLVER = new ThreadLocal<>();
+
+    /**
+     * biome 行读取"公式地形"的只读视图：全部由公式层直接计算（不读已生成的方块），
+     * 因此群系填充阶段（地形尚未写入区块）也可用。
+     */
+    public interface TerrainView {
+        /** 该列表面方块的 y（含水面）；全空列返回世界最低 y - 1。 */
+        int surfaceY(int x, int z);
+
+        /** 表面方块是否指定方块（按方块种类比较）。 */
+        boolean surfaceIs(int x, int z, BlockState target);
+
+        /** 指定 y 处是否指定方块（按方块种类比较；越界为 false）。 */
+        boolean blockIs(int x, int z, int y, BlockState target);
+    }
+
+    /** 当前求值的地形视图（仅 biome 行有值）；由 {@link #evalToBiome} 设置/清除。 */
+    private static final ThreadLocal<TerrainView> TERRAIN_VIEW = new ThreadLocal<>();
 
     /**
      * 当前世界的种子；由 {@code WorldLoadHandler} 在世界加载时设置（各维度同值）。
@@ -50,7 +69,9 @@ public class ExprEvaluator {
             Map.entry("asin", 1), Map.entry("acos", 1), Map.entry("atan", 1),
             Map.entry("todeg", 1), Map.entry("torad", 1),
             Map.entry("seedhash", -1),
-            Map.entry("rand", -1), Map.entry("randexcept", -1));
+            Map.entry("rand", -1), Map.entry("randexcept", -1),
+            // biome 行的地形查询（只能出现在 biome 行；参数位决定方块字面量语义）
+            Map.entry("terrain", 2), Map.entry("surfis", 3), Map.entry("blockis", 4));
 
     /** 是否是已知函数名（语法高亮与校验共用同一张表）。 */
     public static boolean isFunctionName(String name) {
@@ -64,6 +85,7 @@ public class ExprEvaluator {
             FN_EXP = 11, FN_LOG = 12, FN_LOG10 = 13, FN_SIN = 14, FN_COS = 15, FN_TAN = 16,
             FN_ASIN = 17, FN_ACOS = 18, FN_ATAN = 19, FN_TODEG = 20, FN_TORAD = 21;
     public static final int FN_RAND = 100, FN_RANDEXCEPT = 101, FN_SEEDHASH = 102;
+    public static final int FN_TERRAIN = 103, FN_SURFIS = 104, FN_BLOCKIS = 105;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -98,6 +120,9 @@ public class ExprEvaluator {
             case "seedhash" -> FN_SEEDHASH;
             case "rand" -> FN_RAND;
             case "randexcept" -> FN_RANDEXCEPT;
+            case "terrain" -> FN_TERRAIN;
+            case "surfis" -> FN_SURFIS;
+            case "blockis" -> FN_BLOCKIS;
             default -> FN_UNKNOWN;
         };
     }
@@ -399,6 +424,10 @@ public class ExprEvaluator {
             case "todeg" -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
             case "torad" -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
             case "seedhash" -> seedhash(args, x, z, ly, context);
+            // biome 行的地形查询（只会在 biome 求值环境里被调用）
+            case "terrain" -> terrainHeight(args, x, z, ly, context);
+            case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
+            case "blockis" -> blockIsAt(args, x, z, ly, context) ? 1 : 0;
             // 非数值函数（rand/randexcept）返回方块，按数值语境取 0
             default -> toDouble(evalFunc(f, x, z, ly, context));
         };
@@ -449,10 +478,69 @@ public class ExprEvaluator {
             case FN_TODEG -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
             case FN_TORAD -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
             case FN_SEEDHASH -> seedhash(args, x, z, ly, context);
+            case FN_TERRAIN -> terrainHeight(args, x, z, ly, context);
+            case FN_SURFIS -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
+            case FN_BLOCKIS -> blockIsAt(args, x, z, ly, context) ? 1 : 0;
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
         };
+    }
+
+    // ---------------------------------------------------------- biome 行的地形查询
+
+    /** {@code terrain(x, z)}：公式地形在该列的表面方块 y（含水面；全空列为世界最低 y - 1）。 */
+    private static double terrainHeight(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        TerrainView view = TERRAIN_VIEW.get();
+        if (view == null) return 0d;
+        return view.surfaceY(blockCoord(args.get(0), x, z, ly, context),
+                blockCoord(args.get(1), x, z, ly, context));
+    }
+
+    /** {@code surfis(x, z, 方块)}：表面方块是否指定方块。 */
+    private static boolean surfaceIsAt(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        TerrainView view = TERRAIN_VIEW.get();
+        if (view == null) return false;
+        BlockState target = blockValue(args.get(2), x, z, ly, context);
+        if (target == null) return false;
+        return view.surfaceIs(blockCoord(args.get(0), x, z, ly, context),
+                blockCoord(args.get(1), x, z, ly, context), target);
+    }
+
+    /** {@code blockis(x, z, y, 方块)}：指定 y 处是否指定方块。 */
+    private static boolean blockIsAt(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        TerrainView view = TERRAIN_VIEW.get();
+        if (view == null) return false;
+        BlockState target = blockValue(args.get(3), x, z, ly, context);
+        if (target == null) return false;
+        return view.blockIs(blockCoord(args.get(0), x, z, ly, context),
+                blockCoord(args.get(1), x, z, ly, context),
+                blockCoord(args.get(2), x, z, ly, context), target);
+    }
+
+    /** 坐标实参：向下取整（与方块坐标的负数语义一致）。 */
+    private static int blockCoord(ExprNode arg, int x, int z, int ly, EvalContext context) {
+        return (int) Math.floor(evalNumber(arg, x, z, ly, context));
+    }
+
+    /** 方块实参（surfis 第 3 参 / blockis 第 4 参）：以方块语义求值并取方块种类。 */
+    private static BlockState blockValue(ExprNode arg, int x, int z, int ly, EvalContext context) {
+        Object value = evalBlockArg(arg, x, z, ly, context);
+        return value instanceof BlockState state ? state : null;
+    }
+
+    /** 摘掉群系求值环境求值一段表达式（方块参数位需要用方块注册表的语义）。 */
+    private static Object evalBlockArg(ExprNode arg, int x, int z, int ly, EvalContext context) {
+        Function<String, Object> savedResolver = BIOME_RESOLVER.get();
+        TerrainView savedTerrain = TERRAIN_VIEW.get();
+        BIOME_RESOLVER.remove();
+        TERRAIN_VIEW.remove();
+        try {
+            return eval(arg, x, z, ly, context);
+        } finally {
+            if (savedResolver != null) BIOME_RESOLVER.set(savedResolver);
+            if (savedTerrain != null) TERRAIN_VIEW.set(savedTerrain);
+        }
     }
 
     private static int pickIndex(int x, int z, int y, int bound) {
@@ -545,20 +633,36 @@ public class ExprEvaluator {
     }
 
     public static BlockState evalToBlock(ExprNode node, int x, int z, int ly) {
-        Object result = eval(node, x, z, ly);
-        return result instanceof BlockState bs ? bs : BlockResolver.resolve("minecraft:air");
+        // 方块语义入口：临时摘掉群系求值环境。biome 行的地形查询会在求值中途回调
+        // 到方块层（FormulaLayerDef.getBlock 同样走这里），不摘除的话方块字面量
+        // 会被当成群系解析。
+        Function<String, Object> savedResolver = BIOME_RESOLVER.get();
+        TerrainView savedTerrain = TERRAIN_VIEW.get();
+        BIOME_RESOLVER.remove();
+        TERRAIN_VIEW.remove();
+        try {
+            Object result = eval(node, x, z, ly);
+            return result instanceof BlockState bs ? bs : BlockResolver.resolve("minecraft:air");
+        } finally {
+            if (savedResolver != null) BIOME_RESOLVER.set(savedResolver);
+            if (savedTerrain != null) TERRAIN_VIEW.set(savedTerrain);
+        }
     }
 
     /**
      * 群系求值：与 {@link #eval} 相同，但字面量不解析为方块，而是交给
-     * {@code resolver}（群系表达式里的字面量是群系 id）。返回 resolver 的原样结果。
+     * {@code resolver}（群系表达式里的字面量是群系 id）；同时注入 biome 行的
+     * 地形查询视图（可为 null）。返回 resolver 的原样结果。
      */
-    public static Object evalToBiome(ExprNode node, int x, int z, int ly, Function<String, Object> resolver) {
+    public static Object evalToBiome(ExprNode node, int x, int z, int ly, Function<String, Object> resolver,
+                                     TerrainView terrain) {
         BIOME_RESOLVER.set(resolver);
+        TERRAIN_VIEW.set(terrain);
         try {
             return eval(node, x, z, ly);
         } finally {
             BIOME_RESOLVER.remove();
+            TERRAIN_VIEW.remove();
         }
     }
 

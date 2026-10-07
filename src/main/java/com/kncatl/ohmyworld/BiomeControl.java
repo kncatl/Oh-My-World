@@ -5,12 +5,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.function.Function;
-import java.util.function.IntBinaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.kncatl.ohmyworld.compat.ResourceIds;
+import com.kncatl.ohmyworld.expr.ExprEvaluator;
 import com.kncatl.ohmyworld.mixin.ChunkGeneratorBiomeSourceAccessor;
 import com.kncatl.ohmyworld.mixin.ChunkMapAccessor;
 import com.google.common.base.Suppliers;
@@ -30,6 +30,7 @@ import net.minecraft.world.level.biome.FixedBiomeSource;
 import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
 import net.minecraft.world.level.biome.MultiNoiseBiomeSourceParameterLists;
 import net.minecraft.world.level.biome.TheEndBiomeSource;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
@@ -232,30 +233,48 @@ public final class BiomeControl {
                                                   List<BiomeLayerDef> biomeLayers,
                                                   DimensionRules.BiomeFallback fallbackMode) {
         try {
+            PatternData.PatternSnapshot snapshot = PatternData.snapshotFor(generator);
+            if (snapshot == null) {
+                LOGGER.error("ohmyworld: no formula snapshot for {} while building biome source",
+                        ResourceIds.keyIdString(level.dimension()));
+                return null;
+            }
             BiomeSource fallbackSource = null;
-            IntBinaryOperator referenceY = null;
             if (fallbackMode != DimensionRules.BiomeFallback.NONE) {
                 fallbackSource = build(level, DimensionRules.BiomeRule.VANILLA);
                 if (fallbackSource == null) return null;
             }
-            if (fallbackMode == DimensionRules.BiomeFallback.TWO_D) {
-                PatternData.PatternSnapshot snapshot = PatternData.snapshotFor(generator);
-                if (snapshot == null) {
-                    LOGGER.error("ohmyworld: no formula snapshot for {} while building biome source",
-                            ResourceIds.keyIdString(level.dimension()));
-                    return null;
-                }
-                int minY = LevelHeights.minY(level);
-                int maxY = LevelHeights.maxY(level);
-                referenceY = (x, z) -> PatternData.getBaseHeight(snapshot, x, z,
-                        Heightmap.Types.WORLD_SURFACE_WG, minY, maxY);
-            }
+            ExprEvaluator.TerrainView terrain = new SnapshotTerrainView(snapshot,
+                    LevelHeights.minY(level), LevelHeights.maxY(level));
             return new FormulaBiomeSource(level, biomeLayers, fallbackSource,
-                    fallbackMode == DimensionRules.BiomeFallback.TWO_D, referenceY);
+                    fallbackMode == DimensionRules.BiomeFallback.TWO_D, terrain);
         } catch (Exception e) {
             LOGGER.error("ohmyworld: failed to build formula biome source for {}: {}",
                     ResourceIds.keyIdString(level.dimension()), e.toString());
             return null;
+        }
+    }
+
+    /**
+     * biome 行的地形视图：表面高度 / 表面方块 / 指定位置方块，全部按公式层直接计算
+     * （不读已生成的方块，群系填充阶段即可用）；高度查询复用预览/高度图同一份缓存。
+     */
+    private record SnapshotTerrainView(PatternData.PatternSnapshot snapshot, int minY, int maxY)
+            implements ExprEvaluator.TerrainView {
+        @Override
+        public int surfaceY(int x, int z) {
+            return PatternData.getBaseHeight(snapshot, x, z, Heightmap.Types.WORLD_SURFACE_WG, minY, maxY) - 1;
+        }
+
+        @Override
+        public boolean surfaceIs(int x, int z, BlockState target) {
+            return blockIs(x, z, surfaceY(x, z), target);
+        }
+
+        @Override
+        public boolean blockIs(int x, int z, int y, BlockState target) {
+            if (y < minY || y >= maxY) return false;
+            return PatternData.blockAt(snapshot.layers(), x, z, y).getBlock() == target.getBlock();
         }
     }
 

@@ -25,7 +25,8 @@
   1 = [biome:minecraft:desert] —— 主世界只应有沙漠、无平原；
   2 = [biome:vanilla] —— 至少出现 2 种不同主世界群系（不再是清一色平原）；
   3 = biome 行两段全覆盖（深暗之域/沙漠）—— 两行都生效且无原版平原；
-  4 = biome 行 + [biome-fallback:3d] —— 低段深暗之域 + 至少 2 种原版群系。
+  4 = biome 行 + [biome-fallback:3d] —— 低段深暗之域 + 至少 2 种原版群系；
+  5 = biome 行按 terrain/surfis/blockis 分布 —— 冰刺之地/沙漠/恶地都要出现。
 
 --features-smoke（P4.3）：装饰特性冒烟预设（下界固定玄武岩三角洲）：
   1 = [features:all] —— 装饰方块（黑石/荧石/岩浆块至少一种）应出现；
@@ -157,6 +158,12 @@ BIOME_SMOKE_RULES["4"] = {
     "expect_any_min": {
         "overworld": [BIOME_SMOKE_RULES["2"]["expect_any_min"]["overworld"][0]],
     },
+}
+# 5 = 地形联动（配合 smoke-server-config.py --biome-terrain）：biome 行用
+# terrain/surfis/blockis 决定群系——三类群系都要出现，且不能有原版平原。
+BIOME_SMOKE_RULES["5"] = {
+    "expect": {"overworld": ("minecraft:ice_spikes", "minecraft:desert", "minecraft:badlands")},
+    "forbid": {"overworld": ("minecraft:plains",)},
 }
 
 # P4.3 特性冒烟（配合 smoke-server-config.py --features-all / --features-none）：
