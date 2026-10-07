@@ -5,9 +5,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.function.Function;
+import java.util.function.IntBinaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.kncatl.ohmyworld.compat.ResourceIds;
 import com.kncatl.ohmyworld.mixin.ChunkGeneratorBiomeSourceAccessor;
 import com.kncatl.ohmyworld.mixin.ChunkMapAccessor;
@@ -31,6 +33,7 @@ import net.minecraft.world.level.biome.TheEndBiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -77,9 +80,11 @@ public final class BiomeControl {
 
     private BiomeControl() {}
 
-    /** 按该生成器当前的 {@code [biome:...]} 规则套用群系相关状态（无规则 = 不接管 / 还原）。 */
+    /** 按该生成器当前的 {@code [biome:...]} 规则 / biome 行套用群系相关状态（无规则 = 不接管 / 还原）。 */
     public static void apply(ServerLevel level, ChunkGenerator generator) {
         DimensionRules.BiomeRule rule = PatternData.biomeRuleFor(generator);
+        List<BiomeLayerDef> biomeLayers = PatternData.biomeLayersFor(generator);
+        DimensionRules.BiomeFallback biomeFallback = PatternData.biomeFallbackFor(generator);
         boolean featuresOff = PatternData.suppressFeatures(generator);
         synchronized (STATES) {
             ChunkGeneratorBiomeSourceAccessor accessor = (ChunkGeneratorBiomeSourceAccessor) generator;
@@ -93,11 +98,16 @@ public final class BiomeControl {
             Function<Holder<Biome>, BiomeGenerationSettings> targetGetter = state.settingsGetter();
             Supplier<List<FeatureSorter.StepFeatureData>> targetFeatures = state.featuresPerStep();
 
-            if (rule != null) {
-                BiomeSource built = build(level, rule);
+            if (rule != null || !biomeLayers.isEmpty()) {
+                BiomeSource built = !biomeLayers.isEmpty()
+                        ? buildFormulaSource(level, generator, biomeLayers, biomeFallback)
+                        : build(level, rule);
                 if (built == null) return; // 构建失败：已记日志，保持现状
-                if (rule.vanilla() && !(generator instanceof NoiseBasedChunkGenerator)) {
-                    // 超平坦等非噪声生成器：换成真实气候采样，双噪声群系源才能形成分布
+                // 需要真实气候采样的两种情形：vanilla 换源；公式源带 2d/3d 回退（回退要采样原版）。
+                boolean needsClimate = rule != null ? rule.vanilla()
+                        : biomeFallback != DimensionRules.BiomeFallback.NONE;
+                if (needsClimate && !(generator instanceof NoiseBasedChunkGenerator)) {
+                    // 超平坦等非噪声生成器：换成真实气候采样，双噪声群系源（含回退）才能形成分布
                     RandomState climate = buildClimateRandomState(level);
                     if (climate != null) targetRandom = climate;
                 }
@@ -136,9 +146,11 @@ public final class BiomeControl {
                 rebuildStructureState(level, generator, targetSource);
             }
             if (OhMyWorldConfig.debugLogsEnabled() && changed) {
+                String label = rule != null ? rule.toString()
+                        : biomeLayers.isEmpty() ? "restored"
+                        : "formula(" + biomeLayers.size() + " layer(s), fallback=" + biomeFallback + ")";
                 LOGGER.info("ohmyworld: biome of {} -> {} (featuresOff={})",
-                        ResourceIds.keyIdString(level.dimension()),
-                        rule == null ? "restored" : rule.toString(), featuresOff);
+                        ResourceIds.keyIdString(level.dimension()), label, featuresOff);
             }
         }
     }
@@ -211,6 +223,42 @@ public final class BiomeControl {
         }
     }
 
+    /**
+     * 依据 biome 行构建公式群系源。2d/3d 的回退用该维度自己的原版群系源（主世界/下界
+     * 双噪声、末地末地源）；2d 的参考高度取公式地形的表面（含水面，与预览一致）。
+     * 未知群系 id 会在构造期抛错，这里记日志并保持现状。
+     */
+    private static BiomeSource buildFormulaSource(ServerLevel level, ChunkGenerator generator,
+                                                  List<BiomeLayerDef> biomeLayers,
+                                                  DimensionRules.BiomeFallback fallbackMode) {
+        try {
+            BiomeSource fallbackSource = null;
+            IntBinaryOperator referenceY = null;
+            if (fallbackMode != DimensionRules.BiomeFallback.NONE) {
+                fallbackSource = build(level, DimensionRules.BiomeRule.VANILLA);
+                if (fallbackSource == null) return null;
+            }
+            if (fallbackMode == DimensionRules.BiomeFallback.TWO_D) {
+                PatternData.PatternSnapshot snapshot = PatternData.snapshotFor(generator);
+                if (snapshot == null) {
+                    LOGGER.error("ohmyworld: no formula snapshot for {} while building biome source",
+                            ResourceIds.keyIdString(level.dimension()));
+                    return null;
+                }
+                int minY = LevelHeights.minY(level);
+                int maxY = LevelHeights.maxY(level);
+                referenceY = (x, z) -> PatternData.getBaseHeight(snapshot, x, z,
+                        Heightmap.Types.WORLD_SURFACE_WG, minY, maxY);
+            }
+            return new FormulaBiomeSource(level, biomeLayers, fallbackSource,
+                    fallbackMode == DimensionRules.BiomeFallback.TWO_D, referenceY);
+        } catch (Exception e) {
+            LOGGER.error("ohmyworld: failed to build formula biome source for {}: {}",
+                    ResourceIds.keyIdString(level.dimension()), e.toString());
+            return null;
+        }
+    }
+
     /** 依据规则构建群系源；无法构建（未知群系等）返回 null 并记日志。 */
     private static BiomeSource build(ServerLevel level, DimensionRules.BiomeRule rule) {
         try {
@@ -257,7 +305,7 @@ public final class BiomeControl {
     }
 
     /** "命名空间:名称"（缺省命名空间=minecraft）→ 群系键。 */
-    private static ResourceKey<Biome> biomeKey(String biomeId) {
+    static ResourceKey<Biome> biomeKey(String biomeId) {
         String namespace = "minecraft";
         String path = biomeId;
         int colon = biomeId.indexOf(':');

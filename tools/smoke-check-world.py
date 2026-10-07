@@ -23,7 +23,9 @@
 
 --biome-smoke（P4.2）：群系冒烟预设：
   1 = [biome:minecraft:desert] —— 主世界只应有沙漠、无平原；
-  2 = [biome:vanilla] —— 至少出现 2 种不同主世界群系（不再是清一色平原）。
+  2 = [biome:vanilla] —— 至少出现 2 种不同主世界群系（不再是清一色平原）；
+  3 = biome 行两段全覆盖（深暗之域/沙漠）—— 两行都生效且无原版平原；
+  4 = biome 行 + [biome-fallback:3d] —— 低段深暗之域 + 至少 2 种原版群系。
 
 --features-smoke（P4.3）：装饰特性冒烟预设（下界固定玄武岩三角洲）：
   1 = [features:all] —— 装饰方块（黑石/荧石/岩浆块至少一种）应出现；
@@ -138,6 +140,22 @@ BIOME_SMOKE_RULES = {
                      "minecraft:sugar_cane", "minecraft:sunflower")),
             ],
         },
+    },
+}
+
+# 公式群系冒烟（配合 smoke-server-config.py --biome-formula / --biome-formula-fallback）：
+# 3 = 两段全覆盖：低段深暗之域 + 高段沙漠都应出现（两行都生效），且不能出现原版平原；
+# 4 = 3d 回退：低段深暗之域（公式行）+ 至少 2 种候选原版群系（回退行；候选表同模式 2）。
+BIOME_SMOKE_RULES["3"] = {
+    "expect": {"overworld": ("minecraft:deep_dark", "minecraft:desert")},
+    "forbid": {"overworld": ("minecraft:plains",)},
+}
+BIOME_SMOKE_RULES["4"] = {
+    "expect": {"overworld": ("minecraft:deep_dark",)},
+    # 只核对"回退出来的是原版分布"（候选群系 ≥2）；装饰方块不在本模式判定
+    # （超平坦基座没有草/沙等基底，植被类特性本来就放不下）。
+    "expect_any_min": {
+        "overworld": [BIOME_SMOKE_RULES["2"]["expect_any_min"]["overworld"][0]],
     },
 }
 

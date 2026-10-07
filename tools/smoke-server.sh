@@ -27,11 +27,29 @@ echo "[smoke] 节点=$NODE  日志=$LOG"
 # 冒烟公式刻意使用白名单之外的方块（触发 RegistryLookup）并用特征方块核验世界。
 mkdir -p "$RUN_DIR"
 PORT=auto
-if [ "$MODE" = "seed" ]; then
-    CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT" --seed-formula)"
-else
-    CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT")"
-fi
+case "$MODE" in
+    "")
+        CONFIG_FLAGS=""
+        CHECK_ARGS=""
+        ;;
+    seed)
+        CONFIG_FLAGS="--seed-formula"
+        CHECK_ARGS="--require-all"
+        ;;
+    biome-formula)
+        CONFIG_FLAGS="--biome-formula"
+        CHECK_ARGS="--biome-smoke 3"
+        ;;
+    biome-formula-fallback)
+        CONFIG_FLAGS="--biome-formula-fallback"
+        CHECK_ARGS="--biome-smoke 4"
+        ;;
+    *)
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | biome-formula | biome-formula-fallback）" >&2
+        exit 2
+        ;;
+esac
+CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT" $CONFIG_FLAGS)"
 echo "$CONFIG_OUT" | grep -v '^SMOKE_FORMULA=' || true
 SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
 
@@ -86,12 +104,8 @@ CHUNKS=$(find "$RUN_DIR/world" -path '*/region/*.mca' 2>/dev/null | wc -l | tr -
 # 这证明「Mixin → fillChunk → 公式 → 注册表查方块」整条链路真的跑过。
 # seed 模式额外要求两种特征方块都出现（seedhash 退化成常量时只剩一种，必须判失败）。
 if [ "$SMOKE_FORMULA" = "1" ]; then
-    if [ "$MODE" = "seed" ]; then
-        python3 "$ROOT/tools/smoke-check-world.py" --require-all "$RUN_DIR" \
-            || fail "世界里缺少公式特征方块（seed 或 seedhash 没有按预期生效）"
-    else
-        python3 "$ROOT/tools/smoke-check-world.py" "$RUN_DIR" || fail "世界里没有公式特征方块（公式没有生效）"
-    fi
+    python3 "$ROOT/tools/smoke-check-world.py" $CHECK_ARGS "$RUN_DIR" \
+        || fail "世界核验未通过（公式或群系没有按预期生效）"
 fi
 
 echo "[smoke] OK: $NODE 出生点生成成功（region 文件 $CHUNKS 个）"

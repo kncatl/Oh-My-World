@@ -76,7 +76,8 @@ public class PatternData {
 
     public record PatternSnapshot(List<Object> layers, String rawInput, long version,
                                   DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome,
-                                  boolean featuresOff) {}
+                                  boolean featuresOff, List<BiomeLayerDef> biomeLayers,
+                                  DimensionRules.BiomeFallback biomeFallback) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -98,7 +99,7 @@ public class PatternData {
             if (snapshot == null) {
                 snapshot = new PatternSnapshot(List.copyOf(parsed.layers()), raw,
                         SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome(),
-                        parsed.featuresOff());
+                        parsed.featuresOff(), List.copyOf(parsed.biomeLayers()), parsed.biomeFallback());
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -140,7 +141,8 @@ public class PatternData {
         synchronized (PatternData.class) {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
-                        SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false);
+                        SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
+                        List.of(), DimensionRules.BiomeFallback.NONE);
             }
             return defaultSnapshot;
         }
@@ -194,6 +196,18 @@ public class PatternData {
     public static DimensionRules.BiomeRule biomeRuleFor(ChunkGenerator generator) {
         PatternSnapshot snapshot = snapshotFor(generator);
         return snapshot == null ? null : snapshot.biome();
+    }
+
+    /** 公式群系层（biome 行）；未绑定 / 无 → 空表（不使用公式群系）。 */
+    public static List<BiomeLayerDef> biomeLayersFor(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot == null ? List.of() : snapshot.biomeLayers();
+    }
+
+    /** [biome-fallback:...]；未绑定 / 无 → none。 */
+    public static DimensionRules.BiomeFallback biomeFallbackFor(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot == null ? DimensionRules.BiomeFallback.NONE : snapshot.biomeFallback();
     }
 
     /** [features:none] 是否生效；未绑定 / 缺省 → false（零行为变化）。 */

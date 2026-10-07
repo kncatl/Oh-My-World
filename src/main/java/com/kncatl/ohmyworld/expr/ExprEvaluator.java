@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Block;
@@ -22,6 +23,13 @@ public class ExprEvaluator {
     public enum ValueType { NUMBER, BOOLEAN, BLOCK, UNKNOWN }
 
     private static final ThreadLocal<EvalContext> CONTEXT = ThreadLocal.withInitial(EvalContext::new);
+
+    /**
+     * 群系求值模式：非 null 时，表达式里的字面量交给它解析（返回群系 Holder），
+     * 不触碰方块注册表。由 {@link #evalToBiome} 设置/清除；同一线程内嵌套求值
+     * （例如未来 biome 行里的地形查询）需要在进入方块求值前自行清空。
+     */
+    private static final ThreadLocal<Function<String, Object>> BIOME_RESOLVER = new ThreadLocal<>();
 
     /**
      * 当前世界的种子；由 {@code WorldLoadHandler} 在世界加载时设置（各维度同值）。
@@ -114,7 +122,10 @@ public class ExprEvaluator {
         return switch (node) {
             case ExprNode.NumberNode n -> n.value();
             case ExprNode.VariableNode v -> context.lookup(v.name(), x, z, ly);
-            case ExprNode.BlockNode b -> resolveBlock(b);
+            case ExprNode.BlockNode b -> {
+                Function<String, Object> biomeResolver = BIOME_RESOLVER.get();
+                yield biomeResolver != null ? biomeResolver.apply(b.blockId()) : resolveBlock(b);
+            }
             case ExprNode.BinaryNode b -> evalBinary(b, x, z, ly, context);
             case ExprNode.UnaryNode u -> evalUnary(u, x, z, ly, context);
             case ExprNode.ConditionalNode c -> evalConditional(c, x, z, ly, context);
@@ -536,6 +547,19 @@ public class ExprEvaluator {
     public static BlockState evalToBlock(ExprNode node, int x, int z, int ly) {
         Object result = eval(node, x, z, ly);
         return result instanceof BlockState bs ? bs : BlockResolver.resolve("minecraft:air");
+    }
+
+    /**
+     * 群系求值：与 {@link #eval} 相同，但字面量不解析为方块，而是交给
+     * {@code resolver}（群系表达式里的字面量是群系 id）。返回 resolver 的原样结果。
+     */
+    public static Object evalToBiome(ExprNode node, int x, int z, int ly, Function<String, Object> resolver) {
+        BIOME_RESOLVER.set(resolver);
+        try {
+            return eval(node, x, z, ly);
+        } finally {
+            BIOME_RESOLVER.remove();
+        }
     }
 
     private static double toDouble(Object o) { if (o instanceof Number n) return n.doubleValue(); if (o instanceof Boolean b) return b ? 1d : 0d; return 0d; }

@@ -29,6 +29,10 @@
 
 --biome-desert / --biome-vanilla（P4.2）：主世界 [biome:...] 群系冒烟；配合
   smoke-check-world.py --biome-smoke 1|2 判定（区块 NBT 群系调色板扫描）。
+--biome-formula / --biome-formula-fallback（公式群系）：主世界 biome 行冒烟；
+  配合 smoke-check-world.py --biome-smoke 3|4 判定。
+  3 = 两段全覆盖（y=-64..30 深暗之域 / y=31..319 沙漠，fallback 缺省 none）；
+  4 = [biome-fallback:3d]：低段深暗之域 + 其余按实际 y 交还原版分布。
 --features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
   装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
 
@@ -115,6 +119,23 @@ BIOME_VANILLA_FORMULA = (
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的
 # 群系源（平原）"过滤过结构组，沙漠神殿本不在候选里——本模组换群系后会重建结构组
 # 状态；若重建失败，这里将扫不到 desert_pyramid。配合 --structure-smoke 3。
+# 公式群系冒烟（配合 smoke-check-world.py --biome-smoke 3|4）：
+# 3 = 两段全覆盖（低段深暗之域 / 高段沙漠，fallback 缺省 none——两行都必须生效）；
+# 4 = [biome-fallback:3d]：低段深暗之域 + 其余按实际 y 交还原版分布。
+BIOME_FORMULA_FORMULA = (
+    "{overworld="
+    "y=-64: minecraft:bedrock;"
+    "y=-63..64: (x+z)%2==0 ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks;"
+    "biome y=-64..30: minecraft:deep_dark;"
+    "biome y=31..319: minecraft:desert}"
+)
+BIOME_FORMULA_FALLBACK_FORMULA = (
+    "{overworld=[biome-fallback:3d] "
+    "y=-64: minecraft:bedrock;"
+    "y=-63..64: (x+z)%2==0 ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks;"
+    "biome y=-64..30: minecraft:deep_dark}"
+)
+
 BIOME_STRUCTURES_FORMULA = (
     "{overworld=[biome:minecraft:desert] [structure:only=desert_pyramids] "
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
@@ -154,6 +175,8 @@ def main():
     biome_desert = "--biome-desert" in sys.argv
     biome_vanilla = "--biome-vanilla" in sys.argv
     biome_structures = "--biome-structures" in sys.argv
+    biome_formula = "--biome-formula" in sys.argv
+    biome_formula_fallback = "--biome-formula-fallback" in sys.argv
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     if len(args) != 2:
@@ -180,7 +203,8 @@ def main():
         # - 打开结构开关（默认冒烟是关结构，避免干扰方块核验）。
         props["level-type"] = "ohmyworld\\:flat_plus"
         props["generate-structures"] = "true"
-    elif biome_desert or biome_vanilla or biome_structures or features_all or features_none:
+    elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
+            or features_all or features_none:
         # 群系/特性冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -205,6 +229,10 @@ def main():
         formula = BIOME_VANILLA_FORMULA
     elif biome_structures:
         formula = BIOME_STRUCTURES_FORMULA
+    elif biome_formula:
+        formula = BIOME_FORMULA_FORMULA
+    elif biome_formula_fallback:
+        formula = BIOME_FORMULA_FALLBACK_FORMULA
     elif features_all:
         formula = FEATURES_ALL_FORMULA
     elif features_none:
@@ -218,6 +246,7 @@ def main():
     wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
+                     or biome_formula or biome_formula_fallback
                      or features_all or features_none
                      or not config.exists())
     if not wrote_formula:
@@ -260,6 +289,10 @@ def main():
         label = "使用群系冒烟公式（主世界 [biome:vanilla]）"
     elif biome_structures:
         label = "使用群系结构冒烟公式（主世界 [biome:desert] + [structure:only=desert_pyramids]）"
+    elif biome_formula:
+        label = "使用公式群系冒烟（主世界 biome 行两段全覆盖、fallback=none）"
+    elif biome_formula_fallback:
+        label = "使用公式群系冒烟（主世界 biome 行 + [biome-fallback:3d]）"
     elif features_all:
         label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
     elif features_none:
