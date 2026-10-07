@@ -472,7 +472,7 @@ public class PatternData {
             BlockState[] column = new BlockState[16 * 16];
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
-                    BlockState st = f.getBlock(cx + x, cz + z, lo);
+                    BlockState st = f.getBlock(cx + x, cz + z, lo, minY);
                     column[x * 16 + z] = st;
                 }
             }
@@ -489,7 +489,7 @@ public class PatternData {
                 int worldX = cx + x;
                 int worldZ = cz + z;
                 for (int y = lo; y <= hi; y++) {
-                    prepared[(y - baseY) * 16 * 16 + x * 16 + z] = f.getBlock(worldX, worldZ, y);
+                    prepared[(y - baseY) * 16 * 16 + x * 16 + z] = f.getBlock(worldX, worldZ, y, minY);
                 }
             }
         }
@@ -518,7 +518,7 @@ public class PatternData {
                     int worldX = cx + x;
                     int worldZ = cz + z;
                     for (int y = lo; y <= hi; y++) {
-                        prepared[(y - baseY) * 16 * 16 + x * 16 + z] = c.getBlock(worldX, worldZ, y);
+                        prepared[(y - baseY) * 16 * 16 + x * 16 + z] = c.getBlock(worldX, worldZ, y, minY);
                     }
                 }
             }
@@ -526,30 +526,31 @@ public class PatternData {
         }
 
         // 条目都不引用 ly，因此 layerY 取任一值都等价
-        int layerY = lo - c.yStart();
+        int start = c.resolvedStart(minY);
+        int layerY = lo - start;
         BlockState[] cycle = new BlockState[period];
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 int worldX = cx + x;
                 int worldZ = cz + z;
                 for (int pos = 0; pos < period; pos++) {
-                    cycle[pos] = c.getBlockForPos(worldX, worldZ, pos, layerY);
+                    cycle[pos] = c.getBlockForPos(worldX, worldZ, pos, layerY, start);
                 }
                 for (int y = lo; y <= hi; y++) {
-                    prepared[(y - baseY) * 16 * 16 + x * 16 + z] = cycle[c.posOf(y)];
+                    prepared[(y - baseY) * 16 * 16 + x * 16 + z] = cycle[c.posOf(y, minY)];
                 }
             }
         }
     }
 
-    /** 按与区块填充相同的顺序计算某个世界坐标最终得到的方块状态。 */
-    public static BlockState blockAt(List<Object> layers, int x, int z, int y) {
+    /** 按与区块填充相同的顺序计算某个世界坐标最终得到的方块状态（minY 用于解析开区间层的 ly 基准）。 */
+    public static BlockState blockAt(List<Object> layers, int x, int z, int y, int dimensionMinY) {
         BlockState result = AIR;
         for (Object obj : layers) {
             if (obj instanceof FormulaLayerDef f && y >= f.yStart() && y <= f.yEnd()) {
-                result = f.getBlock(x, z, y);
+                result = f.getBlock(x, z, y, dimensionMinY);
             } else if (obj instanceof CyclicLayerDef c && y >= c.yStart() && y <= c.yEnd()) {
-                result = c.getBlock(x, z, y);
+                result = c.getBlock(x, z, y, dimensionMinY);
             }
         }
         return result;
@@ -575,7 +576,7 @@ public class PatternData {
         int maxY = Math.addExact(minY, total);
         int lo = Math.max(minY, minLayerStart(snapshot.layers()));
         int hi = Math.min(maxY - 1, maxLayerEnd(snapshot.layers()));
-        for (int y = lo; y <= hi; y++) column[y - minY] = blockAt(snapshot.layers(), x, z, y);
+        for (int y = lo; y <= hi; y++) column[y - minY] = blockAt(snapshot.layers(), x, z, y, minY);
         return column;
     }
 
@@ -604,7 +605,7 @@ public class PatternData {
         int upper = Math.min(maxY - 1, maxLayerEnd(snapshot.layers()));
         int result = minY;
         for (long y = upper; y >= minY; y--) {
-            BlockState state = blockAt(snapshot.layers(), x, z, (int) y);
+            BlockState state = blockAt(snapshot.layers(), x, z, (int) y, minY);
             if (type.isOpaque().test(state)) {
                 result = (int) y + 1;
                 break;

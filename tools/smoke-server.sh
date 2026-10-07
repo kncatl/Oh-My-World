@@ -40,6 +40,14 @@ case "$MODE" in
         CONFIG_FLAGS="--spawn-formula"
         CHECK_ARGS="--require-all"
         ;;
+    open-ranges)
+        CONFIG_FLAGS="--open-ranges"
+        CHECK_ARGS="--require-all"
+        ;;
+    water)
+        CONFIG_FLAGS="--water"
+        CHECK_ARGS="--require-all"
+        ;;
     biome-formula)
         CONFIG_FLAGS="--biome-formula"
         CHECK_ARGS="--biome-smoke 3"
@@ -77,7 +85,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac

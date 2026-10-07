@@ -274,7 +274,7 @@ public final class BiomeControl {
         @Override
         public boolean blockIs(int x, int z, int y, BlockState target) {
             if (y < minY || y >= maxY) return false;
-            return PatternData.blockAt(snapshot.layers(), x, z, y).getBlock() == target.getBlock();
+            return PatternData.blockAt(snapshot.layers(), x, z, y, minY).getBlock() == target.getBlock();
         }
     }
 

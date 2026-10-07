@@ -7,6 +7,16 @@ Separate layers with semicolons ";". Two formats are supported:
 [Single expression]
   y=<start>..<end>: <expression>
   y=<layer>: <expression>             ← single layer, range omitted
+  y=<start>..: <expression>           ← open end: up to the dimension top
+  y=..<end>: <expression>             ← open start: from the dimension bottom
+  y=..: <expression>                  ← the whole dimension
+
+  ly base of open ranges: y=<start>..: starts at <start>; y=..<end> / y=..:
+  start at the dimension's minimum y (same as the biome shorthand).
+
+  Overlap: for the same y, later layers override earlier ones (open ranges too).
+  E.g. {y=-64..0: A; y=..: B} ends up all-B (A is fully covered); for a
+  "base + local override", write the base first: {y=..: B; y=-64..0: A}.
 
 [let block]
   y=<start>..<end>: {
@@ -357,11 +367,26 @@ Default preset:
     ★ The algorithms are frozen: the same formula + seed generates the same
       world in every version.
 
+  -- Splines (custom curve mapping; positions ascending, clamped outside) --
+  spline(v, p0, v0, p1, v1, ...)    piecewise linear: passes through every point
+  cspline(v, p0, v0, p1, v1, ...)   Catmull-Rom: passes through points, smoother
+                                    curve (may slightly overshoot)
+
+    ★ Use it to map noise (or any value) through a custom curve, e.g.
+      let h = 64 + spline(noise2(x, z, 1200, 1), -1, -30, -0.2, -6, 0.2, 8, 1, 60);
+    ★ At least two point pairs (an odd argument count >= 5); positions must be
+      ascending (checked ahead of time when all positions are number literals).
+      Algorithms are frozen.
+
   -- Helpers --
   clamp(v, lo, hi)             clamp into [lo, hi]
   lerp(a, b, t)                linear interpolation a + (b - a) * t
   smoothstep(t)                cubic smoothing of a 0..1 input
   map(v, a, b, c, d)           linear map from [a,b] to [c,d] (vanilla Mth.map)
+  waterline(x, z, level)       water surface height of the column: level plus
+                               slow noise (feature ~512 blocks, ~±3 blocks,
+                               follows the world seed). Use it for "lowland
+                               flooding / cave water"; see the recipes.
 
 
 5. Expression Examples
@@ -526,6 +551,36 @@ Default preset:
     (air) and the rim interleaves block by block -- a plush edge. wobble makes the
     sphere lumpy (drop it for a plain fuzzy ball). The bounding box test comes
     first, so the heavy part only runs inside the box.
+
+  ▸ Spline terrain curve (map noise through a custom curve):
+
+    {overworld=
+      let n = noise2(x, z, 1400, 1);
+      let h = 64 + spline(n, -0.6, -26, -0.15, -4, 0.15, 6, 0.6, 30);
+      y=-64..: y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air
+    }
+
+    Tweak the point pairs for steep cliffs vs gentle plains; cspline is smoother.
+
+  ▸ Water (water level + lowland flooding + cave water):
+
+    {overworld=
+      let w = waterline(x, z, 63);
+      let h = 60 + fbm2(x, z, 380, 4, 2) * 26;
+      y=..: {
+        let cave = noise3(x, y, z, 84, 7) > 0.34;
+        (y <= h && !cave)
+          ? (y > h - 5 ? minecraft:sand : minecraft:stone)
+          : (y <= w ? minecraft:water : minecraft:air)
+      }
+    }
+
+    · Terrain below the water level becomes water (oceans/lakes); caves below
+      it store water too.
+    · waterline gives a seed-dependent, slowly varying level; you can also
+      write your own noise as the level.
+    · y=..: is the open range: the whole dimension (ly starts at the dimension
+      minimum y).
 
   Rules and performance:
     · Noise/cellular functions are a frozen contract: same formula + seed gives

@@ -37,6 +37,16 @@ public class BiomeLayerDef {
     /** true 表示 {@code biome: <表达式>} 简写（覆盖整维，起止高度运行时才解析）。 */
     public boolean shorthand() { return shorthand; }
 
+    /** 运行期解析后的起点：简写或开区间（{@code biome y=..b:}）都取维度最低 y。 */
+    public int resolvedStart(int dimensionMinY) {
+        return (shorthand || yStart == Integer.MIN_VALUE) ? dimensionMinY : yStart;
+    }
+
+    /** 运行期解析后的终点（含）：简写或开区间（{@code biome y=a..:}）都取维度最高 y。 */
+    public int resolvedEnd(int dimensionMaxY) {
+        return (shorthand || yEnd == Integer.MAX_VALUE) ? dimensionMaxY : yEnd;
+    }
+
     public ExprNode expression() { return expression; }
 
     /**

@@ -42,7 +42,7 @@ public sealed interface ExprNode {
     // containsKey + get。对绑定较多的公式，每格要执行数百次哈希查找，而区块
     // 生成每区块要算近十万格。编译后变量访问变成定长数组的读写。
 
-    /** 内建值：0=x，1=z，2=ly，3=seed（当前世界种子，由 WorldLoadHandler 设置）。 */
+    /** 内建值：0=x，1=z，2=ly，3=seed，4=y（绝对 y），5=spawnx，6=spawnz。 */
     record BuiltinNode(int kind) implements ExprNode {}
 
     /** let 绑定的槽位引用。 */

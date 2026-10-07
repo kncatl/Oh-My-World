@@ -26,12 +26,21 @@ public class FormulaLayerDef {
     public int yEnd() { return yEnd; }
 
     /**
+     * 运行期解析后的层起点：{@code y=..b}（开区间）取维度最低 y，
+     * 此时 {@code ly = y - 维度最低 y}；显式起点则原样返回。
+     */
+    public int resolvedStart(int dimensionMinY) {
+        return yStart == Integer.MIN_VALUE ? dimensionMinY : yStart;
+    }
+
+    /**
      * true 表示本层的结果在同一列内对所有 y 都相同（表达式不引用 ly），
      * 调用方可以只求值一次后整段高度复用。
      */
     public boolean columnInvariant() { return columnInvariant; }
 
-    public BlockState getBlock(int worldX, int worldZ, int globalY) {
-        return ExprEvaluator.evalToBlock(expression, worldX, worldZ, globalY - yStart, globalY);
+    public BlockState getBlock(int worldX, int worldZ, int globalY, int dimensionMinY) {
+        int start = resolvedStart(dimensionMinY);
+        return ExprEvaluator.evalToBlock(expression, worldX, worldZ, globalY - start, globalY);
     }
 }

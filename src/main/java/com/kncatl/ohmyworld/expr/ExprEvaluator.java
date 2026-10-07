@@ -113,7 +113,10 @@ public class ExprEvaluator {
             Map.entry("map", 5),
             Map.entry("noise2", 4), Map.entry("noise3", 5),
             Map.entry("fbm2", 5), Map.entry("fbm3", 6),
-            Map.entry("worley2", 4), Map.entry("worley3", 5));
+            Map.entry("worley2", 4), Map.entry("worley3", 5),
+            // 1.2.6：样条映射（分段线性 / Catmull-Rom）与水位助手
+            Map.entry("spline", -1), Map.entry("cspline", -1),
+            Map.entry("waterline", 3));
 
     /** 是否是已知函数名（语法高亮与校验共用同一张表）。 */
     public static boolean isFunctionName(String name) {
@@ -132,6 +135,7 @@ public class ExprEvaluator {
     public static final int FN_CLAMP = 107, FN_LERP = 108, FN_SMOOTHSTEP = 109, FN_MAP = 110;
     public static final int FN_NOISE2 = 111, FN_NOISE3 = 112, FN_FBM2 = 113, FN_FBM3 = 114;
     public static final int FN_WORLEY2 = 115, FN_WORLEY3 = 116;
+    public static final int FN_SPLINE = 117, FN_CSPLINE = 118, FN_WATERLINE = 119;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -180,6 +184,9 @@ public class ExprEvaluator {
             case "fbm3" -> FN_FBM3;
             case "worley2" -> FN_WORLEY2;
             case "worley3" -> FN_WORLEY3;
+            case "spline" -> FN_SPLINE;
+            case "cspline" -> FN_CSPLINE;
+            case "waterline" -> FN_WATERLINE;
             default -> FN_UNKNOWN;
         };
     }
@@ -188,6 +195,13 @@ public class ExprEvaluator {
     public static String validateFunction(String name, int argCount) {
         Integer arity = FUNCTION_ARITY.get(name);
         if (arity == null) return "Unknown function: " + name;
+        if (name.equals("spline") || name.equals("cspline")) {
+            // 值 + 至少两组"位置 值"点对：参数个数必须是 ≥5 的奇数
+            if (argCount < 5 || argCount % 2 == 0) {
+                return "Function '" + name + "' expects an odd number of arguments (value plus at least two point pairs), got " + argCount;
+            }
+            return null;
+        }
         if (arity >= 0 && arity != argCount) {
             return "Function '" + name + "' expects " + arity + " argument(s), got " + argCount;
         }
@@ -537,6 +551,9 @@ public class ExprEvaluator {
             case "worley3" -> worley3(evalNumber(args.get(0), x, z, ly, context),
                     evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
                     evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case "spline" -> splineLinear(args, x, z, ly, context);
+            case "cspline" -> splineCatmullRom(args, x, z, ly, context);
+            case "waterline" -> waterline(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
             case "terrain" -> terrainHeight(args, x, z, ly, context);
             case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
@@ -624,6 +641,9 @@ public class ExprEvaluator {
             case FN_WORLEY3 -> worley3(evalNumber(args.get(0), x, z, ly, context),
                     evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
                     evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case FN_SPLINE -> splineLinear(args, x, z, ly, context);
+            case FN_CSPLINE -> splineCatmullRom(args, x, z, ly, context);
+            case FN_WATERLINE -> waterline(args, x, z, ly, context);
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -954,6 +974,89 @@ public class ExprEvaluator {
             }
         }
         return clamp(best, 0, 1);
+    }
+
+    // ---------------------------------------------------------- 样条映射（1.2.6）
+
+    /**
+     * {@code spline(v, p0, v0, p1, v1, ...)}：分段线性映射。
+     *
+     * <p>点按位置升序（{@code p0 < p1 < ...}）；{@code v} 在相邻两点之间线性插值，
+     * 越界取端点值（含 {@code v <= p0} 与 {@code v >= pn}）。重复位置取后一个点的值。
+     * 算法冻结：发布后不得更改（同 noise/worley）。
+     */
+    private static double splineLinear(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        double v = evalNumber(args.get(0), x, z, ly, context);
+        int points = (args.size() - 1) / 2;
+        double prevP = evalNumber(args.get(1), x, z, ly, context);
+        double prevV = evalNumber(args.get(2), x, z, ly, context);
+        if (v <= prevP) return prevV;
+        for (int i = 1; i < points; i++) {
+            double p = evalNumber(args.get(1 + 2 * i), x, z, ly, context);
+            double pv = evalNumber(args.get(2 + 2 * i), x, z, ly, context);
+            if (v <= p) {
+                return p == prevP ? pv : prevV + (v - prevP) * (pv - prevV) / (p - prevP);
+            }
+            prevP = p;
+            prevV = pv;
+        }
+        return prevV;
+    }
+
+    /**
+     * {@code cspline(v, p0, v0, p1, v1, ...)}：Catmull-Rom 样条（非均匀间隔的
+     * 三次 Hermite 形式，切线由相邻点的差分估计）。
+     *
+     * <p>曲线经过所有点、在点处 C1 连续（比 {@code spline} 更顺滑、可能出现
+     * 轻微过冲）；越界取端点值。点按位置升序；重复位置退化处理（不产生除零）。
+     * 算法冻结：发布后不得更改。
+     */
+    private static double splineCatmullRom(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        double v = evalNumber(args.get(0), x, z, ly, context);
+        int points = (args.size() - 1) / 2;
+        double[] ps = new double[points];
+        double[] vs = new double[points];
+        for (int i = 0; i < points; i++) {
+            ps[i] = evalNumber(args.get(1 + 2 * i), x, z, ly, context);
+            vs[i] = evalNumber(args.get(2 + 2 * i), x, z, ly, context);
+        }
+        if (v <= ps[0]) return vs[0];
+        if (v >= ps[points - 1]) return vs[points - 1];
+        int i = 0;
+        while (i < points - 2 && v > ps[i + 1]) i++;
+        double h = ps[i + 1] - ps[i];
+        double t = h == 0 ? 0 : (v - ps[i]) / h;
+        // 切线：内部用相邻点中心差分，端点用单侧差分（对应 Catmull-Rom 的端点处理）
+        double m0 = i == 0
+                ? splineSlope(ps[0], vs[0], ps[1], vs[1])
+                : splineSlope(ps[i - 1], vs[i - 1], ps[i + 1], vs[i + 1]);
+        double m1 = i + 1 == points - 1
+                ? splineSlope(ps[points - 2], vs[points - 2], ps[points - 1], vs[points - 1])
+                : splineSlope(ps[i], vs[i], ps[i + 2], vs[i + 2]);
+        double t2 = t * t;
+        double t3 = t2 * t;
+        return (2 * t3 - 3 * t2 + 1) * vs[i]
+                + (t3 - 2 * t2 + t) * h * m0
+                + (-2 * t3 + 3 * t2) * vs[i + 1]
+                + (t3 - t2) * h * m1;
+    }
+
+    private static double splineSlope(double pa, double va, double pb, double vb) {
+        return pa == pb ? 0 : (vb - va) / (pb - pa);
+    }
+
+    /**
+     * {@code waterline(x, z, level)}：该列的水位面高度——以 {@code level} 为基准
+     * 叠加缓变噪声（特征尺度约 512 格、实际幅度约 ±3 格），随世界种子变化。
+     *
+     * <p>把它与地形高度（如 {@code h}）比较即可写"低地淹水 / 洞穴蓄水"：
+     * {@code y <= h ? (y <= w ? minecraft:water : ...) : ...}。算法冻结。
+     */
+    private static double waterline(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        double wx = evalNumber(args.get(0), x, z, ly, context);
+        double wz = evalNumber(args.get(1), x, z, ly, context);
+        double level = evalNumber(args.get(2), x, z, ly, context);
+        return level + fbm2(wx, wz, 512, 3, 17) * 6;
     }
 
     private static Object evalRand(List<ExprNode> args, int x, int z, int ly, EvalContext context) {

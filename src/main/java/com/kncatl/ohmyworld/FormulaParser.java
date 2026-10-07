@@ -540,14 +540,8 @@ public class FormulaParser {
                 }
 
                 String valuePart = rangePart.substring(eqIdx + 1).trim();
-                int yStart, yEnd;
-                int dotsIdx = valuePart.indexOf("..");
-                if (dotsIdx >= 0) {
-                    yStart = Integer.parseInt(valuePart.substring(0, dotsIdx).trim());
-                    yEnd = Integer.parseInt(valuePart.substring(dotsIdx + 2).trim());
-                } else {
-                    yStart = yEnd = Integer.parseInt(valuePart);
-                }
+                int[] range = parseYRange(valuePart);
+                int yStart = range[0], yEnd = range[1];
                 if (yStart > yEnd) {
                     errors.add(layerError(lineIdx, "range start " + yStart + " is greater than end " + yEnd, line));
                     continue;
@@ -747,6 +741,25 @@ public class FormulaParser {
         return cursor <= max ? cursor : null;
     }
 
+    /**
+     * 解析 y 范围：{@code a}、{@code a..b}、{@code a..}、{@code ..b}、{@code ..}。
+     * 开区间一侧用哨兵表示（{@code Integer.MIN_VALUE}/{@code Integer.MAX_VALUE}），
+     * 运行期按维度真实高度解析——起止与 {@code ly} 基准同 biome 简写同款处理
+     * （{@code ly = y - 起点}，起点缺省时取维度最低 y）。
+     */
+    private static int[] parseYRange(String valuePart) {
+        int dotsIdx = valuePart.indexOf("..");
+        if (dotsIdx < 0) {
+            int y = Integer.parseInt(valuePart);
+            return new int[] {y, y};
+        }
+        String startPart = valuePart.substring(0, dotsIdx).trim();
+        String endPart = valuePart.substring(dotsIdx + 2).trim();
+        int yStart = startPart.isEmpty() ? Integer.MIN_VALUE : Integer.parseInt(startPart);
+        int yEnd = endPart.isEmpty() ? Integer.MAX_VALUE : Integer.parseInt(endPart);
+        return new int[] {yStart, yEnd};
+    }
+
     /** 解析一行群系层：{@code biome: 表达式}（整维简写）或 {@code biome y=a..b: 表达式}。 */
     private static void parseBiomeLayer(String line, int lineIdx, List<ExprNode.LetBinding> shared,
                                         Map<String, ParametricLet> macros,
@@ -778,13 +791,9 @@ public class FormulaParser {
                     throw new IllegalArgumentException("only 'y' is supported as layer axis, got \"" + varName + "\"");
                 }
                 String valuePart = rangePart.substring(eqIdx + 1).trim();
-                int dotsIdx = valuePart.indexOf("..");
-                if (dotsIdx >= 0) {
-                    yStart = Integer.parseInt(valuePart.substring(0, dotsIdx).trim());
-                    yEnd = Integer.parseInt(valuePart.substring(dotsIdx + 2).trim());
-                } else {
-                    yStart = yEnd = Integer.parseInt(valuePart);
-                }
+                int[] range = parseYRange(valuePart);
+                yStart = range[0];
+                yEnd = range[1];
                 if (yStart > yEnd) {
                     throw new IllegalArgumentException("range start " + yStart + " is greater than end " + yEnd);
                 }
@@ -961,6 +970,9 @@ public class FormulaParser {
                     }
                     return ExprEvaluator.ValueType.BLOCK;
                 }
+                if (f.name().equals("spline") || f.name().equals("cspline")) {
+                    checkAscendingPoints(f.name(), f.args(), errors);
+                }
                 for (ExprNode a : f.args()) {
                     ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode);
                     requireNumber(type, "argument of " + f.name(), errors);
@@ -986,6 +998,23 @@ public class FormulaParser {
     private static void requireNumber(ExprEvaluator.ValueType type, String location, List<String> errors) {
         if (type != ExprEvaluator.ValueType.NUMBER && type != ExprEvaluator.ValueType.UNKNOWN) {
             errors.add("Expected a number for " + location + ", got " + type);
+        }
+    }
+
+    /**
+     * spline/cspline 的位置参数若全是数字字面量，提前校验升序；有非常量位置时跳过
+     * （运行期按"未定义但确定"处理，避免逐格求值付出校验成本）。
+     */
+    private static void checkAscendingPoints(String name, List<ExprNode> args, List<String> errors) {
+        Double prev = null;
+        for (int i = 1; i < args.size(); i += 2) {
+            if (!(args.get(i) instanceof ExprNode.NumberNode n)) return;
+            double p = n.value();
+            if (prev != null && p <= prev) {
+                errors.add("Function '" + name + "' positions must be ascending, got " + prev + " then " + p);
+                return;
+            }
+            prev = p;
         }
     }
 

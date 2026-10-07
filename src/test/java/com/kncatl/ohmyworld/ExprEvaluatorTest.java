@@ -97,6 +97,46 @@ class ExprEvaluatorTest {
     }
 
     @Test
+    void splineInterpolatesAndClamps() {
+        // 点 (-1,-10) (0,0) (1,10)
+        assertEquals(-10.0, eval("spline(-2, -1, -10, 0, 0, 1, 10)", 0, 0, 0));
+        assertEquals(0.0, eval("spline(0, -1, -10, 0, 0, 1, 10)", 0, 0, 0));
+        assertEquals(5.0, eval("spline(0.5, -1, -10, 0, 0, 1, 10)", 0, 0, 0));
+        assertEquals(10.0, eval("spline(2, -1, -10, 0, 0, 1, 10)", 0, 0, 0));
+        // 非均匀间隔：0→0、4→4，v=2 取中点 2
+        assertEquals(2.0, eval("spline(2, 0, 0, 4, 4)", 0, 0, 0));
+        // 重复位置：取后一个点的值（不产生除零）
+        assertEquals(7.0, eval("spline(1, 0, 1, 1, 7, 2, 9)", 0, 0, 0));
+    }
+
+    @Test
+    void csplinePassesThroughPointsAndSmooths() {
+        // 过点与端点外夹取
+        assertEquals(0.0, eval("cspline(0, 0, 0, 1, 10, 2, 0)", 0, 0, 0));
+        assertEquals(10.0, eval("cspline(1, 0, 0, 1, 10, 2, 0)", 0, 0, 0));
+        assertEquals(0.0, eval("cspline(-5, 0, 0, 1, 10, 2, 0)", 0, 0, 0));
+        assertEquals(0.0, eval("cspline(5, 0, 0, 1, 10, 2, 0)", 0, 0, 0));
+        // Catmull-Rom 过冲：中点高于线性中点 5
+        assertTrue(eval("cspline(0.5, 0, 0, 1, 10, 2, 0)", 0, 0, 0) > 5.0);
+    }
+
+    @Test
+    void waterlineStaysNearLevel() {
+        for (int x = -500; x <= 500; x += 250) {
+            double w = eval("waterline(x, 3, 63)", x, 3, 0);
+            assertTrue(w >= 57 && w <= 69, "waterline out of expected range: " + w);
+        }
+        ExprEvaluator.setWorldSeed(12345L);
+        double withSeed = eval("waterline(7, 9, 63)", 0, 0, 0);
+        ExprEvaluator.setWorldSeed(999L);
+        assertNotEquals(withSeed, eval("waterline(7, 9, 63)", 0, 0, 0));
+        ExprEvaluator.setWorldSeed(12345L);
+        // 水位基准只做平移：level 120 与 63 的差恒为 57
+        assertEquals(57.0, eval("waterline(7, 9, 120)", 0, 0, 0)
+                - eval("waterline(7, 9, 63)", 0, 0, 0), 1e-9);
+    }
+
+    @Test
     void compiledPathMatchesUncompiled() {
         ExprEvaluator.setWorldSeed(12345L);
         ExprEvaluator.setWorldSpawn(123, -456);
@@ -107,6 +147,9 @@ class ExprEvaluatorTest {
                 "worley2(x, z, 40, 1)", "worley3(x, y, z, 40, 1)",
                 "spawnx + spawnz", "(x - spawnx) * (x - spawnx) + (z - spawnz)",
                 "{ let dx = x - spawnx; dx * dx < 400 ? seedhash(dx, spawnz, 3) : spawnx }",
+                "spline(0.3, -1, -30, -0.2, -6, 0.2, 8, 1, 60)",
+                "cspline(0.3, -1, -30, -0.2, -6, 0.2, 8, 1, 60)",
+                "waterline(x, z, 63)",
         };
         int[][] points = {{0, 0, 0}, {3, 7, -4}, {-9, 2, 5}};
         for (String expression : expressions) {

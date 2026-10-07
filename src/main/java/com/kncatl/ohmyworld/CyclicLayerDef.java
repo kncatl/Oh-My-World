@@ -35,6 +35,11 @@ public class CyclicLayerDef {
     public int yStart() { return yStart; }
     public int yEnd() { return yEnd; }
 
+    /** 运行期解析后的层起点：{@code y=..b}（开区间）取维度最低 y。 */
+    public int resolvedStart(int dimensionMinY) {
+        return yStart == Integer.MIN_VALUE ? dimensionMinY : yStart;
+    }
+
     /**
      * 返回列的周期：结果只取决于 {@code posOf(y)}，取值 0 表示与 y 相关、无法按列缓存。
      */
@@ -42,27 +47,28 @@ public class CyclicLayerDef {
         return columnInvariant ? (int) cycleLength : 0;
     }
 
-    /** globalY 在该列循环中的位置。 */
-    public int posOf(int globalY) {
+    /** globalY 在该列循环中的位置（开区间起点按维度最低 y 解析）。 */
+    public int posOf(int globalY, int dimensionMinY) {
         if (cycleLength == 0) return 0;
-        return (int) Math.floorMod((long) globalY - yStart, cycleLength);
+        return (int) Math.floorMod((long) globalY - resolvedStart(dimensionMinY), cycleLength);
     }
 
-    /** 按 pos 取方块（跳过重复的 floorMod 计算），供按列缓存时使用。 */
-    public BlockState getBlockForPos(int worldX, int worldZ, int pos, int layerY) {
+    /** 按 pos 取方块；{@code layerStart} 是解析后的层起点（用于把 ly 还原成全局 y）。 */
+    public BlockState getBlockForPos(int worldX, int worldZ, int pos, int layerY, int layerStart) {
         long acc = 0;
         for (Entry e : entries) {
             if (pos < acc + e.thickness()) {
-                return ExprEvaluator.evalToBlock(e.expression(), worldX, worldZ, layerY, layerY + yStart);
+                return ExprEvaluator.evalToBlock(e.expression(), worldX, worldZ, layerY, layerY + layerStart);
             }
             acc += e.thickness();
         }
         return Blocks.AIR.defaultBlockState();
     }
 
-    public BlockState getBlock(int worldX, int worldZ, int globalY) {
+    public BlockState getBlock(int worldX, int worldZ, int globalY, int dimensionMinY) {
         if (cycleLength == 0) return Blocks.AIR.defaultBlockState();
-        return getBlockForPos(worldX, worldZ, posOf(globalY), globalY - yStart);
+        int start = resolvedStart(dimensionMinY);
+        return getBlockForPos(worldX, worldZ, posOf(globalY, dimensionMinY), globalY - start, start);
     }
 
     /**

@@ -72,6 +72,68 @@ class FormulaParserTest {
         assertTrue(result.errors().isEmpty(), result.errors().toString());
     }
 
+    /** 开区间层语法：y=a.. / y=..b / y=..；开区间端的哨兵在运行期按维度高度解析。 */
+    @Test
+    void openEndedRangesParse() {
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=-64..: rand()}{the_nether=y=..40: rand()}{the_end=y=..: rand()}");
+        assertTrue(result.errors().isEmpty(), result.errors().toString());
+
+        FormulaLayerDef overworld = (FormulaLayerDef) result.dimensions()
+                .get(FormulaParser.DIM_OVERWORLD).layers().get(0);
+        assertEquals(Integer.MAX_VALUE, overworld.yEnd());
+        assertEquals(-64, overworld.resolvedStart(-64));
+
+        FormulaLayerDef nether = (FormulaLayerDef) result.dimensions()
+                .get(FormulaParser.DIM_NETHER).layers().get(0);
+        assertEquals(Integer.MIN_VALUE, nether.yStart());
+        assertEquals(0, nether.resolvedStart(0));
+
+        FormulaLayerDef end = (FormulaLayerDef) result.dimensions()
+                .get(FormulaParser.DIM_END).layers().get(0);
+        assertEquals(Integer.MIN_VALUE, end.yStart());
+        assertEquals(Integer.MAX_VALUE, end.yEnd());
+        assertEquals(-64, end.resolvedStart(-64));
+    }
+
+    /** 开区间参与 biome 覆盖检查：y=..a 与 y=b.. 拼起来应视作覆盖整维。 */
+    @Test
+    void openEndedRangesCoverBiomeFallback() {
+        FormulaParser.DimensionParseResult full = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=biome y=..20: minecraft:basalt_deltas;"
+                        + " biome y=21..: minecraft:basalt_deltas; y=0: rand()}");
+        assertTrue(full.errors().isEmpty(), full.errors().toString());
+
+        FormulaParser.DimensionParseResult gap = FormulaParser.parseDimensionsWithErrors(
+                "{the_nether=biome y=..10: minecraft:basalt_deltas;"
+                        + " biome y=12..: minecraft:basalt_deltas; y=0: rand()}");
+        assertTrue(gap.errors().stream().anyMatch(e -> e.contains("must cover the whole dimension")),
+                gap.errors().toString());
+    }
+
+    /** spline/cspline：参数个数（≥5 的奇数）与位置升序校验。 */
+    @Test
+    void splineValidation() {
+        FormulaParser.ParseResult even = FormulaParser.parseWithErrors(
+                "y=0: spline(0.5, 0, 1, 2) > 0 ? rand() : rand()");
+        assertTrue(even.errors().stream().anyMatch(e -> e.contains("odd number of arguments")),
+                even.errors().toString());
+
+        FormulaParser.ParseResult tooFew = FormulaParser.parseWithErrors(
+                "y=0: cspline(0.5, 0, 1) > 0 ? rand() : rand()");
+        assertTrue(tooFew.errors().stream().anyMatch(e -> e.contains("odd number of arguments")),
+                tooFew.errors().toString());
+
+        FormulaParser.ParseResult descending = FormulaParser.parseWithErrors(
+                "y=0: spline(0.5, 1, 0, -1, 2) > 0 ? rand() : rand()");
+        assertTrue(descending.errors().stream().anyMatch(e -> e.contains("positions must be ascending")),
+                descending.errors().toString());
+
+        FormulaParser.ParseResult ok = FormulaParser.parseWithErrors(
+                "y=0: spline(0.5, -1, 0, 1, 2) > 0 ? rand() : rand()");
+        assertTrue(ok.errors().isEmpty(), ok.errors().toString());
+    }
+
     // ── 分节语法（多维度，P3） ──────────────────────────────────────────────
 
     /** 正例：单节公式解析成功（rand() 不依赖方块注册表，可用于纯 JUnit 正例）。 */
@@ -597,6 +659,16 @@ class FormulaParserTest {
                 // 11. 出生点附近的圆盘（spawnx/spawnz）
                 "{overworld=y=-64..319: { let dx = x - spawnx; let dz = z - spawnz;"
                         + " dx * dx + dz * dz < 400 ? rand() : rand() }}",
+                // 12. 样条地形曲线（spline + 开区间 y=-64..）
+                "{overworld=let n = noise2(x, z, 1400, 1);"
+                        + " let h = 64 + spline(n, -0.6, -26, -0.15, -4, 0.15, 6, 0.6, 30);"
+                        + " y=-64..: y <= h ? (y > h - 4 ? rand() : rand()) : rand()}",
+                // 13. 水域配方（waterline + 全高开区间 y=..: + 分支内洞穴判断）
+                "{overworld=let w = waterline(x, z, 63);"
+                        + " let h = 60 + fbm2(x, z, 380, 4, 2) * 26;"
+                        + " y=..: { let cave = noise3(x, y, z, 84, 7) > 0.34;"
+                        + " (y <= h && !cave) ? (y > h - 5 ? rand() : rand())"
+                        + " : (y <= w ? rand() : rand()) }}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);

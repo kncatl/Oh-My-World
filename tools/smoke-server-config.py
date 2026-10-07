@@ -54,6 +54,15 @@
 --features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
   装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
 
+--open-ranges：开区间层语法冒烟（1.2.6）：y=..（全高，ly 从维度最低 y 起算）、
+  y=60..（从 60 到维度顶部）两种写法 + 一段普通范围；底部三层铺海晶灯用于
+  核对 ly 基准，三段（灯 / 黑石砖 / 圆石）互不重叠。配合 --require-all；
+  再用逐方块扫描核对三条边界。
+
+--water：水域配方冒烟（1.2.6：spline + waterline 一起）：样条地形高度 + 水位面，
+  地表铺海晶灯、内部黑石砖、水位以下灌水。配合 --require-all；
+  再用 stats 核对水域存在且没有"高海拔水体"。
+
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
@@ -96,6 +105,30 @@ SPAWN_FORMULA = (
     "y=-64: minecraft:bedrock;"
     "y=-63..64: ((x - spawnx) * (x - spawnx) + (z - spawnz) * (z - spawnz) <= 144)"
     " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks"
+)
+
+# 开区间层语法冒烟（1.2.6）：
+#  · y=..:          全高（ly 从维度最低 y 起算）→ 底部三层（ly<3）铺海晶灯；
+#  · y=-61..59:     普通范围 → 黑石砖；
+#  · y=60..:        从 60 到维度顶部（开终点）→ 圆石。
+# 三段互不重叠（后写覆盖先写，重叠会把前面的结果盖掉）。
+OPEN_RANGES_FORMULA = (
+    "{overworld=y=..: ly < 3 ? minecraft:sea_lantern : minecraft:air;"
+    " y=-61..59: minecraft:polished_blackstone_bricks;"
+    " y=60..: minecraft:stone}"
+)
+
+# 水域配方冒烟（1.2.6：spline + waterline）：
+# 样条地形高度 h（噪声经 spline 映射）+ 水位 w（waterline）；
+# 地形低于水位处自动灌水（地表海晶灯、内部黑石砖），水面之上为空气。
+WATER_FORMULA = (
+    "{overworld="
+    "let n = noise2(x, z, 1400, 1);"
+    "let h = 64 + spline(n, -0.6, -26, -0.15, -4, 0.15, 6, 0.6, 30);"
+    "let w = waterline(x, z, 63);"
+    "y=..: y <= h"
+    " ? (y > h - 4 ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks)"
+    " : (y <= w ? minecraft:water : minecraft:air)}"
 )
 
 # 分节冒烟（1）：主世界 + 下界各写公式，末地不写（必须保持原版）。
@@ -255,6 +288,8 @@ def main():
     force = "--force-formula" in sys.argv
     seed_formula = "--seed-formula" in sys.argv
     spawn_formula = "--spawn-formula" in sys.argv
+    open_ranges = "--open-ranges" in sys.argv
+    water = "--water" in sys.argv
     dimension_formula = "--dimension-formula" in sys.argv
     dimension_alias = "--dimension-alias" in sys.argv
     marker_formula = "--marker-formula" in sys.argv
@@ -356,11 +391,16 @@ def main():
         formula = SEED_FORMULA
     elif spawn_formula:
         formula = SPAWN_FORMULA
+    elif open_ranges:
+        formula = OPEN_RANGES_FORMULA
+    elif water:
+        formula = WATER_FORMULA
     else:
         formula = FORMULA
 
     config = server / "config" / "ohmyworld.json"
-    wrote_formula = (force or seed_formula or spawn_formula or dimension_formula or dimension_alias
+    wrote_formula = (force or seed_formula or spawn_formula or open_ranges or water
+                     or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
@@ -433,6 +473,10 @@ def main():
         label = "使用种子专项冒烟公式"
     elif spawn_formula:
         label = "使用出生点专项冒烟公式（spawnx/spawnz 圆盘）"
+    elif open_ranges:
+        label = "使用开区间层冒烟公式（y=.. / y=..60 / y=61..）"
+    elif water:
+        label = "使用水域冒烟公式（spline 地形 + waterline 水位）"
     elif wrote_formula:
         label = "使用冒烟公式"
     else:

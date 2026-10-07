@@ -68,8 +68,8 @@ public class FormulaBiomeSource extends BiomeSource {
         int maxY = LevelHeights.maxY(level) - 1;
         List<Layer> expanded = new ArrayList<>(defs.size());
         for (BiomeLayerDef def : defs) {
-            int start = def.shorthand() ? minY : def.yStart();
-            int end = def.shorthand() ? maxY : def.yEnd();
+            int start = def.resolvedStart(minY);
+            int end = def.resolvedEnd(maxY);
             expanded.add(new Layer(start, end, start, def.expression()));
         }
         this.layers = List.copyOf(expanded);
