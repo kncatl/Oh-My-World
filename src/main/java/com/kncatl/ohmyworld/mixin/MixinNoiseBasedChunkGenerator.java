@@ -16,6 +16,9 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+import net.minecraft.world.level.levelgen.NoiseChunk;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
+import net.minecraft.world.level.levelgen.NoiseSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
@@ -42,6 +45,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 洞穴雕刻（{@code applyCarvers}，仅 26.3 前）。生物群系（{@code createBiomes}）
  * 不动——保留原版的下界/末地群系分布与特征/结构生成。
  *
+ * <p>雕刻在 26.3 上并入 {@code buildTerrain}、没有公开入口：
+ * {@code [carvers:vanilla]} 时用 {@link NoiseBasedChunkGeneratorInvoker}
+ * 借原版私有的 {@code createNoiseChunk} + {@code generateCarvers} 补跑（见
+ * {@code ohmyworld$onBuildTerrain}）。
+ *
  * <p>版本分支说明：1.21.1 的 {@code applyCarvers} 比 1.21.2+ 多一个
  * {@code GenerationStep.Carving} 参数，因此该注入使用只声明 {@code CallbackInfo}
  * 的处理器（Mixin 允许省略目标方法的参数），与签名差异无关。
@@ -49,8 +57,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(NoiseBasedChunkGenerator.class)
 public class MixinNoiseBasedChunkGenerator {
     private static final Logger LOGGER = LogUtils.getLogger();
-    /** 26.3 上 [carvers:vanilla] 不受支持，只提示一次。 */
-    private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_WARNED =
+    /** 26.3 的雕刻若失败只提示一次（避免每区块刷屏）。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_ERROR_LOGGED =
             new java.util.concurrent.atomic.AtomicBoolean();
     /** 调试日志：applyCarvers 是否被调用/是否放行，只记录一次。 */
     private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_LOGGED =
@@ -64,7 +72,28 @@ public class MixinNoiseBasedChunkGenerator {
                                           StructureManager structureManager, BiomeManager biomeManager,
                                           WorldGenRegion region, Set<Holder<Biome>> biomes,
                                           CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
-        ohmyworld$fillFromPattern(chunk, cir);
+        if (!ohmyworld$fillFromPattern(chunk, cir)) return;
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot == null || !snapshot.carversVanilla()) return;
+        // 26.3 的雕刻并入本入口、没有公开入口：[carvers:vanilla] 时借原版私有的
+        // createNoiseChunk + generateCarvers，在本生成器自身设置上补跑雕刻
+        // （含水层行为与 1.21.x 的"放行原版 applyCarvers"一致）。
+        NoiseBasedChunkGenerator self = (NoiseBasedChunkGenerator) (Object) this;
+        try {
+            NoiseGeneratorSettings settings = self.generatorSettings().value();
+            NoiseSettings noiseSettings = settings.noiseSettings()
+                    .clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
+            NoiseBasedChunkGeneratorInvoker invoker = (NoiseBasedChunkGeneratorInvoker) (Object) self;
+            try (NoiseChunk noiseChunk = invoker.ohmyworld$createNoiseChunk(
+                    chunk, structureManager, blender, randomState, noiseSettings)) {
+                invoker.ohmyworld$generateCarvers(chunk, blender, noiseChunk, randomState,
+                        biomeManager, region, settings.materialRule().value());
+            }
+        } catch (Exception e) {
+            if (CARVERS_ERROR_LOGGED.compareAndSet(false, true)) {
+                LOGGER.error("ohmyworld: 26.3 carvers failed on formula terrain: {}", e.toString());
+            }
+        }
     }
     //?} else {
     @Inject(method = "fillFromNoise", at = @At("HEAD"), cancellable = true)
@@ -130,18 +159,11 @@ public class MixinNoiseBasedChunkGenerator {
         }
     }
 
-    /** 两代地形构建入口共用的公式填充主体（与 {@code MixinFlatLevelSource} 同构）。 */
-    private void ohmyworld$fillFromPattern(ChunkAccess chunk, CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
+    /** 两代地形构建入口共用的公式填充主体（返回是否真的接管了地形；与 {@code MixinFlatLevelSource} 同构）。 */
+    private boolean ohmyworld$fillFromPattern(ChunkAccess chunk, CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot == null || snapshot.layers().isEmpty()) return;
+        if (snapshot == null || snapshot.layers().isEmpty()) return false;
         List<Object> layers = snapshot.layers();
-
-        //? >=26.3 {
-        if (snapshot.carversVanilla() && CARVERS_WARNED.compareAndSet(false, true)) {
-            LOGGER.warn("ohmyworld: [carvers:vanilla] is not supported on this version (carving is merged "
-                    + "into buildTerrain and cannot run separately); carvers stay disabled");
-        }
-        //?}
 
         try {
             PatternData.fillChunk(chunk, layers);
@@ -151,8 +173,9 @@ public class MixinNoiseBasedChunkGenerator {
             LOGGER.error("ohmyworld: formula chunk fill failed, disabling pattern", e);
             PatternData.clearActive();
             PatternData.clearPending();
-            return;
+            return false;
         }
         cir.setReturnValue(CompletableFuture.completedFuture(chunk));
+        return true;
     }
 }

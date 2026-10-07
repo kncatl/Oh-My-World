@@ -107,10 +107,6 @@ public final class WorldLoadHandler {
     /** 绑定该维度的生成器（结构/特性规则随快照生效），随后套用 {@code [biome:...]} 群系源规则。 */
     private static void bindDimension(ServerLevel sl, ChunkGenerator generator) {
         PatternData.bindGenerator(sl.dimension(), generator);
-        if (PatternData.carversVanillaFor(generator) && generator instanceof FlatLevelSource) {
-            LOGGER.info("ohmyworld: [carvers:vanilla] has no effect on flat generators "
-                    + "(they have no carvers); it only applies to noise-generator dimensions");
-        }
         BiomeControl.apply(sl, generator);
     }
 

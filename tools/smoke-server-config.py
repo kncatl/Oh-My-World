@@ -39,9 +39,13 @@
   smoke-check-world.py --biome-smoke 6 判定（两种"按群系铺的方块"都要出现）。
 --natural：自然世界冒烟（1.2.5：noise/fbm + y 变量 + 洞穴）；配合
   smoke-check-world.py --biome-smoke 7 判定（地表材质方块都要出现）。
---carvers / --carvers-off：雕刻器 A/B 冒烟（**普通世界**类型；超平坦没有雕刻器）；
-  公式为整块石头 + [carvers:vanilla|none]；配合 --biome-smoke 8，再用
-  dump-biomes.py stats 对比 y 段空气率判定是否真的被掏空。
+--carvers / --carvers-off：雕刻器 A/B 冒烟（**普通世界**类型；超平坦世界的雕刻器
+  由 1.2.6 起通过"干燥代理"支持，见下一条）；公式为整块石头 + [carvers:vanilla|none]；
+  配合 --biome-smoke 8，再用 dump-biomes.py stats 对比 y 段空气率判定是否真的被掏空。
+--flat-carvers / --flat-carvers-off：超平坦雕刻器 A/B 冒烟（**我们自己的 flat_plus 预设**）；
+  公式同上（整块石头到 y=80 + [carvers:vanilla|none]），用于验证 1.2.6 的
+  "超平坦世界跑原版雕刻器"（干燥代理）确实在公式地形上掏出了洞穴/峡谷：
+  carvers-on 的空气率应显著高于 carvers-off（后者≈0）。配合 --biome-smoke 8。
 --features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
   装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
 
@@ -198,6 +202,12 @@ CARVERS_OFF_FORMULA = (
     "{overworld=[carvers:none] y=-64..319: y <= 80 ? minecraft:stone : minecraft:air}"
 )
 
+# 超平坦雕刻器 A/B 冒烟（--flat-carvers / --flat-carvers-off；flat_plus 预设）：
+# 公式与上面相同，区别在 level-type——验证 1.2.6 超平坦世界的"干燥代理"雕刻
+# （FlatLevelSource 的 applyCarvers 原本为空实现）。同样用 stats 比较空气率。
+FLAT_CARVERS_FORMULA = CARVERS_FORMULA
+FLAT_CARVERS_OFF_FORMULA = CARVERS_OFF_FORMULA
+
 BIOME_STRUCTURES_FORMULA = (
     "{overworld=[biome:minecraft:desert] [structure:only=desert_pyramids] "
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
@@ -244,6 +254,8 @@ def main():
     natural = "--natural" in sys.argv
     carvers = "--carvers" in sys.argv
     carvers_off = "--carvers-off" in sys.argv
+    flat_carvers = "--flat-carvers" in sys.argv
+    flat_carvers_off = "--flat-carvers-off" in sys.argv
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     if len(args) != 2:
@@ -274,8 +286,9 @@ def main():
         props["level-type"] = "ohmyworld\\:flat_plus"
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
-            or biome_terrain or biome_biomeis or natural or features_all or features_none:
-        # 群系/特性冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
+            or biome_terrain or biome_biomeis or natural or features_all or features_none \
+            or flat_carvers or flat_carvers_off:
+        # 群系/特性/超平坦雕刻冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
         # 结构解锁冒烟要真正生成结构
@@ -313,6 +326,10 @@ def main():
         formula = CARVERS_FORMULA
     elif carvers_off:
         formula = CARVERS_OFF_FORMULA
+    elif flat_carvers:
+        formula = FLAT_CARVERS_FORMULA
+    elif flat_carvers_off:
+        formula = FLAT_CARVERS_OFF_FORMULA
     elif features_all:
         formula = FEATURES_ALL_FORMULA
     elif features_none:
@@ -327,7 +344,7 @@ def main():
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
-                     or carvers or carvers_off
+                     or carvers or carvers_off or flat_carvers or flat_carvers_off
                      or features_all or features_none
                      or not config.exists())
     if not wrote_formula:
@@ -384,6 +401,10 @@ def main():
         label = "使用雕刻器冒烟（普通世界 + [carvers:vanilla]）"
     elif carvers_off:
         label = "使用雕刻器对照冒烟（普通世界 + [carvers:none]）"
+    elif flat_carvers:
+        label = "使用超平坦雕刻器冒烟（flat_plus + [carvers:vanilla] 干燥代理）"
+    elif flat_carvers_off:
+        label = "使用超平坦雕刻器对照冒烟（flat_plus + [carvers:none]）"
     elif features_all:
         label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
     elif features_none:

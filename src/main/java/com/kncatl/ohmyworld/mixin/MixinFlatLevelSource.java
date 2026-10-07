@@ -13,11 +13,14 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
+import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
+import com.kncatl.ohmyworld.FlatCarvers;
 import com.kncatl.ohmyworld.PatternData;
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
@@ -25,6 +28,7 @@ import org.slf4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(FlatLevelSource.class)
@@ -39,7 +43,12 @@ public class MixinFlatLevelSource {
                                           StructureManager structureManager, BiomeManager biomeManager,
                                           WorldGenRegion region, Set<Holder<Biome>> biomes,
                                           CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
-        ohmyworld$fillFromPattern(chunk, cir);
+        if (ohmyworld$fillFromPattern(chunk, cir)
+                && PatternData.carversVanillaFor((ChunkGenerator) (Object) this)) {
+            // 26.3 的雕刻并入本入口：公式填充完成后补跑原版雕刻（干燥代理，见 FlatCarvers）
+            FlatCarvers.carveModern((ChunkGenerator) (Object) this, region, blender,
+                    biomeManager, structureManager, chunk);
+        }
     }
     //?} else {
     @Inject(method = "fillFromNoise", at = @At("HEAD"), cancellable = true)
@@ -51,15 +60,47 @@ public class MixinFlatLevelSource {
     }
     //?}
 
+    //? <26.3 {
     /**
-     * 两代地形构建入口共用的公式填充主体。
+     * 超平坦生成器的 applyCarvers 是空实现：公式接管 + {@code [carvers:vanilla]} 时，
+     * 借一个"干燥"的临时噪声生成器按原版逻辑雕刻（只掏空气、不灌水）。
+     * 1.21.1 的方法多一个 {@code GenerationStep.Carving} 参数（管线按 AIR/LIQUID
+     * 分步调用），只在 AIR 步执行；1.21.2+ 无该参数、每区块调用一次。
+     */
+    //? >=1.21.2 {
+    @Inject(method = "applyCarvers", at = @At("HEAD"))
+    private void ohmyworld$onApplyCarvers(WorldGenRegion region, long seed, RandomState randomState,
+                                          BiomeManager biomeManager, StructureManager structureManager,
+                                          ChunkAccess chunk, CallbackInfo ci) {
+        ohmyworld$carveIfEnabled(region, seed, biomeManager, structureManager, chunk);
+    }
+    //?} else {
+    @Inject(method = "applyCarvers", at = @At("HEAD"))
+    private void ohmyworld$onApplyCarvers(WorldGenRegion region, long seed, RandomState randomState,
+                                          BiomeManager biomeManager, StructureManager structureManager,
+                                          ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
+        if (step == GenerationStep.Carving.AIR) {
+            ohmyworld$carveIfEnabled(region, seed, biomeManager, structureManager, chunk);
+        }
+    }
+    //?}
+
+    private void ohmyworld$carveIfEnabled(WorldGenRegion region, long seed, BiomeManager biomeManager,
+                                          StructureManager structureManager, ChunkAccess chunk) {
+        if (!PatternData.carversVanillaFor((ChunkGenerator) (Object) this)) return;
+        FlatCarvers.carve((ChunkGenerator) (Object) this, region, seed, biomeManager, structureManager, chunk);
+    }
+    //?}
+
+    /**
+     * 两代地形构建入口共用的公式填充主体（返回是否真的接管了地形）。
      *
      * <p>26.3 起入口是 {@code buildTerrain}，更早是 {@code fillFromNoise}；两者
      * 语义相同（写入地形方块并返回区块），参数只是版本差异，不参与计算。
      */
-    private void ohmyworld$fillFromPattern(ChunkAccess chunk, CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
+    private boolean ohmyworld$fillFromPattern(ChunkAccess chunk, CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((FlatLevelSource) (Object) this);
-        if (snapshot == null || snapshot.layers().isEmpty()) return;
+        if (snapshot == null || snapshot.layers().isEmpty()) return false;
         List<Object> layers = snapshot.layers();
 
         try {
@@ -70,9 +111,10 @@ public class MixinFlatLevelSource {
             LOGGER.error("ohmyworld: formula chunk fill failed, disabling pattern", e);
             PatternData.clearActive();
             PatternData.clearPending();
-            return;
+            return false;
         }
         cir.setReturnValue(CompletableFuture.completedFuture(chunk));
+        return true;
     }
 
     @Inject(method = "getBaseHeight", at = @At("HEAD"), cancellable = true)

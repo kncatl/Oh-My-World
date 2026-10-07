@@ -230,14 +230,11 @@ Default preset:
     the formula terrain:
       [carvers:none]     default: carvers are cancelled, the formula owns the terrain
       [carvers:vanilla]  allow: vanilla carvers dig canyons/caves into the formula terrain
-    Only meaningful for noise-generator dimensions -- **the Overworld generator
-    of a flat world has no carvers** (the directive is accepted, does nothing,
-    and a log entry explains it once). Good places to see it:
-      - dimensions of a normal (noise) world -- typical under server_mode;
-      - the Nether / End sections of a flat world (those dimensions are noise
-        generators themselves).
-    Not supported on 26.3 (carving is merged into the terrain entry point there);
-    the directive is kept but carvers stay disabled with a log warning.
+    Works in every dimension:
+    - noise-generator dimensions (normal worlds / the Nether & End sections of
+      a flat world) carve with their own vanilla settings;
+    - flat-world Overworlds too (since 1.2.6): a "dry" delegate runs the vanilla
+      carvers there, so caves stay dry (no aquifer water; lava below y=-54 only).
 
   * Notes:
     - [structure:...] only affects newly generated structures; /locate and

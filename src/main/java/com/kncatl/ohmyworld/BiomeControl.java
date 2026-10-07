@@ -305,22 +305,31 @@ public final class BiomeControl {
     /** 用该维度真实噪声设置构建 RandomState（气候采样）；失败返回 null 并记日志。 */
     private static RandomState buildClimateRandomState(ServerLevel level) {
         try {
-            var key = ResourceIds.sameKey(level.dimension(), Level.NETHER) ? NoiseGeneratorSettings.NETHER
-                    : ResourceIds.sameKey(level.dimension(), Level.END) ? NoiseGeneratorSettings.END
-                    : NoiseGeneratorSettings.OVERWORLD;
-            var noiseGetter = level.registryAccess().lookupOrThrow(Registries.NOISE);
-            var settings = level.registryAccess().lookupOrThrow(Registries.NOISE_SETTINGS)
-                    .getOrThrow(key).value();
-            //? >=26.3 {
-            return RandomState.create(noiseGetter, level.getSeed(), settings);
-            //?} else {
-            return RandomState.create(settings, noiseGetter, level.getSeed());
-            //?}
+            return createRandomState(level, vanillaNoiseSettings(level));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: failed to build climate RandomState for {}: {}",
                     ResourceIds.keyIdString(level.dimension()), e.toString());
             return null;
         }
+    }
+
+    /** 该维度对应的原版噪声设置（Overworld/Nether/End；超平坦雕刻代理等共用）。 */
+    static NoiseGeneratorSettings vanillaNoiseSettings(ServerLevel level) {
+        var key = ResourceIds.sameKey(level.dimension(), Level.NETHER) ? NoiseGeneratorSettings.NETHER
+                : ResourceIds.sameKey(level.dimension(), Level.END) ? NoiseGeneratorSettings.END
+                : NoiseGeneratorSettings.OVERWORLD;
+        return level.registryAccess().lookupOrThrow(Registries.NOISE_SETTINGS)
+                .getOrThrow(key).value();
+    }
+
+    /** 在给定噪声设置上构建 RandomState（版本差异收口在此）。 */
+    static RandomState createRandomState(ServerLevel level, NoiseGeneratorSettings settings) {
+        var noiseGetter = level.registryAccess().lookupOrThrow(Registries.NOISE);
+        //? >=26.3 {
+        return RandomState.create(noiseGetter, level.getSeed(), settings);
+        //?} else {
+        return RandomState.create(settings, noiseGetter, level.getSeed());
+        //?}
     }
 
     /** "命名空间:名称"（缺省命名空间=minecraft）→ 群系键。 */
