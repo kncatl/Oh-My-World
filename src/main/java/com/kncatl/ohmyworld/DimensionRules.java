@@ -67,6 +67,17 @@ public final class DimensionRules {
         NONE, TWO_D, THREE_D
     }
 
+    /**
+     * 公式接管地形时是否允许原版雕刻器（峡谷/旧式洞穴）在公式地形上打洞。
+     * 只对噪声生成器的世界有意义（超平坦生成器本来就没有雕刻器）。
+     */
+    public enum CarversMode {
+        /** 默认：取消雕刻器，公式完全接管地形。 */
+        NONE,
+        /** {@code [carvers:vanilla]}：放行原版雕刻器。 */
+        VANILLA
+    }
+
     /** 规范化名称：去掉 {@code minecraft:} 前缀，其余命名空间保留。 */
     public static String normalizeName(String name) {
         String s = name.trim();

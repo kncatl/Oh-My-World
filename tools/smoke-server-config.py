@@ -37,6 +37,8 @@
   配合 smoke-check-world.py --biome-smoke 5 判定（三类群系都出现才算通过）。
 --biome-biomeis：[biome:vanilla] + 方块层 biomeis 冒烟；配合
   smoke-check-world.py --biome-smoke 6 判定（两种"按群系铺的方块"都要出现）。
+--natural：自然世界冒烟（1.2.5：noise/fbm + y 变量 + 洞穴）；配合
+  smoke-check-world.py --biome-smoke 7 判定（地表材质方块都要出现）。
 --features-all / --features-none（P4.3）：下界固定玄武岩三角洲 + [features:...]
   装饰开关冒烟；配合 smoke-check-world.py --features-smoke 1|2 判定（装饰方块扫描）。
 
@@ -171,6 +173,18 @@ BIOME_BIOMEIS_FORMULA = (
     " : minecraft:polished_blackstone_bricks)}"
 )
 
+# 自然世界冒烟（配合 smoke-check-world.py --biome-smoke 7）：
+# 噪声起伏地形（fbm2 定高）+ 交错洞穴（noise3 掏洞）+ y 变量写地层。
+# 检查只看"地表材质方块都在"；地表起伏与洞穴空气率用 dump-biomes.py stats 复核。
+NATURAL_FORMULA = (
+    "{overworld="
+    "let cont = fbm2(x, z, 180, 3, 1);"
+    "let h = 64 + cont * 26;"
+    "let cave = noise3(x, y, z, 70, 7);"
+    "y=-64..319: (cave > 0.35 && y < h - 4) ? minecraft:air"
+    " : (y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air)}"
+)
+
 BIOME_STRUCTURES_FORMULA = (
     "{overworld=[biome:minecraft:desert] [structure:only=desert_pyramids] "
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
@@ -214,6 +228,7 @@ def main():
     biome_formula_fallback = "--biome-formula-fallback" in sys.argv
     biome_terrain = "--biome-terrain" in sys.argv
     biome_biomeis = "--biome-biomeis" in sys.argv
+    natural = "--natural" in sys.argv
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     if len(args) != 2:
@@ -241,7 +256,7 @@ def main():
         props["level-type"] = "ohmyworld\\:flat_plus"
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
-            or biome_terrain or biome_biomeis or features_all or features_none:
+            or biome_terrain or biome_biomeis or natural or features_all or features_none:
         # 群系/特性冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -274,6 +289,8 @@ def main():
         formula = BIOME_TERRAIN_FORMULA
     elif biome_biomeis:
         formula = BIOME_BIOMEIS_FORMULA
+    elif natural:
+        formula = NATURAL_FORMULA
     elif features_all:
         formula = FEATURES_ALL_FORMULA
     elif features_none:
@@ -287,7 +304,7 @@ def main():
     wrote_formula = (force or seed_formula or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_structures
-                     or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis
+                     or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural
                      or features_all or features_none
                      or not config.exists())
     if not wrote_formula:
@@ -338,6 +355,8 @@ def main():
         label = "使用地形联动冒烟（biome 行调用 terrain/surfis/blockis）"
     elif biome_biomeis:
         label = "使用群系回读冒烟（[biome:vanilla] + 方块层 biomeis）"
+    elif natural:
+        label = "使用自然世界冒烟（噪声地形 + 洞穴 + y 变量）"
     elif features_all:
         label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
     elif features_none:

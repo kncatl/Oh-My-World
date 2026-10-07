@@ -80,7 +80,7 @@ public class PatternData {
     public record PatternSnapshot(List<Object> layers, String rawInput, long version,
                                   DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome,
                                   boolean featuresOff, List<BiomeLayerDef> biomeLayers,
-                                  DimensionRules.BiomeFallback biomeFallback) {}
+                                  DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -102,7 +102,8 @@ public class PatternData {
             if (snapshot == null) {
                 snapshot = new PatternSnapshot(List.copyOf(parsed.layers()), raw,
                         SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome(),
-                        parsed.featuresOff(), List.copyOf(parsed.biomeLayers()), parsed.biomeFallback());
+                        parsed.featuresOff(), List.copyOf(parsed.biomeLayers()), parsed.biomeFallback(),
+                        parsed.carvers() == DimensionRules.CarversMode.VANILLA);
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -145,7 +146,7 @@ public class PatternData {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
-                        List.of(), DimensionRules.BiomeFallback.NONE);
+                        List.of(), DimensionRules.BiomeFallback.NONE, false);
             }
             return defaultSnapshot;
         }

@@ -93,7 +93,13 @@ public class ExprEvaluator {
             // biome 行的地形查询（只能出现在 biome 行；参数位决定方块字面量语义）
             Map.entry("terrain", 2), Map.entry("surfis", 3), Map.entry("blockis", 4),
             // 方块层的群系查询（只能出现在方块层；末位是群系字面量）
-            Map.entry("biomeis", 4));
+            Map.entry("biomeis", 4),
+            // 1.2.5 自然世界原语
+            Map.entry("clamp", 3), Map.entry("lerp", 3), Map.entry("smoothstep", 1),
+            Map.entry("map", 5),
+            Map.entry("noise2", 4), Map.entry("noise3", 5),
+            Map.entry("fbm2", 5), Map.entry("fbm3", 6),
+            Map.entry("worley2", 4), Map.entry("worley3", 5));
 
     /** 是否是已知函数名（语法高亮与校验共用同一张表）。 */
     public static boolean isFunctionName(String name) {
@@ -109,6 +115,9 @@ public class ExprEvaluator {
     public static final int FN_RAND = 100, FN_RANDEXCEPT = 101, FN_SEEDHASH = 102;
     public static final int FN_TERRAIN = 103, FN_SURFIS = 104, FN_BLOCKIS = 105;
     public static final int FN_BIOMEIS = 106;
+    public static final int FN_CLAMP = 107, FN_LERP = 108, FN_SMOOTHSTEP = 109, FN_MAP = 110;
+    public static final int FN_NOISE2 = 111, FN_NOISE3 = 112, FN_FBM2 = 113, FN_FBM3 = 114;
+    public static final int FN_WORLEY2 = 115, FN_WORLEY3 = 116;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -147,6 +156,16 @@ public class ExprEvaluator {
             case "surfis" -> FN_SURFIS;
             case "blockis" -> FN_BLOCKIS;
             case "biomeis" -> FN_BIOMEIS;
+            case "clamp" -> FN_CLAMP;
+            case "lerp" -> FN_LERP;
+            case "smoothstep" -> FN_SMOOTHSTEP;
+            case "map" -> FN_MAP;
+            case "noise2" -> FN_NOISE2;
+            case "noise3" -> FN_NOISE3;
+            case "fbm2" -> FN_FBM2;
+            case "fbm3" -> FN_FBM3;
+            case "worley2" -> FN_WORLEY2;
+            case "worley3" -> FN_WORLEY3;
             default -> FN_UNKNOWN;
         };
     }
@@ -162,8 +181,17 @@ public class ExprEvaluator {
     }
 
     public static Object eval(ExprNode node, int x, int z, int ly) {
+        return evalAt(node, x, z, ly, ly);
+    }
+
+    /**
+     * 带绝对 y 的求值入口（内置变量 {@code y} 用）。没有层上下文时用
+     * {@link #eval(ExprNode, int, int, int)}（那里 y 等于 ly）。
+     */
+    public static Object evalAt(ExprNode node, int x, int z, int ly, int globalY) {
         EvalContext context = CONTEXT.get();
         context.reset();
+        context.globalY = globalY;
         return eval(node, x, z, ly, context);
     }
 
@@ -181,7 +209,7 @@ public class ExprEvaluator {
             case ExprNode.FuncCallNode f -> evalFunc(f, x, z, ly, context);
             case ExprNode.BlockExprNode be -> evalBlockExpr(be, x, z, ly, context);
             // 编译后的形态：变量读取变成数组下标，不再有任何 Map 操作
-            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly);
+            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly, context.globalY);
             case ExprNode.SlotNode s -> context.slot(s.slot());
             case ExprNode.CompiledFuncCallNode f -> evalCompiledFunc(f, x, z, ly, context);
             case ExprNode.CompiledBlockNode cb -> evalCompiledBlock(cb, x, z, ly, context);
@@ -227,8 +255,15 @@ public class ExprEvaluator {
         context.markPrepared(block.id(), x, z);
     }
 
-    private static double builtinValue(int kind, int x, int z, int ly) {
-        return switch (kind) { case 0 -> x; case 1 -> z; case 2 -> ly; case 3 -> (double) worldSeed; default -> 0; };
+    private static double builtinValue(int kind, int x, int z, int ly, int globalY) {
+        return switch (kind) {
+            case 0 -> x;
+            case 1 -> z;
+            case 2 -> ly;
+            case 3 -> (double) worldSeed;
+            case 4 -> globalY;
+            default -> 0;
+        };
     }
 
     /** 方块字面量只解析一次；并发竞争时结果相同，最坏只是重复解析。 */
@@ -260,7 +295,8 @@ public class ExprEvaluator {
         return switch (node) {
             case ExprNode.NumberNode n -> false;
             case ExprNode.BlockNode b -> false;
-            case ExprNode.VariableNode v -> v.name().equals("ly") && !shadowed.contains("ly");
+            case ExprNode.VariableNode v ->
+                    (v.name().equals("ly") || v.name().equals("y")) && !shadowed.contains(v.name());
             case ExprNode.BinaryNode b -> dependsOnLy(b.left(), shadowed) || dependsOnLy(b.right(), shadowed);
             case ExprNode.UnaryNode u -> dependsOnLy(u.operand(), shadowed);
             case ExprNode.ConditionalNode c ->
@@ -304,8 +340,15 @@ public class ExprEvaluator {
         }
     }
 
-    private static double builtinValue(String name, int x, int z, int ly) {
-        return switch (name) { case "x" -> x; case "z" -> z; case "ly" -> ly; case "seed" -> (double) worldSeed; default -> 0; };
+    private static double builtinValue(String name, int x, int z, int ly, int globalY) {
+        return switch (name) {
+            case "x" -> x;
+            case "z" -> z;
+            case "ly" -> ly;
+            case "y" -> globalY;
+            case "seed" -> (double) worldSeed;
+            default -> 0;
+        };
     }
 
     private static Object evalBinary(ExprNode.BinaryNode b, int x, int z, int ly, EvalContext context) {
@@ -336,7 +379,7 @@ public class ExprEvaluator {
     private static double evalNumber(ExprNode node, int x, int z, int ly, EvalContext context) {
         return switch (node) {
             case ExprNode.NumberNode n -> n.value();
-            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly);
+            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly, context.globalY);
             case ExprNode.SlotNode s -> toDouble(context.slot(s.slot()));
             case ExprNode.BinaryNode b -> evalNumberBinary(b, x, z, ly, context);
             case ExprNode.UnaryNode u -> u.op() == ExprNode.UnaryOp.NEG
@@ -448,6 +491,34 @@ public class ExprEvaluator {
             case "todeg" -> Math.toDegrees(evalNumber(args.get(0), x, z, ly, context));
             case "torad" -> Math.toRadians(evalNumber(args.get(0), x, z, ly, context));
             case "seedhash" -> seedhash(args, x, z, ly, context);
+            // 1.2.5 自然世界原语
+            case "clamp" -> clamp(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context));
+            case "lerp" -> lerp(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context));
+            case "smoothstep" -> smoothstep(evalNumber(args.get(0), x, z, ly, context));
+            case "map" -> mapValue(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case "noise2" -> noise2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
+            case "noise3" -> noise3(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case "fbm2" -> fbm2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case "fbm3" -> fbm3(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context),
+                    evalNumber(args.get(5), x, z, ly, context));
+            case "worley2" -> worley2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
+            case "worley3" -> worley3(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
             case "terrain" -> terrainHeight(args, x, z, ly, context);
             case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
@@ -508,6 +579,33 @@ public class ExprEvaluator {
             case FN_SURFIS -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
             case FN_BLOCKIS -> blockIsAt(args, x, z, ly, context) ? 1 : 0;
             case FN_BIOMEIS -> biomeIs(args, x, z, ly, context) ? 1 : 0;
+            case FN_CLAMP -> clamp(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context));
+            case FN_LERP -> lerp(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context));
+            case FN_SMOOTHSTEP -> smoothstep(evalNumber(args.get(0), x, z, ly, context));
+            case FN_MAP -> mapValue(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case FN_NOISE2 -> noise2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
+            case FN_NOISE3 -> noise3(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case FN_FBM2 -> fbm2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
+            case FN_FBM3 -> fbm3(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context),
+                    evalNumber(args.get(5), x, z, ly, context));
+            case FN_WORLEY2 -> worley2(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context));
+            case FN_WORLEY3 -> worley3(evalNumber(args.get(0), x, z, ly, context),
+                    evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
+                    evalNumber(args.get(3), x, z, ly, context), evalNumber(args.get(4), x, z, ly, context));
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -617,6 +715,229 @@ public class ExprEvaluator {
         return z ^ (z >>> 31);
     }
 
+    // ---------------------------------------------------------- 自然世界原语（1.2.5）
+    //
+    // 与 seedhash / pickIndex 同级：**算法是兼容性契约，一经发布不得更改**，
+    // 否则同一公式与种子会在不同版本间生成不同地形。噪声都读取世界种子，
+    // 因此同一公式在不同种子的世界里分布不同。
+
+    private static double clamp(double v, double lo, double hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    private static double lerp(double a, double b, double t) {
+        return a + (b - a) * t;
+    }
+
+    /** 0..1 输入的三次平滑（hermite）。 */
+    private static double smoothstep(double t) {
+        double c = clamp(t, 0, 1);
+        return c * c * (3 - 2 * c);
+    }
+
+    /** vanilla {@code Mth.map}：把 [a, b] 线性映射到 [c, d]；a == b 时返回 c。 */
+    private static double mapValue(double v, double a, double b, double c, double d) {
+        return b == a ? c : c + (v - a) / (b - a) * (d - c);
+    }
+
+    private static final double SQRT_HALF = 0.7071067811865476;
+
+    /** 2D 单位梯度（8 向）。 */
+    private static final double[] GRAD2_X = {1, -1, 0, 0, SQRT_HALF, -SQRT_HALF, SQRT_HALF, -SQRT_HALF};
+    private static final double[] GRAD2_Z = {0, 0, 1, -1, SQRT_HALF, SQRT_HALF, -SQRT_HALF, -SQRT_HALF};
+
+    /** 3D 单位梯度（经典 12 棱向）。 */
+    private static final double[] GRAD3_X =
+            {SQRT_HALF, -SQRT_HALF, SQRT_HALF, -SQRT_HALF, SQRT_HALF, -SQRT_HALF, SQRT_HALF, -SQRT_HALF, 0, 0, 0, 0};
+    private static final double[] GRAD3_Y =
+            {SQRT_HALF, SQRT_HALF, -SQRT_HALF, -SQRT_HALF, 0, 0, 0, 0, SQRT_HALF, -SQRT_HALF, SQRT_HALF, -SQRT_HALF};
+    private static final double[] GRAD3_Z =
+            {0, 0, 0, 0, SQRT_HALF, SQRT_HALF, -SQRT_HALF, -SQRT_HALF, SQRT_HALF, SQRT_HALF, -SQRT_HALF, -SQRT_HALF};
+
+    /** 噪声晶格哈希：混合世界种子、盐与晶格坐标（冻结契约）。 */
+    private static long latticeHash(double salt, int x, int z) {
+        long h = mix64(worldSeed + Double.doubleToRawLongBits(salt) * 0x9E3779B97F4A7C15L);
+        h = mix64(h + x * 0x9E3779B97F4A7C15L);
+        h = mix64(h + z * 0xC2B2AE3D27D4EB4FL);
+        return h;
+    }
+
+    private static long latticeHash(double salt, int x, int y, int z) {
+        long h = mix64(worldSeed + Double.doubleToRawLongBits(salt) * 0x9E3779B97F4A7C15L);
+        h = mix64(h + x * 0x9E3779B97F4A7C15L);
+        h = mix64(h + y * 0x165667B19E3779F9L);
+        h = mix64(h + z * 0xC2B2AE3D27D4EB4FL);
+        return h;
+    }
+
+    /** [0,1) 均匀值（取高 53 位）。 */
+    private static double unit(long h) {
+        return (h >>> 11) * 0x1.0p-53;
+    }
+
+    /** 五次平滑（Perlin 的 fade）。 */
+    private static double fade(double t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    private static double grad2(long h, double dx, double dz) {
+        int gi = (int) ((h & 0x7FFFFFFFL) % 8);
+        return GRAD2_X[gi] * dx + GRAD2_Z[gi] * dz;
+    }
+
+    private static double grad3(long h, double dx, double dy, double dz) {
+        int gi = (int) ((h & 0x7FFFFFFFL) % 12);
+        return GRAD3_X[gi] * dx + GRAD3_Y[gi] * dy + GRAD3_Z[gi] * dz;
+    }
+
+    /**
+     * {@code noise2(x, z, scale, salt)}：2D 平滑梯度噪声，返回 [-1, 1]。
+     * {@code scale} 是特征尺度（方块）——值越大、特征越大；{@code salt} 换一套图案。
+     */
+    private static double noise2(double x, double z, double scale, double salt) {
+        double s = scale > 0 ? scale : 1;
+        double fx = x / s;
+        double fz = z / s;
+        int x0 = (int) Math.floor(fx);
+        int z0 = (int) Math.floor(fz);
+        double tx = fx - x0;
+        double tz = fz - z0;
+        double u = fade(tx);
+        double v = fade(tz);
+        double n00 = grad2(latticeHash(salt, x0, z0), tx, tz);
+        double n10 = grad2(latticeHash(salt, x0 + 1, z0), tx - 1, tz);
+        double n01 = grad2(latticeHash(salt, x0, z0 + 1), tx, tz - 1);
+        double n11 = grad2(latticeHash(salt, x0 + 1, z0 + 1), tx - 1, tz - 1);
+        double a = n00 + u * (n10 - n00);
+        double b = n01 + u * (n11 - n01);
+        return clamp((a + v * (b - a)) * 1.4142135623730951, -1, 1);
+    }
+
+    /** {@code noise3(x, y, z, scale, salt)}：3D 平滑梯度噪声，返回 [-1, 1]。 */
+    private static double noise3(double x, double y, double z, double scale, double salt) {
+        double s = scale > 0 ? scale : 1;
+        double fx = x / s;
+        double fy = y / s;
+        double fz = z / s;
+        int x0 = (int) Math.floor(fx);
+        int y0 = (int) Math.floor(fy);
+        int z0 = (int) Math.floor(fz);
+        double tx = fx - x0;
+        double ty = fy - y0;
+        double tz = fz - z0;
+        double u = fade(tx);
+        double v = fade(ty);
+        double w = fade(tz);
+        double n000 = grad3(latticeHash(salt, x0, y0, z0), tx, ty, tz);
+        double n100 = grad3(latticeHash(salt, x0 + 1, y0, z0), tx - 1, ty, tz);
+        double n010 = grad3(latticeHash(salt, x0, y0 + 1, z0), tx, ty - 1, tz);
+        double n110 = grad3(latticeHash(salt, x0 + 1, y0 + 1, z0), tx - 1, ty - 1, tz);
+        double n001 = grad3(latticeHash(salt, x0, y0, z0 + 1), tx, ty, tz - 1);
+        double n101 = grad3(latticeHash(salt, x0 + 1, y0, z0 + 1), tx - 1, ty, tz - 1);
+        double n011 = grad3(latticeHash(salt, x0, y0 + 1, z0 + 1), tx, ty - 1, tz - 1);
+        double n111 = grad3(latticeHash(salt, x0 + 1, y0 + 1, z0 + 1), tx - 1, ty - 1, tz - 1);
+        double a = n000 + u * (n100 - n000);
+        double b = n010 + u * (n110 - n010);
+        double c = n001 + u * (n101 - n001);
+        double d = n011 + u * (n111 - n011);
+        double e = a + v * (b - a);
+        double f = c + v * (d - c);
+        return clamp((e + w * (f - e)) * 1.1547005383792515, -1, 1);
+    }
+
+    /**
+     * {@code fbm2(x, z, scale, octaves, salt)}：多倍频叠加（gain 0.5、每层特征尺度减半），
+     * 返回 [-1, 1]；octaves 夹在 1..8。
+     */
+    private static double fbm2(double x, double z, double scale, double octaves, double salt) {
+        int count = (int) clamp(octaves, 1, 8);
+        double s = scale > 0 ? scale : 1;
+        double sum = 0;
+        double norm = 0;
+        double amp = 1;
+        for (int i = 0; i < count; i++) {
+            sum += amp * noise2(x, z, s, salt + i);
+            norm += amp;
+            amp *= 0.5;
+            s *= 0.5;
+        }
+        return sum / norm;
+    }
+
+    /** {@code fbm3(x, y, z, scale, octaves, salt)}：3D 多倍频叠加，返回 [-1, 1]。 */
+    private static double fbm3(double x, double y, double z, double scale, double octaves, double salt) {
+        int count = (int) clamp(octaves, 1, 8);
+        double s = scale > 0 ? scale : 1;
+        double sum = 0;
+        double norm = 0;
+        double amp = 1;
+        for (int i = 0; i < count; i++) {
+            sum += amp * noise3(x, y, z, s, salt + i);
+            norm += amp;
+            amp *= 0.5;
+            s *= 0.5;
+        }
+        return sum / norm;
+    }
+
+    /**
+     * {@code worley2(x, z, scale, salt)}：细胞噪声的最近特征点距离，
+     * 以 {@code scale} 为单位并截断到 [0, 1]（0 = 恰在特征点上）。
+     */
+    private static double worley2(double x, double z, double scale, double salt) {
+        double s = scale > 0 ? scale : 1;
+        double fx = x / s;
+        double fz = z / s;
+        int cx = (int) Math.floor(fx);
+        int cz = (int) Math.floor(fz);
+        double best = 2;
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                int gx = cx + dx;
+                int gz = cz + dz;
+                long h = latticeHash(salt, gx, gz);
+                double px = gx + unit(h);
+                double pz = gz + unit(mix64(h + 0x9E3779B97F4A7C15L));
+                double ddx = px - fx;
+                double ddz = pz - fz;
+                double d = Math.sqrt(ddx * ddx + ddz * ddz);
+                if (d < best) best = d;
+            }
+        }
+        return clamp(best, 0, 1);
+    }
+
+    /** {@code worley3(x, y, z, scale, salt)}：3D 细胞噪声的最近特征点距离（截断到 [0, 1]）。 */
+    private static double worley3(double x, double y, double z, double scale, double salt) {
+        double s = scale > 0 ? scale : 1;
+        double fx = x / s;
+        double fy = y / s;
+        double fz = z / s;
+        int cx = (int) Math.floor(fx);
+        int cy = (int) Math.floor(fy);
+        int cz = (int) Math.floor(fz);
+        double best = 2;
+        for (int oy = -1; oy <= 1; oy++) {
+            for (int oz = -1; oz <= 1; oz++) {
+                for (int ox = -1; ox <= 1; ox++) {
+                    int gx = cx + ox;
+                    int gy = cy + oy;
+                    int gz = cz + oz;
+                    long h = latticeHash(salt, gx, gy, gz);
+                    double px = gx + unit(h);
+                    double py = gy + unit(mix64(h + 0x9E3779B97F4A7C15L));
+                    double pz = gz + unit(mix64(h + 0xC2B2AE3D27D4EB4FL));
+                    double ddx = px - fx;
+                    double ddy = py - fy;
+                    double ddz = pz - fz;
+                    double d = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+                    if (d < best) best = d;
+                }
+            }
+        }
+        return clamp(best, 0, 1);
+    }
+
     private static Object evalRand(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
         if (args.isEmpty()) {
             List<BlockState> all = getAllBlocks();
@@ -673,6 +994,11 @@ public class ExprEvaluator {
     }
 
     public static BlockState evalToBlock(ExprNode node, int x, int z, int ly) {
+        return evalToBlock(node, x, z, ly, ly);
+    }
+
+    /** 方块语义入口（带绝对 y，供内置变量 {@code y} 使用）。 */
+    public static BlockState evalToBlock(ExprNode node, int x, int z, int ly, int globalY) {
         // 方块语义入口：临时摘掉群系求值环境。biome 行的地形查询会在求值中途回调
         // 到方块层（FormulaLayerDef.getBlock 同样走这里），不摘除的话方块字面量
         // 会被当成群系解析。
@@ -681,7 +1007,7 @@ public class ExprEvaluator {
         BIOME_RESOLVER.remove();
         TERRAIN_VIEW.remove();
         try {
-            Object result = eval(node, x, z, ly);
+            Object result = evalAt(node, x, z, ly, globalY);
             return result instanceof BlockState bs ? bs : BlockResolver.resolve("minecraft:air");
         } finally {
             if (savedResolver != null) BIOME_RESOLVER.set(savedResolver);
@@ -690,16 +1016,16 @@ public class ExprEvaluator {
     }
 
     /**
-     * 群系求值：与 {@link #eval} 相同，但字面量不解析为方块，而是交给
+     * 群系求值：与 {@link #evalAt} 相同，但字面量不解析为方块，而是交给
      * {@code resolver}（群系表达式里的字面量是群系 id）；同时注入 biome 行的
      * 地形查询视图（可为 null）。返回 resolver 的原样结果。
      */
-    public static Object evalToBiome(ExprNode node, int x, int z, int ly, Function<String, Object> resolver,
-                                     TerrainView terrain) {
+    public static Object evalToBiome(ExprNode node, int x, int z, int ly, int globalY,
+                                     Function<String, Object> resolver, TerrainView terrain) {
         BIOME_RESOLVER.set(resolver);
         TERRAIN_VIEW.set(terrain);
         try {
-            return eval(node, x, z, ly);
+            return evalAt(node, x, z, ly, globalY);
         } finally {
             BIOME_RESOLVER.remove();
             TERRAIN_VIEW.remove();
@@ -714,6 +1040,8 @@ public class ExprEvaluator {
 
         private final Map<String, Object> bindings = new HashMap<>();
         private final ArrayDeque<Scope> scopes = new ArrayDeque<>();
+        /** 当前求值的绝对 y（内置变量 {@code y}）；无层上下文时等于 ly。 */
+        private int globalY;
         /** 编译后形式的 let 绑定槽位；按需增长，跨次求值复用。 */
         private Object[] slots = new Object[16];
 
@@ -775,7 +1103,7 @@ public class ExprEvaluator {
         }
 
         Object lookup(String name, int x, int z, int ly) {
-            return bindings.containsKey(name) ? bindings.get(name) : builtinValue(name, x, z, ly);
+            return bindings.containsKey(name) ? bindings.get(name) : builtinValue(name, x, z, ly, globalY);
         }
     }
 

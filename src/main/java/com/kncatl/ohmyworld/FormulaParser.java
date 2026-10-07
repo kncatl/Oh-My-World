@@ -20,7 +20,7 @@ import com.kncatl.ohmyworld.expr.ExprParser;
 
 public class FormulaParser {
 
-    private static final List<String> KNOWN_VARS = List.of("x", "z", "ly", "seed");
+    private static final List<String> KNOWN_VARS = List.of("x", "y", "z", "ly", "seed");
     // These are deliberately high safety ceilings, not a formula complexity budget.
     public static final int MAX_INPUT_LENGTH = 1_048_576;
     private static final int MAX_LAYERS = 65_536;
@@ -41,7 +41,8 @@ public class FormulaParser {
     public record ParsedDimension(List<Object> layers, DimensionRules.StructureRule structure,
                                   DimensionRules.BiomeRule biome, boolean featuresOff,
                                   List<BiomeLayerDef> biomeLayers,
-                                  DimensionRules.BiomeFallback biomeFallback) {}
+                                  DimensionRules.BiomeFallback biomeFallback,
+                                  DimensionRules.CarversMode carvers) {}
 
     /**
      * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
@@ -127,7 +128,7 @@ public class FormulaParser {
             } else {
                 dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
                         DimensionRules.StructureRule.ALL, null, false, result.biomeLayers(),
-                        DimensionRules.BiomeFallback.NONE));
+                        DimensionRules.BiomeFallback.NONE, DimensionRules.CarversMode.NONE));
             }
         }
         return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), false);
@@ -217,10 +218,12 @@ public class FormulaParser {
         DimensionRules.StructureRule structure = DimensionRules.StructureRule.ALL;
         DimensionRules.BiomeRule biome = null;
         DimensionRules.BiomeFallback biomeFallback = DimensionRules.BiomeFallback.NONE;
+        DimensionRules.CarversMode carvers = DimensionRules.CarversMode.NONE;
         boolean featuresOff = false;
         boolean structureSeen = false;
         boolean biomeSeen = false;
         boolean biomeFallbackSeen = false;
+        boolean carversSeen = false;
         boolean featuresSeen = false;
         int pos = 0;
         while (true) {
@@ -258,6 +261,14 @@ public class FormulaParser {
                 biomeFallback = parseBiomeFallbackDirective(
                         directive.substring("biome-fallback:".length()), name, errors);
                 if (biomeFallback == null) return;
+            } else if (directive.startsWith("carvers:")) {
+                if (carversSeen) {
+                    errors.add(name + ": duplicate carvers directive");
+                    return;
+                }
+                carversSeen = true;
+                carvers = parseCarversDirective(directive.substring("carvers:".length()), name, errors);
+                if (carvers == null) return;
             } else if (directive.startsWith("features:")) {
                 if (featuresSeen) {
                     errors.add(name + ": duplicate features directive");
@@ -269,7 +280,7 @@ public class FormulaParser {
                 featuresOff = off;
             } else {
                 errors.add(name + ": unknown directive [" + truncate(directive)
-                        + "] (available: structure, biome, biome-fallback, features)");
+                        + "] (available: structure, biome, biome-fallback, carvers, features)");
                 return;
             }
         }
@@ -307,7 +318,7 @@ public class FormulaParser {
         }
         if (!result.layers().isEmpty()) {
             dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff,
-                    result.biomeLayers(), biomeFallback));
+                    result.biomeLayers(), biomeFallback, carvers));
         }
     }
 
@@ -383,6 +394,16 @@ public class FormulaParser {
         return null;
     }
 
+    /** [carvers:none|vanilla]（默认 none：公式接管地形时取消原版雕刻器）。 */
+    private static DimensionRules.CarversMode parseCarversDirective(String arg, String dimension,
+                                                                     List<String> errors) {
+        String a = arg.trim();
+        if (a.equals("none")) return DimensionRules.CarversMode.NONE;
+        if (a.equals("vanilla")) return DimensionRules.CarversMode.VANILLA;
+        errors.add(dimension + ": invalid carvers mode \"" + truncate(a) + "\" (available: none, vanilla)");
+        return null;
+    }
+
     /** [features:all|none]；返回 true 表示 none（关闭装饰特性）。 */
     private static Boolean parseFeaturesDirective(String arg, String dimension, List<String> errors) {
         String a = arg.trim();
@@ -448,16 +469,35 @@ public class FormulaParser {
         boolean usesBiomeQueries = false;
         String[] lines = smartSplit(cleaned);
 
-        // 第一遍：收集共享节级 let（`let 名称 = 表达式`），供本段所有层/群系行复用。
-        // 任一共享 let 解析失败即整体报错返回：它坏掉时所有层都会连带报错，噪声很大。
-        List<ExprNode.LetBinding> shared = new ArrayList<>();
+        // 第一遍：收集共享节级 let（`let 名称 = 表达式` / `let 名称(参数, ...) = 表达式`），
+        // 供本段所有层/群系行复用。任一解析失败即整体报错返回：它坏掉时所有层都会
+        // 连带报错，噪声很大。
+        List<ExprNode.LetBinding> plainLets = new ArrayList<>();
+        Map<String, ParametricLet> macros = new LinkedHashMap<>();
         for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             String raw = lines[lineIdx].trim();
             if (raw.isEmpty() || !isSharedLet(raw)) continue;
             try {
-                shared.add(parseSharedLet(raw));
+                SharedLet parsed = parseSharedLet(raw);
+                if (parsed.macro() != null) {
+                    if (macros.putIfAbsent(parsed.macro().name(), parsed.macro()) != null) {
+                        throw new IllegalArgumentException("duplicate shared let '" + parsed.macro().name() + "'");
+                    }
+                } else {
+                    plainLets.add(parsed.binding());
+                }
             } catch (Exception e) {
                 errors.add("Shared let (segment " + (lineIdx + 1) + "): " + e.getMessage());
+            }
+        }
+        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), false, false);
+        // 普通绑定的值也可以调用宏（参数化 let），同样在包装前展开
+        List<ExprNode.LetBinding> shared = new ArrayList<>(plainLets.size());
+        for (ExprNode.LetBinding binding : plainLets) {
+            try {
+                shared.add(new ExprNode.LetBinding(binding.name(), expandMacros(binding.value(), macros)));
+            } catch (Exception e) {
+                errors.add("Shared let '" + binding.name() + "': " + e.getMessage());
             }
         }
         if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), false, false);
@@ -472,7 +512,7 @@ public class FormulaParser {
 
             try {
                 if (isBiomeLine(line)) {
-                    parseBiomeLayer(line, lineIdx, shared, biomeLayers, errors);
+                    parseBiomeLayer(line, lineIdx, shared, macros, biomeLayers, errors);
                     continue;
                 }
                 int colonIdx = findColon(line);
@@ -514,7 +554,7 @@ public class FormulaParser {
                 }
 
                 if (exprPart.contains("*[")) {
-                    List<CyclicEntry> srcEntries = parseCyclic(exprPart, shared);
+                    List<CyclicEntry> srcEntries = parseCyclic(exprPart, shared, macros);
                     if (srcEntries.isEmpty()) {
                         errors.add(layerError(lineIdx, "cyclic layer has no valid entries", line));
                         continue;
@@ -546,7 +586,8 @@ public class FormulaParser {
                     }
                     layers.add(new CyclicLayerDef(yStart, yEnd, entries));
                 } else {
-                    ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(exprPart)).parse());
+                    ExprNode expr = wrapShared(shared,
+                            expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros));
                     if (!usesBiomeQueries && usesBiomeQuery(expr)) usesBiomeQueries = true;
                     List<String> valErrors = new ArrayList<>();
                     ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), false);
@@ -708,6 +749,7 @@ public class FormulaParser {
 
     /** 解析一行群系层：{@code biome: 表达式}（整维简写）或 {@code biome y=a..b: 表达式}。 */
     private static void parseBiomeLayer(String line, int lineIdx, List<ExprNode.LetBinding> shared,
+                                        Map<String, ParametricLet> macros,
                                         List<BiomeLayerDef> biomeLayers, List<String> errors) {
         try {
             String rest = line.substring("biome".length()).trim();
@@ -749,7 +791,7 @@ public class FormulaParser {
             }
             if (exprPart.isEmpty()) throw new IllegalArgumentException("empty expression after ':'");
 
-            ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(exprPart)).parse());
+            ExprNode expr = wrapShared(shared, expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros));
             List<String> valErrors = new ArrayList<>();
             ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), true);
             if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
@@ -785,7 +827,7 @@ public class FormulaParser {
             case ExprNode.VariableNode v -> {
                 if (variables.containsKey(v.name())) return variables.get(v.name());
                 if (KNOWN_VARS.contains(v.name())) return ExprEvaluator.ValueType.NUMBER;
-                errors.add("Unknown variable: " + v.name() + " (available: x, z, ly, seed)");
+                errors.add("Unknown variable: " + v.name() + " (available: x, y, z, ly, seed)");
                 return ExprEvaluator.ValueType.UNKNOWN;
             }
             case ExprNode.BlockNode b -> {
@@ -957,7 +999,8 @@ public class FormulaParser {
     /** 循环层条目（未编译；语义校验与编译由 parseLayers 统一做）。 */
     private record CyclicEntry(int thickness, ExprNode expression, boolean lyDependent) {}
 
-    private static List<CyclicEntry> parseCyclic(String exprPart, List<ExprNode.LetBinding> shared) {
+    private static List<CyclicEntry> parseCyclic(String exprPart, List<ExprNode.LetBinding> shared,
+                                                 Map<String, ParametricLet> macros) {
         List<CyclicEntry> entries = new ArrayList<>();
         int pos = 0;
         while (pos < exprPart.length()) {
@@ -992,7 +1035,7 @@ public class FormulaParser {
             String inner = exprPart.substring(start, pos).trim();
             pos++;
 
-            ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(inner)).parse());
+            ExprNode expr = wrapShared(shared, expandMacros(new ExprParser(ExprLexer.tokenize(inner)).parse(), macros));
             // 与整层同理：依赖判定必须在编译前、且在未编译的 AST 上完成
             boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
             entries.add(new CyclicEntry(t, expr, lyDependent));
@@ -1010,8 +1053,14 @@ public class FormulaParser {
         return !(Character.isLetterOrDigit(c) || c == '_');
     }
 
-    /** 解析 `let 名称 = 表达式`（一个分号段一条；绑定按声明顺序依次求值）。 */
-    private static ExprNode.LetBinding parseSharedLet(String line) {
+    /** 解析出的共享 let：普通绑定与宏（参数化 let）恰有一个非空。 */
+    private record SharedLet(ExprNode.LetBinding binding, ParametricLet macro) {}
+
+    /** 参数化共享 let：编译期宏展开（调用即内联，无运行时开销）。 */
+    private record ParametricLet(String name, List<String> params, ExprNode body) {}
+
+    /** 解析 `let 名称 = 表达式` 或 `let 名称(参数, ...) = 表达式`。 */
+    private static SharedLet parseSharedLet(String line) {
         String rest = line.substring(3).trim();
         int i = 0;
         while (i < rest.length() && (Character.isLetterOrDigit(rest.charAt(i)) || rest.charAt(i) == '_')) i++;
@@ -1020,15 +1069,150 @@ public class FormulaParser {
             throw new IllegalArgumentException("expected a variable name after 'let'");
         }
         String name = rest.substring(0, i);
+        boolean parens = false;
+        List<String> params = List.of();
+        if (i < rest.length() && rest.charAt(i) == '(') {
+            parens = true;
+            int close = rest.indexOf(')', i + 1);
+            if (close < 0) throw new IllegalArgumentException("missing ')' in parameter list of '" + name + "'");
+            String inner = rest.substring(i + 1, close).trim();
+            if (!inner.isEmpty()) {
+                List<String> parsed = new ArrayList<>();
+                for (String part : inner.split(",")) {
+                    String param = part.trim();
+                    if (!isIdentifier(param)) {
+                        throw new IllegalArgumentException("invalid parameter \"" + param + "\" of '" + name + "'");
+                    }
+                    if (parsed.contains(param)) {
+                        throw new IllegalArgumentException("duplicate parameter '" + param + "' of '" + name + "'");
+                    }
+                    parsed.add(param);
+                }
+                params = List.copyOf(parsed);
+            }
+            i = close + 1;
+        }
         String tail = rest.substring(i).trim();
         if (!tail.startsWith("=")) {
             throw new IllegalArgumentException("expected '=' after 'let " + name + "'");
         }
         String valueText = tail.substring(1).trim();
         if (valueText.isEmpty()) {
-            throw new IllegalArgumentException("expected an expression after 'let " + name + " ='");
+            throw new IllegalArgumentException("expected an expression after 'let " + name + " '");
         }
-        return new ExprNode.LetBinding(name, new ExprParser(ExprLexer.tokenize(valueText)).parse());
+        ExprNode value = new ExprParser(ExprLexer.tokenize(valueText)).parse();
+        if (!parens) {
+            return new SharedLet(new ExprNode.LetBinding(name, value), null);
+        }
+        if (ExprEvaluator.isFunctionName(name)) {
+            throw new IllegalArgumentException("shared let '" + name + "' collides with a built-in function");
+        }
+        return new SharedLet(null, new ParametricLet(name, params, value));
+    }
+
+    /** 标识符：字母/下划线开头，后跟字母数字下划线。 */
+    private static boolean isIdentifier(String s) {
+        if (s.isEmpty()) return false;
+        char c0 = s.charAt(0);
+        if (!(Character.isLetter(c0) || c0 == '_')) return false;
+        for (int i = 1; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!(Character.isLetterOrDigit(c) || c == '_')) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 宏展开：把参数化 let 的调用点替换为函数体（实参表达式代入参数）。
+     * 展开在编译前完成，因此没有运行时开销；自引用会在深度上限处报错。
+     */
+    private static ExprNode expandMacros(ExprNode node, Map<String, ParametricLet> macros) {
+        return expandMacros(node, macros, 0);
+    }
+
+    private static ExprNode expandMacros(ExprNode node, Map<String, ParametricLet> macros, int depth) {
+        if (depth > 64) {
+            throw new IllegalArgumentException("parametric let expansion is too deep (self reference?)");
+        }
+        return switch (node) {
+            case ExprNode.NumberNode n -> n;
+            case ExprNode.VariableNode v -> v;
+            case ExprNode.BlockNode b -> b;
+            case ExprNode.BinaryNode b -> new ExprNode.BinaryNode(
+                    expandMacros(b.left(), macros, depth), b.op(), expandMacros(b.right(), macros, depth));
+            case ExprNode.UnaryNode u -> new ExprNode.UnaryNode(u.op(), expandMacros(u.operand(), macros, depth));
+            case ExprNode.ConditionalNode c -> new ExprNode.ConditionalNode(
+                    expandMacros(c.condition(), macros, depth),
+                    expandMacros(c.thenExpr(), macros, depth),
+                    expandMacros(c.elseExpr(), macros, depth));
+            case ExprNode.FuncCallNode f -> {
+                ParametricLet macro = macros.get(f.name());
+                if (macro == null) {
+                    List<ExprNode> args = new ArrayList<>(f.args().size());
+                    for (ExprNode arg : f.args()) args.add(expandMacros(arg, macros, depth));
+                    yield new ExprNode.FuncCallNode(f.name(), args);
+                }
+                if (f.args().size() != macro.params().size()) {
+                    throw new IllegalArgumentException("parametric let '" + f.name() + "' expects "
+                            + macro.params().size() + " argument(s), got " + f.args().size());
+                }
+                List<ExprNode> args = new ArrayList<>(f.args().size());
+                for (ExprNode arg : f.args()) args.add(expandMacros(arg, macros, depth));
+                yield expandMacros(substitute(macro.body(), macro.params(), args), macros, depth + 1);
+            }
+            case ExprNode.BlockExprNode be -> {
+                List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    bindings.add(new ExprNode.LetBinding(binding.name(),
+                            expandMacros(binding.value(), macros, depth)));
+                }
+                yield new ExprNode.BlockExprNode(bindings, expandMacros(be.body(), macros, depth));
+            }
+            case ExprNode.BuiltinNode b -> b;
+            case ExprNode.SlotNode s -> s;
+            case ExprNode.CompiledFuncCallNode cf -> cf;
+            case ExprNode.CompiledBlockNode cb -> cb;
+        };
+    }
+
+    /** 宏体代入：参数名替换为实参表达式；块内同名绑定会遮蔽参数（与求值作用域一致）。 */
+    private static ExprNode substitute(ExprNode node, List<String> params, List<ExprNode> args) {
+        Map<String, ExprNode> subs = new HashMap<>();
+        for (int i = 0; i < params.size(); i++) subs.put(params.get(i), args.get(i));
+        return substitute(node, subs);
+    }
+
+    private static ExprNode substitute(ExprNode node, Map<String, ExprNode> subs) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> n;
+            case ExprNode.VariableNode v -> subs.getOrDefault(v.name(), v);
+            case ExprNode.BlockNode b -> b;
+            case ExprNode.BinaryNode b -> new ExprNode.BinaryNode(
+                    substitute(b.left(), subs), b.op(), substitute(b.right(), subs));
+            case ExprNode.UnaryNode u -> new ExprNode.UnaryNode(u.op(), substitute(u.operand(), subs));
+            case ExprNode.ConditionalNode c -> new ExprNode.ConditionalNode(
+                    substitute(c.condition(), subs),
+                    substitute(c.thenExpr(), subs), substitute(c.elseExpr(), subs));
+            case ExprNode.FuncCallNode f -> {
+                List<ExprNode> args = new ArrayList<>(f.args().size());
+                for (ExprNode arg : f.args()) args.add(substitute(arg, subs));
+                yield new ExprNode.FuncCallNode(f.name(), args);
+            }
+            case ExprNode.BlockExprNode be -> {
+                Map<String, ExprNode> inner = new HashMap<>(subs);
+                List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    // 绑定值先于绑定名可见（与求值器一致）
+                    bindings.add(new ExprNode.LetBinding(binding.name(), substitute(binding.value(), inner)));
+                    inner.remove(binding.name());
+                }
+                yield new ExprNode.BlockExprNode(bindings, substitute(be.body(), inner));
+            }
+            case ExprNode.BuiltinNode b -> b;
+            case ExprNode.SlotNode s -> s;
+            case ExprNode.CompiledFuncCallNode cf -> cf;
+            case ExprNode.CompiledBlockNode cb -> cb;
+        };
     }
 
     /** 把共享绑定前置到层表达式外：{ 共享绑定...; 原表达式 }。 */

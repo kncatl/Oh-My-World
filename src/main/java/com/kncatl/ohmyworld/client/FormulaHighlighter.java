@@ -34,7 +34,7 @@ public final class FormulaHighlighter {
     /** 一段带颜色的文本区间，[start, end)。 */
     public record Span(int start, int end, int color) {}
 
-    private static final Set<String> VARIABLES = Set.of("x", "z", "ly", "seed");
+    private static final Set<String> VARIABLES = Set.of("x", "y", "z", "ly", "seed");
     private static final Set<String> DIRECTIVE_NAMES = Set.of("structure", "biome", "features");
     private static final Set<String> DIRECTIVE_MODES = Set.of("all", "none", "only", "except", "vanilla");
     private static final Set<String> DIMENSIONS = Set.of("overworld", "nether", "the_nether", "end", "the_end");

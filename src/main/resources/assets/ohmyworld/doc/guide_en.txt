@@ -32,6 +32,20 @@ Separate layers with semicolons ";". Two formats are supported:
       biome: hills < 0.5 ? minecraft:desert : minecraft:plains
     }
 
+  Parameterised shared lets (macros) are expanded at compile time (no runtime
+  cost) and can be evaluated at different coordinates (slopes, neighbourhoods):
+
+    {overworld=
+      let h(px, pz) = 64 + noise2(px, pz, 900, 1) * 30;
+      let slope(px, pz) = h(px + 1, pz) - h(px, pz);
+      y=-64..319: y <= h(x, z) ? (slope(x, z) > 6 ? minecraft:stone : minecraft:grass_block)
+                             : minecraft:air
+    }
+
+  Macros may call other macros (self reference is caught by the expansion depth
+  limit); a block-local let shadows macro parameters; a macro name must not
+  collide with a built-in function; declaration order does not matter.
+
 [Cyclic expression]
   y=<start>..<end>: <count>*[<expr>],<count>*[<expr>],...
 
@@ -212,6 +226,14 @@ Default preset:
                        no decoration anyway)
       [features:none]  disable all biome decoration features
 
+  * [carvers:...] whether vanilla carvers (canyons / legacy caves) may carve
+    the formula terrain:
+      [carvers:none]     default: carvers are cancelled, the formula owns the terrain
+      [carvers:vanilla]  allow: vanilla carvers dig canyons/caves into the formula terrain
+    Only meaningful for noise-generator worlds (flat generators have no carvers).
+    Not supported on 26.3 (carving is merged into the terrain entry point there);
+    the directive is kept but carvers stay disabled with a log warning.
+
   * Notes:
     - [structure:...] only affects newly generated structures; /locate and
       eyes of ender still use the vanilla theoretical positions.
@@ -228,6 +250,7 @@ Default preset:
   x    World X coordinate (integer, can be negative)
   z    World Z coordinate (integer, can be negative)
   ly   Relative y within the layer (0-based, ly = currentY - layerStartY)
+  y    Absolute y coordinate (= ly + layer start) — prefer y for strata/caves
   seed World seed (integer; constant within a world, generally differs across worlds)
 
        Use it to make the same formula produce different results in different
@@ -303,6 +326,27 @@ Default preset:
     (different worlds get different patterns; deterministic within a world)
   ★ For grid noise, floordiv the coordinates first, e.g.
     seedhash(floordiv(x,3), floordiv(z,3), 0).
+
+  -- Smooth noise (uses the world seed; continuous, for terrain/caves/islands) --
+  noise2(x, z, scale, salt)               2D smooth noise, [-1,1]
+  noise3(x, y, z, scale, salt)            3D smooth noise, [-1,1]
+  fbm2(x, z, scale, octaves, salt)        2D fractal sum (octaves 1..8), [-1,1]
+  fbm3(x, y, z, scale, octaves, salt)     3D fractal sum, [-1,1]
+  worley2(x, z, scale, salt)              cellular distance to nearest point, [0,1]
+  worley3(x, y, z, scale, salt)           3D cellular distance, [0,1]
+
+    ★ scale = feature size in blocks: larger scale, larger features; change
+      "salt" for another pattern.
+    ★ Division of labour: seedhash/rand for per-block speckle; noise/fbm/worley
+      for smooth terrain, caves and islands.
+    ★ The algorithms are frozen: the same formula + seed generates the same
+      world in every version.
+
+  -- Helpers --
+  clamp(v, lo, hi)             clamp into [lo, hi]
+  lerp(a, b, t)                linear interpolation a + (b - a) * t
+  smoothstep(t)                cubic smoothing of a 0..1 input
+  map(v, a, b, c, d)           linear map from [a,b] to [c,d] (vanilla Mth.map)
 
 
 5. Expression Examples
@@ -391,7 +435,65 @@ Default preset:
     be derived from ly (ly counts from the layer's start).
 
 
-6. Blocks
+6. Natural World Recipes
+
+  Starter recipes for "make the world look natural" (1.2.5 primitives). Paste
+  them, then tune scales/thresholds. Noise functions use the world seed: the
+  same formula differs across seeds and is deterministic inside a world (and
+  across versions — published distributions never change).
+
+  ▸ Rolling terrain (continents + hills + peaks, the vanilla "several
+    low-frequency smooth fields" idea):
+
+    {overworld=
+      let cont = noise2(x, z, 1400, 1);
+      let hill = fbm2(x, z, 320, 4, 2);
+      let peak = smoothstep(noise2(x, z, 900, 3) * 0.7 + 0.5);
+      let h = 64 + cont * 36 + hill * 10 + peak * 30;
+      y=-64..319: y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air
+    }
+
+    h does not depend on ly, so the engine caches it per column (computed once
+    per column). Lower the scales for steeper mountains.
+
+  ▸ Interwoven caves (cheese caves + thin tunnels; harder to break through
+    near the surface, so entrances are not abrupt):
+
+    let cave = noise3(x, y * 2.2, z, 96, 7);
+    let tunnel = abs(noise3(x, y, z, 34, 8));
+    let open = lerp(0.22, 0.45, clamp((h - y) / 28, 0, 1));
+    (put the cave test at the front of the terrain layer:)
+    y=-64..319: (cave > open || tunnel < 0.006) && y < h - 3 ? minecraft:air
+             : (y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air);
+
+    Note: typical noise values stay within about ±0.5 (the theoretical range
+    is ±1); the numbers above carve a few percent near the surface and up to
+    ~20% deep down -- lower the thresholds for emptier caves.
+
+  ▸ Nether-style chaotic caverns (a large-scale noise cut with fbm detail):
+
+    let blob = fbm3(x, y * 1.6, z, 150, 3, 21);
+    y=0..127: blob > 0.20 ? minecraft:air : minecraft:netherrack;
+
+  ▸ End-style fragmented islands (radial falloff + cellular islands + fbm edges):
+
+    let r = sqrt(x * x + z * z);
+    let islands = worley2(x, z, 240, 4);
+    let edge = fbm2(x, z, 120, 3, 5) * 6;
+    let top = 90 - r * 0.10 + edge;
+    y=0..255: y <= top * smoothstep(0.55 - islands * 1.6) ? minecraft:end_stone : minecraft:air;
+
+  Rules and performance:
+    · Noise/cellular functions are a frozen contract: same formula + seed gives
+      the same world in every version;
+    · keep strata and large-scale noise in shared lets (ly-independent parts are
+      cached per column automatically);
+    · use seedhash/rand for per-block speckle, noise/fbm/worley for smooth shapes;
+    · always keep the "original block" branch in cave recipes — a column of air
+      would erase the terrain.
+
+
+7. Blocks
 
 Use standard Minecraft resource IDs:
 
@@ -409,21 +511,20 @@ Supported concrete colors (hardcoded, no registry needed):
 Other blocks are resolved via BuiltInRegistries.BLOCK.
 
 
-7. Notes
-
+8. Notes
 1. Semicolons ";" must be in English mode. Chinese ";" won't work.
 2. All block IDs must be typed in English.
 3. Nest ternary conditions with explicit parentheses.
 4. For grid patterns with / or %, MUST use floordiv/floormod.
 5. % in expressions like (x+z)%2 is fine as a direct operator.
-6. The ly variable is for intra-layer offset (rarely needed).
+6. ly is layer-relative; the built-in "y" is the absolute y (= ly + layer start). Prefer y for strata/cave formulas.
 7. Cyclic [expr] brackets enclose any valid expression.
 8. Commas "," in cyclic format separate groups; commas inside [ ] are fine.
 9. rand() is deterministic: same (x,z,y) always returns the same block.
 10. It is recommended to set "Generate Structures" to OFF when the top
     layer of your pattern is not a flat, continuous surface.
 
-8. Dedicated Servers
+9. Dedicated Servers
 
 Dedicated servers have no world-creation UI, so the formula marker cannot be
 written from the editor. Set server_mode: true in config/ohmyworld.json instead;

@@ -32,6 +32,6 @@ public class FormulaLayerDef {
     public boolean columnInvariant() { return columnInvariant; }
 
     public BlockState getBlock(int worldX, int worldZ, int globalY) {
-        return ExprEvaluator.evalToBlock(expression, worldX, worldZ, globalY - yStart);
+        return ExprEvaluator.evalToBlock(expression, worldX, worldZ, globalY - yStart, globalY);
     }
 }

@@ -48,6 +48,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(NoiseBasedChunkGenerator.class)
 public class MixinNoiseBasedChunkGenerator {
     private static final Logger LOGGER = LogUtils.getLogger();
+    /** 26.3 上 [carvers:vanilla] 不受支持，只提示一次。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_WARNED =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     //? >=26.3 {
     // 26.3 把地形构建重做成单入口 buildTerrain：(fillFromNoise + buildSurface +
@@ -74,10 +77,11 @@ public class MixinNoiseBasedChunkGenerator {
         if (PatternData.snapshotFor((ChunkGenerator) (Object) this) != null) ci.cancel();
     }
 
-    /** 公式接管地形时，不再让原版雕刻器在公式方块上挖洞。 */
+    /** 公式接管地形时，不再让原版雕刻器在公式方块上挖洞；[carvers:vanilla] 可放行。 */
     @Inject(method = "applyCarvers", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onApplyCarvers(CallbackInfo ci) {
-        if (PatternData.snapshotFor((ChunkGenerator) (Object) this) != null) ci.cancel();
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot != null && !snapshot.carversVanilla()) ci.cancel();
     }
     //?}
 
@@ -123,6 +127,13 @@ public class MixinNoiseBasedChunkGenerator {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || snapshot.layers().isEmpty()) return;
         List<Object> layers = snapshot.layers();
+
+        //? >=26.3 {
+        if (snapshot.carversVanilla() && CARVERS_WARNED.compareAndSet(false, true)) {
+            LOGGER.warn("ohmyworld: [carvers:vanilla] is not supported on this version (carving is merged "
+                    + "into buildTerrain and cannot run separately); carvers stay disabled");
+        }
+        //?}
 
         try {
             PatternData.fillChunk(chunk, layers);

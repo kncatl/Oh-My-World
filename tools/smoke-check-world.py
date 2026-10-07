@@ -27,7 +27,8 @@
   3 = biome 行两段全覆盖（深暗之域/沙漠）—— 两行都生效且无原版平原；
   4 = biome 行 + [biome-fallback:3d] —— 低段深暗之域 + 至少 2 种原版群系；
   5 = biome 行按 terrain/surfis/blockis 分布 —— 冰刺之地/沙漠/恶地都要出现；
-  6 = [biome:vanilla] + 方块层 biomeis —— 两种"按群系铺的方块"都要出现。
+  6 = [biome:vanilla] + 方块层 biomeis —— 两种"按群系铺的方块"都要出现；
+  7 = 自然世界（1.2.5：噪声地形 + 洞穴 + y）—— 地表材质方块都要出现。
 
 --features-smoke（P4.3）：装饰特性冒烟预设（下界固定玄武岩三角洲）：
   1 = [features:all] —— 装饰方块（黑石/荧石/岩浆块至少一种）应出现；
@@ -171,6 +172,10 @@ BIOME_SMOKE_RULES["5"] = {
 BIOME_SMOKE_RULES["6"] = {
     "expect": {"overworld": ("minecraft:sea_lantern", "minecraft:ocean")},
     "forbid": {"overworld": ("minecraft:gold_block",)},
+}
+# 7 = 自然世界（配合 smoke-server-config.py --natural）：噪声地形 + 洞穴 + y 变量。
+BIOME_SMOKE_RULES["7"] = {
+    "expect": {"overworld": ("minecraft:grass_block", "minecraft:stone")},
 }
 
 # P4.3 特性冒烟（配合 smoke-server-config.py --features-all / --features-none）：

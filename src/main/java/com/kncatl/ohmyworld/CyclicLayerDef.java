@@ -53,7 +53,7 @@ public class CyclicLayerDef {
         long acc = 0;
         for (Entry e : entries) {
             if (pos < acc + e.thickness()) {
-                return ExprEvaluator.evalToBlock(e.expression(), worldX, worldZ, layerY);
+                return ExprEvaluator.evalToBlock(e.expression(), worldX, worldZ, layerY, layerY + yStart);
             }
             acc += e.thickness();
         }

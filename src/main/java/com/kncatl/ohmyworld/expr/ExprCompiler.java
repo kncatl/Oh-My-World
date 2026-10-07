@@ -127,7 +127,7 @@ public final class ExprCompiler {
             }
 
             // 已编译的形态原样返回
-            case ExprNode.BuiltinNode b -> new Compiled(b, b.kind() == 2);
+            case ExprNode.BuiltinNode b -> new Compiled(b, b.kind() == 2 || b.kind() == 4);
             case ExprNode.SlotNode s -> new Compiled(s, lyDependent(s));
             case ExprNode.CompiledFuncCallNode cf -> new Compiled(cf, lyDependent(cf));
             // 已编译的块无法再反查槽位来源，保守视为与 y 相关：只放弃提升，不影响正确性
@@ -140,7 +140,7 @@ public final class ExprCompiler {
         return switch (node) {
             case ExprNode.NumberNode n -> false;
             case ExprNode.BlockNode b -> false;
-            case ExprNode.BuiltinNode b -> b.kind() == 2;
+            case ExprNode.BuiltinNode b -> b.kind() == 2 || b.kind() == 4;
             case ExprNode.SlotNode s -> slotDependent.getOrDefault(s.slot(), true);
             case ExprNode.BinaryNode b -> lyDependent(b.left()) || lyDependent(b.right());
             case ExprNode.UnaryNode u -> lyDependent(u.operand());
@@ -177,6 +177,7 @@ public final class ExprCompiler {
             case "z" -> new ExprNode.BuiltinNode(1);
             case "ly" -> new ExprNode.BuiltinNode(2);
             case "seed" -> new ExprNode.BuiltinNode(3);
+            case "y" -> new ExprNode.BuiltinNode(4);
             // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };

@@ -146,7 +146,7 @@ public class FormulaBiomeSource extends BiomeSource {
     }
 
     private Holder<Biome> biomeAt(Layer layer, int x, int y, int z) {
-        Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(),
+        Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(), y,
                 this::resolveBiomeLiteral, terrain);
         if (result instanceof Holder<?> holder && holder.value() instanceof Biome) {
             @SuppressWarnings("unchecked")

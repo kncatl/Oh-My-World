@@ -54,7 +54,7 @@ class FormulaParserTest {
     void unknownNamesStillReportCorrectly() {
         FormulaParser.ParseResult variable = FormulaParser.parseWithErrors("y=0: seeds");
         assertEquals(1, variable.errors().size(), variable.errors().toString());
-        assertTrue(variable.errors().get(0).contains("available: x, z, ly, seed"),
+        assertTrue(variable.errors().get(0).contains("available: x, y, z, ly, seed"),
                 variable.errors().toString());
 
         FormulaParser.ParseResult function = FormulaParser.parseWithErrors("y=0: seedhashes(x)");
@@ -484,6 +484,56 @@ class FormulaParserTest {
                 twoD.errors().toString());
     }
 
+    /** 参数化共享 let（宏）：调用内联、遮蔽、参数个数与内置函数冲突校验。 */
+    @Test
+    void parametricSharedLetsExpand() {
+        assertOnlyReturnsBlockTypeError("let h(px, pz) = px * 2 + pz; y=0: h(x, z) * seed;");
+        assertOnlyReturnsBlockTypeError("let k() = seed; y=0: k() * 3;");
+
+        // 邻近采样（坡度）与循环层、群系行里同样可用
+        FormulaParser.DimensionParseResult all = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] let n(px, pz) = seedhash(px, pz, 1);"
+                        + "y=0..4: 1*[n(x, z) < 0.5 ? rand() : rand()];"
+                        + "biome: n(x, z) < 0.5 ? minecraft:desert : minecraft:plains}");
+        assertTrue(all.errors().isEmpty(), all.errors().toString());
+
+        // 宏体内的同名 let 绑定遮蔽参数（没有遮蔽处理的话 rand() 会被代入、报数值类型错误）
+        assertOnlyReturnsBlockTypeError("let f(a) = { let a = 5; a }; y=0: f(rand()) * seed;");
+
+        FormulaParser.ParseResult arity = FormulaParser.parseWithErrors("let f(a) = a; y=0: f(1, 2)");
+        assertTrue(arity.errors().stream().anyMatch(e -> e.contains("expects 1 argument")),
+                arity.errors().toString());
+
+        FormulaParser.ParseResult collision = FormulaParser.parseWithErrors("let rand(a) = a; y=0: 1");
+        assertTrue(collision.errors().stream().anyMatch(e -> e.contains("collides with a built-in function")),
+                collision.errors().toString());
+
+        FormulaParser.ParseResult selfRef = FormulaParser.parseWithErrors("let f(a) = f(a); y=0: f(1)");
+        assertTrue(selfRef.errors().stream().anyMatch(e -> e.contains("too deep")),
+                selfRef.errors().toString());
+    }
+
+    /** [carvers:vanilla] 指令：解析、取值与非法模式。 */
+    @Test
+    void carversDirectiveParses() {
+        FormulaParser.DimensionParseResult vanilla = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[carvers:vanilla] y=0: rand()}");
+        assertTrue(vanilla.errors().isEmpty(), vanilla.errors().toString());
+        assertEquals(DimensionRules.CarversMode.VANILLA,
+                vanilla.dimensions().get(FormulaParser.DIM_OVERWORLD).carvers());
+
+        FormulaParser.DimensionParseResult none = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[carvers:none] y=0: rand()}");
+        assertTrue(none.errors().isEmpty(), none.errors().toString());
+        assertEquals(DimensionRules.CarversMode.NONE,
+                none.dimensions().get(FormulaParser.DIM_OVERWORLD).carvers());
+
+        FormulaParser.DimensionParseResult bad = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[carvers:maybe] y=0: rand()}");
+        assertTrue(bad.errors().stream().anyMatch(e -> e.contains("invalid carvers mode")),
+                bad.errors().toString());
+    }
+
     /** 指南/抽查清单里给出的组合示例（方块层用 rand() 替代，避免触碰注册表）。 */
     @Test
     void documentedExamplesParse() {
@@ -507,6 +557,28 @@ class FormulaParserTest {
                 "{overworld=y=-64..8: { let yy = ly - 64;"
                         + " seedhash(x, yy, z, 11) < min(max((8 - yy) / 8, 0), 1) ? rand() : rand() };"
                         + "y=9..63: rand()}",
+                // 6. 自然世界配方：起伏地形（宏 + 噪声 + y）
+                "{overworld=let cont = noise2(x, z, 1400, 1);"
+                        + " let hill = fbm2(x, z, 320, 4, 2);"
+                        + " let peak = smoothstep(noise2(x, z, 900, 3) * 0.7 + 0.5);"
+                        + " let h = 64 + cont * 36 + hill * 10 + peak * 30;"
+                        + " y=-64..319: y <= h ? (y > h - 4 ? rand() : rand()) : rand()}",
+                // 7. 自然世界配方：交错洞穴（写进地形层最前面）
+                "{overworld=let h = 64 + noise2(x, z, 900, 1) * 24;"
+                        + " let cave = noise3(x, y * 2.2, z, 96, 7);"
+                        + " let tunnel = abs(noise3(x, y, z, 34, 8));"
+                        + " let open = lerp(0.22, 0.45, clamp((h - y) / 28, 0, 1));"
+                        + " y=-64..319: (cave > open || tunnel < 0.006) && y < h - 3 ? rand()"
+                        + " : (y <= h ? (y > h - 4 ? rand() : rand()) : rand())}",
+                // 8. 自然世界配方：下界式混沌洞窟
+                "{the_nether=let blob = fbm3(x, y * 1.6, z, 150, 3, 21);"
+                        + " y=0..127: blob > 0.20 ? rand() : rand()}",
+                // 9. 自然世界配方：末地式零碎岛屿
+                "{the_end=let r = sqrt(x * x + z * z);"
+                        + " let islands = worley2(x, z, 240, 4);"
+                        + " let edge = fbm2(x, z, 120, 3, 5) * 6;"
+                        + " let top = 90 - r * 0.10 + edge;"
+                        + " y=0..255: y <= top * smoothstep(0.55 - islands * 1.6) ? rand() : rand()}",
         };
         for (String formula : valid) {
             FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(formula);
