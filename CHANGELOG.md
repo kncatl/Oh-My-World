@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.2.5-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Natural-world primitives** — write vanilla-style smooth terrain, caves and islands with the formula engine:
+  - `noise2/noise3(x[, y], z, scale, salt)`: smooth gradient noise in [-1,1] (scale = feature size in blocks; salt picks another pattern; the world seed is mixed in, so different worlds differ);
+  - `fbm2/fbm3(..., octaves, salt)`: fractal multi-octave sums for natural detail;
+  - `worley2/worley3(..., scale, salt)`: cellular (nearest-point) distance in [0,1] for fragmented islands and cell patterns;
+  - helpers `clamp / lerp / smoothstep / map`;
+  - a new built-in variable **`y`** (absolute y): strata and cave formulas no longer need `ly` arithmetic.
+- **Parameterised shared lets (macros)**: `let h(px, pz) = <expr>;` expands at compile time, so the same height field can be sampled at other coordinates (slopes, neighbourhoods) with no runtime cost.
+- **`[carvers:none|vanilla]`**: optionally let the vanilla carvers (canyons / legacy caves) carve the formula terrain (1.21.x / 26.1; not available on 26.3 — a warning is logged once per session).
+- **Guide**: a new "Natural World Recipes" section with ready-to-paste rolling-terrain, interwoven-cave, nether-cavern and fragmented-island recipes, plus documentation for everything above.
+
+### Notes
+- All noise algorithms are a **frozen contract** (like `seedhash`): the same formula and seed generate the same world across versions.
+- Existing formulas behave exactly as before; `y` was previously an unknown name, so nothing changes unless you use it.
+
 ## v1.2.4-beta
 
 > Beta release — please report any issue on GitHub.
