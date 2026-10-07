@@ -16,9 +16,12 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.QuartPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -342,7 +345,58 @@ public class PatternData {
      * 先在临时数组中完整计算区块，确认公式没有抛异常后再写入 ChunkAccess，
      * 避免异常时留下半个公式区块。
      */
+    /**
+     * 填充前把 biomeis 视图设为该区块（读已填充的群系容器）。
+     * 区块填充发生在 BIOMES 阶段之后，因此这里读到的群系就是最终值。
+     */
     public static void fillChunk(ChunkAccess chunk, List<Object> layers) {
+        ExprEvaluator.BiomeView saved = ExprEvaluator.biomeView();
+        ExprEvaluator.setBiomeView(biomeViewFor(chunk));
+        try {
+            fillChunkInternal(chunk, layers);
+        } finally {
+            ExprEvaluator.setBiomeView(saved);
+        }
+    }
+
+    /**
+     * biomeis 的运行期视图：把 (x, y, z) 映射到"已存储群系"再与字面量比较。
+     * 区块直接可用（{@code ChunkAccess.getNoiseBiome} 两代都有）；生成期的
+     * {@code WorldGenRegion} 按区块查；其他情形返回 null（此时 biomeis 恒为假，
+     * 例如编辑器预览）。
+     */
+    public static ExprEvaluator.BiomeView biomeViewFor(Object levelOrChunk) {
+        QuartBiomeSource source;
+        if (levelOrChunk instanceof ChunkAccess chunk) {
+            source = chunk::getNoiseBiome;
+        } else if (levelOrChunk instanceof WorldGenRegion region) {
+            source = (qx, qy, qz) -> {
+                try {
+                    ChunkAccess chunk = region.getChunk((qx << 2) >> 4, (qz << 2) >> 4);
+                    return chunk != null ? chunk.getNoiseBiome(qx, qy, qz) : null;
+                } catch (RuntimeException e) {
+                    return null;
+                }
+            };
+        } else {
+            return null;
+        }
+        return (x, y, z, biomeId) -> {
+            Holder<Biome> holder = source.getNoiseBiome(
+                    QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z));
+            return holder != null && holder.unwrapKey()
+                    .map(key -> ResourceIds.keyIdString(key).equals(biomeId))
+                    .orElse(false);
+        };
+    }
+
+    /** 群系查询的最小接口（{@code BiomeManager.NoiseBiomeSource} 在 26.3 已不存在）。 */
+    @FunctionalInterface
+    private interface QuartBiomeSource {
+        Holder<Biome> getNoiseBiome(int qx, int qy, int qz);
+    }
+
+    private static void fillChunkInternal(ChunkAccess chunk, List<Object> layers) {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
@@ -486,6 +540,19 @@ public class PatternData {
         return result;
     }
 
+    /** 带 biomeis 视图的基座高度查询（view 为 null 时沿用当前视图）。 */
+    public static int getBaseHeight(PatternSnapshot snapshot, int x, int z, Heightmap.Types type,
+                                    int minY, int maxY, ExprEvaluator.BiomeView view) {
+        if (view == null) return getBaseHeight(snapshot, x, z, type, minY, maxY);
+        ExprEvaluator.BiomeView saved = ExprEvaluator.biomeView();
+        ExprEvaluator.setBiomeView(view);
+        try {
+            return getBaseHeight(snapshot, x, z, type, minY, maxY);
+        } finally {
+            ExprEvaluator.setBiomeView(saved);
+        }
+    }
+
     public static BlockState[] buildColumn(PatternSnapshot snapshot, int x, int z, int minY, int total) {
         BlockState[] column = new BlockState[total];
         Arrays.fill(column, AIR);
@@ -495,6 +562,19 @@ public class PatternData {
         int hi = Math.min(maxY - 1, maxLayerEnd(snapshot.layers()));
         for (int y = lo; y <= hi; y++) column[y - minY] = blockAt(snapshot.layers(), x, z, y);
         return column;
+    }
+
+    /** 带 biomeis 视图的整列构建（view 为 null 时沿用当前视图）。 */
+    public static BlockState[] buildColumn(PatternSnapshot snapshot, int x, int z, int minY, int total,
+                                           ExprEvaluator.BiomeView view) {
+        if (view == null) return buildColumn(snapshot, x, z, minY, total);
+        ExprEvaluator.BiomeView saved = ExprEvaluator.biomeView();
+        ExprEvaluator.setBiomeView(view);
+        try {
+            return buildColumn(snapshot, x, z, minY, total);
+        } finally {
+            ExprEvaluator.setBiomeView(saved);
+        }
     }
 
     public static int getBaseHeight(PatternSnapshot snapshot, int x, int z, Heightmap.Types type,

@@ -1,12 +1,15 @@
 package com.kncatl.ohmyworld;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 
 import com.kncatl.ohmyworld.expr.BlockResolver;
 import com.kncatl.ohmyworld.expr.ExprCompiler;
@@ -22,8 +25,8 @@ public class FormulaParser {
     public static final int MAX_INPUT_LENGTH = 1_048_576;
     private static final int MAX_LAYERS = 65_536;
 
-    public record ParseResult(List<Object> layers, List<String> errors,
-                              List<BiomeLayerDef> biomeLayers) {}
+    public record ParseResult(List<Object> layers, List<String> errors, List<BiomeLayerDef> biomeLayers,
+                              boolean usesTerrainQueries, boolean usesBiomeQueries) {}
 
     /** 维度节的规范名（{@link DimensionParseResult} 与 PatternData 的键）。 */
     public static final String DIM_OVERWORLD = "overworld";
@@ -288,6 +291,11 @@ public class FormulaParser {
             errors.add(name + ": biome-fallback requires at least one biome line");
             return;
         }
+        if (biomeFallback == DimensionRules.BiomeFallback.TWO_D && result.usesBiomeQueries()) {
+            errors.add(name + ": biome-fallback 2d cannot be combined with biomeis "
+                    + "(the reference height would need biomes that are not filled yet)");
+            return;
+        }
         if (biomeFallback == DimensionRules.BiomeFallback.NONE) {
             Integer gap = firstUncoveredY(name, result.biomeLayers());
             if (gap != null) {
@@ -437,6 +445,7 @@ public class FormulaParser {
         List<Object> layers = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         List<BiomeLayerDef> biomeLayers = new ArrayList<>();
+        boolean usesBiomeQueries = false;
         String[] lines = smartSplit(cleaned);
 
         // 第一遍：收集共享节级 let（`let 名称 = 表达式`），供本段所有层/群系行复用。
@@ -451,7 +460,7 @@ public class FormulaParser {
                 errors.add("Shared let (segment " + (lineIdx + 1) + "): " + e.getMessage());
             }
         }
-        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of());
+        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), false, false);
 
         for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             if (layers.size() + biomeLayers.size() + errors.size() >= MAX_LAYERS) {
@@ -510,6 +519,12 @@ public class FormulaParser {
                         errors.add(layerError(lineIdx, "cyclic layer has no valid entries", line));
                         continue;
                     }
+                    for (CyclicEntry entry : srcEntries) {
+                        if (usesBiomeQuery(entry.expression())) {
+                            usesBiomeQueries = true;
+                            break;
+                        }
+                    }
                     // 先按未编译 AST 做语义校验，再编译：编译后的 let 块会变成
                     // CompiledBlockNode，校验器看不到内部结构（旧实现就是先编译后校验，
                     // 这里顺带修掉那个盲区）。
@@ -532,6 +547,7 @@ public class FormulaParser {
                     layers.add(new CyclicLayerDef(yStart, yEnd, entries));
                 } else {
                     ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(exprPart)).parse());
+                    if (!usesBiomeQueries && usesBiomeQuery(expr)) usesBiomeQueries = true;
                     List<String> valErrors = new ArrayList<>();
                     ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), false);
                     if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
@@ -557,7 +573,19 @@ public class FormulaParser {
                     ? "Formula contains no layers"
                     : "Formula contains biome lines but no block layers");
         }
-        return new ParseResult(List.copyOf(layers), List.copyOf(errors), List.copyOf(biomeLayers));
+        boolean usesTerrainQueries = false;
+        for (BiomeLayerDef layer : biomeLayers) {
+            if (usesTerrainQuery(layer.expression())) {
+                usesTerrainQueries = true;
+                break;
+            }
+        }
+        if (usesTerrainQueries && usesBiomeQueries) {
+            errors.add("Biome lines that read the terrain cannot be combined with block layers "
+                    + "using biomeis (it would form a cycle)");
+        }
+        return new ParseResult(List.copyOf(layers), List.copyOf(errors), List.copyOf(biomeLayers),
+                usesTerrainQueries, usesBiomeQueries);
     }
 
     public static List<Object> parse(String input) {
@@ -567,7 +595,7 @@ public class FormulaParser {
     }
 
     private static ParseResult invalid(String error) {
-        return new ParseResult(List.of(), List.of(error), List.of());
+        return new ParseResult(List.of(), List.of(error), List.of(), false, false);
     }
 
     private static String layerError(int lineIdx, String msg, String line) {
@@ -602,6 +630,46 @@ public class FormulaParser {
     /** biome 行的地形查询函数（只能出现在 biome 行；方块参数位按方块语义校验）。 */
     private static boolean isTerrainQueryFunction(String name) {
         return name.equals("terrain") || name.equals("surfis") || name.equals("blockis");
+    }
+
+    /** 表达式（含编译形态）是否用到 biomeis。 */
+    private static boolean usesBiomeQuery(ExprNode node) {
+        return walkFunctions(node, "biomeis"::equals, id -> id == ExprEvaluator.FN_BIOMEIS);
+    }
+
+    /** 表达式是否用到 biome 行的地形查询（terrain / surfis / blockis）。 */
+    private static boolean usesTerrainQuery(ExprNode node) {
+        return walkFunctions(node, FormulaParser::isTerrainQueryFunction,
+                id -> id == ExprEvaluator.FN_TERRAIN || id == ExprEvaluator.FN_SURFIS
+                        || id == ExprEvaluator.FN_BLOCKIS);
+    }
+
+    /** 遍历表达式里的函数调用（未编译按名字、编译后按编号）。 */
+    private static boolean walkFunctions(ExprNode node, Predicate<String> byName, IntPredicate byId) {
+        return switch (node) {
+            case ExprNode.NumberNode ignored -> false;
+            case ExprNode.VariableNode ignored -> false;
+            case ExprNode.BlockNode ignored -> false;
+            case ExprNode.BinaryNode binary -> walkFunctions(binary.left(), byName, byId)
+                    || walkFunctions(binary.right(), byName, byId);
+            case ExprNode.UnaryNode unary -> walkFunctions(unary.operand(), byName, byId);
+            case ExprNode.ConditionalNode conditional ->
+                    walkFunctions(conditional.condition(), byName, byId)
+                            || walkFunctions(conditional.thenExpr(), byName, byId)
+                            || walkFunctions(conditional.elseExpr(), byName, byId);
+            case ExprNode.FuncCallNode call -> byName.test(call.name())
+                    || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
+            case ExprNode.BlockExprNode block ->
+                    block.bindings().stream().anyMatch(b -> walkFunctions(b.value(), byName, byId))
+                            || walkFunctions(block.body(), byName, byId);
+            case ExprNode.BuiltinNode ignored -> false;
+            case ExprNode.SlotNode ignored -> false;
+            case ExprNode.CompiledFuncCallNode call -> byId.test(call.id())
+                    || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
+            case ExprNode.CompiledBlockNode block ->
+                    Arrays.stream(block.values()).anyMatch(v -> walkFunctions(v, byName, byId))
+                            || walkFunctions(block.body(), byName, byId);
+        };
     }
 
     /** 原版维度最低高度（含）。分节语法只支持原版三维度，与预览的假设一致。 */
@@ -788,6 +856,11 @@ public class FormulaParser {
                     for (ExprNode a : f.args()) validateNode(a, errors, variables, false);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
+                if (f.name().equals("biomeis") && biomeMode) {
+                    errors.add("Function 'biomeis' can only be used in block layers");
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, true);
+                    return ExprEvaluator.ValueType.UNKNOWN;
+                }
                 if (biomeMode && (f.name().equals("rand") || f.name().equals("randexcept"))) {
                     errors.add("Function '" + f.name() + "' cannot be used in a biome expression");
                     for (ExprNode a : f.args()) validateNode(a, errors, variables, true);
@@ -819,6 +892,21 @@ public class FormulaParser {
                         } else {
                             requireNumber(type, "argument of " + f.name(), errors);
                         }
+                    }
+                    return ExprEvaluator.ValueType.BOOLEAN;
+                }
+                if (f.name().equals("biomeis")) {
+                    // biomeMode == false（biome 模式已在上面拦截）
+                    for (int i = 0; i < f.args().size() - 1; i++) {
+                        requireNumber(validateNode(f.args().get(i), errors, variables, false),
+                                "argument of biomeis", errors);
+                    }
+                    ExprNode biomeArg = f.args().get(f.args().size() - 1);
+                    if (biomeArg instanceof ExprNode.BlockNode b) {
+                        if (!isKnownBiome(b.blockId())) errors.add("Unknown biome: " + b.blockId());
+                    } else {
+                        errors.add("Function 'biomeis' expects a single biome literal as its last argument");
+                        validateNode(biomeArg, errors, variables, true);
                     }
                     return ExprEvaluator.ValueType.BOOLEAN;
                 }

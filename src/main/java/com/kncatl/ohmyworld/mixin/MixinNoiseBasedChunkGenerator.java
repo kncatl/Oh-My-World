@@ -91,7 +91,8 @@ public class MixinNoiseBasedChunkGenerator {
 
         try {
             cir.setReturnValue(PatternData.getBaseHeight(snapshot, x, z, type,
-                    LevelHeights.minY(level), LevelHeights.maxY(level)));
+                    LevelHeights.minY(level), LevelHeights.maxY(level),
+                    PatternData.biomeViewFor(level)));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-height evaluation failed, disabling pattern", e);
             PatternData.clearActive();
@@ -108,7 +109,8 @@ public class MixinNoiseBasedChunkGenerator {
         int minY = LevelHeights.minY(height);
         int total = height.getHeight();
         try {
-            BlockState[] column = PatternData.buildColumn(snapshot, x, z, minY, total);
+            BlockState[] column = PatternData.buildColumn(snapshot, x, z, minY, total,
+                    PatternData.biomeViewFor(height));
             cir.setReturnValue(new NoiseColumn(minY, column));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-column evaluation failed, disabling pattern", e);

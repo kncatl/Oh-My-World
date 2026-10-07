@@ -51,6 +51,26 @@ public class ExprEvaluator {
     private static final ThreadLocal<TerrainView> TERRAIN_VIEW = new ThreadLocal<>();
 
     /**
+     * biomeis 的运行期视图：判断指定位置的"已存储群系"是否某个群系。
+     * 由区块填充/基座查询注入（读区块容器）；没有视图时 biomeis 恒为假
+     * （例如编辑器预览、以及不经过区块的查询）。
+     */
+    public interface BiomeView {
+        boolean isBiome(int x, int y, int z, String biomeId);
+    }
+
+    private static final ThreadLocal<BiomeView> BIOME_VIEW = new ThreadLocal<>();
+
+    /** 当前 biomeis 视图；可能为 null。 */
+    public static BiomeView biomeView() { return BIOME_VIEW.get(); }
+
+    /** 设置/清除 biomeis 视图（null = 清除）；调用方自行保存旧值以便嵌套恢复。 */
+    public static void setBiomeView(BiomeView view) {
+        if (view == null) BIOME_VIEW.remove();
+        else BIOME_VIEW.set(view);
+    }
+
+    /**
      * 当前世界的种子；由 {@code WorldLoadHandler} 在世界加载时设置（各维度同值）。
      * 公式里以内置变量 {@code seed} 读取，{@code seedhash(...)} 也以它为混合起点。
      */
@@ -71,7 +91,9 @@ public class ExprEvaluator {
             Map.entry("seedhash", -1),
             Map.entry("rand", -1), Map.entry("randexcept", -1),
             // biome 行的地形查询（只能出现在 biome 行；参数位决定方块字面量语义）
-            Map.entry("terrain", 2), Map.entry("surfis", 3), Map.entry("blockis", 4));
+            Map.entry("terrain", 2), Map.entry("surfis", 3), Map.entry("blockis", 4),
+            // 方块层的群系查询（只能出现在方块层；末位是群系字面量）
+            Map.entry("biomeis", 4));
 
     /** 是否是已知函数名（语法高亮与校验共用同一张表）。 */
     public static boolean isFunctionName(String name) {
@@ -86,6 +108,7 @@ public class ExprEvaluator {
             FN_ASIN = 17, FN_ACOS = 18, FN_ATAN = 19, FN_TODEG = 20, FN_TORAD = 21;
     public static final int FN_RAND = 100, FN_RANDEXCEPT = 101, FN_SEEDHASH = 102;
     public static final int FN_TERRAIN = 103, FN_SURFIS = 104, FN_BLOCKIS = 105;
+    public static final int FN_BIOMEIS = 106;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -123,6 +146,7 @@ public class ExprEvaluator {
             case "terrain" -> FN_TERRAIN;
             case "surfis" -> FN_SURFIS;
             case "blockis" -> FN_BLOCKIS;
+            case "biomeis" -> FN_BIOMEIS;
             default -> FN_UNKNOWN;
         };
     }
@@ -428,6 +452,8 @@ public class ExprEvaluator {
             case "terrain" -> terrainHeight(args, x, z, ly, context);
             case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
             case "blockis" -> blockIsAt(args, x, z, ly, context) ? 1 : 0;
+            // 方块层的群系查询（只在区块填充/基座查询的视图下才有值）
+            case "biomeis" -> biomeIs(args, x, z, ly, context) ? 1 : 0;
             // 非数值函数（rand/randexcept）返回方块，按数值语境取 0
             default -> toDouble(evalFunc(f, x, z, ly, context));
         };
@@ -481,6 +507,7 @@ public class ExprEvaluator {
             case FN_TERRAIN -> terrainHeight(args, x, z, ly, context);
             case FN_SURFIS -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
             case FN_BLOCKIS -> blockIsAt(args, x, z, ly, context) ? 1 : 0;
+            case FN_BIOMEIS -> biomeIs(args, x, z, ly, context) ? 1 : 0;
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -541,6 +568,19 @@ public class ExprEvaluator {
             if (savedResolver != null) BIOME_RESOLVER.set(savedResolver);
             if (savedTerrain != null) TERRAIN_VIEW.set(savedTerrain);
         }
+    }
+
+    // ---------------------------------------------------------- 方块层的群系查询
+
+    /** {@code biomeis(x, z, y, 群系)}：指定位置的"已存储群系"是否该群系（末位须为群系字面量）。 */
+    private static boolean biomeIs(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        BiomeView view = BIOME_VIEW.get();
+        if (view == null) return false;
+        if (!(args.get(3) instanceof ExprNode.BlockNode biome)) return false;
+        return view.isBiome(blockCoord(args.get(0), x, z, ly, context),
+                blockCoord(args.get(2), x, z, ly, context),
+                blockCoord(args.get(1), x, z, ly, context),
+                biome.blockId());
     }
 
     private static int pickIndex(int x, int z, int y, int bound) {

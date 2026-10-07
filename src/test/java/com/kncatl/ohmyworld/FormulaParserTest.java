@@ -441,6 +441,49 @@ class FormulaParserTest {
                 arity.errors().toString());
     }
 
+    /** 方块层的群系查询：参数位、仅限方块层、B/C 互斥与 2d 组合守卫。 */
+    @Test
+    void blockBiomeQueriesValidate() {
+        // 方块层可用；[biome:vanilla] 是允许的组合
+        FormulaParser.DimensionParseResult ok = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:vanilla] y=-64: rand();"
+                        + "y=-63..64: biomeis(x, z, 64, minecraft:desert) ? rand() : rand()}");
+        assertTrue(ok.errors().isEmpty(), ok.errors().toString());
+
+        // 只能出现在方块层
+        FormulaParser.DimensionParseResult inBiomeRow = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] biome: biomeis(x, z, 64, minecraft:desert) "
+                        + "? minecraft:desert : minecraft:plains; y=0: rand()}");
+        assertTrue(inBiomeRow.errors().stream().anyMatch(e -> e.contains("can only be used in block layers")),
+                inBiomeRow.errors().toString());
+
+        // 末位必须是单个群系字面量
+        FormulaParser.DimensionParseResult notLiteral = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:vanilla] y=0: biomeis(x, z, 64, rand()) ? rand() : rand()}");
+        assertTrue(notLiteral.errors().stream().anyMatch(e -> e.contains("expects a single biome literal")),
+                notLiteral.errors().toString());
+
+        // 未知群系
+        FormulaParser.DimensionParseResult unknown = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:vanilla] y=0: biomeis(x, z, 64, minecraft:not_a_biome) ? rand() : rand()}");
+        assertTrue(unknown.errors().stream().anyMatch(e -> e.contains("Unknown biome: minecraft:not_a_biome")),
+                unknown.errors().toString());
+
+        // B/C 互斥：biome 行读地形 + 方块层读群系
+        FormulaParser.DimensionParseResult cycle = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] y=0: biomeis(x, z, 64, minecraft:desert) ? rand() : rand();"
+                        + "biome: surfis(x, z, rand()) ? minecraft:desert : minecraft:plains}");
+        assertTrue(cycle.errors().stream().anyMatch(e -> e.contains("would form a cycle")),
+                cycle.errors().toString());
+
+        // 2d 回退不能与 biomeis 组合
+        FormulaParser.DimensionParseResult twoD = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:2d] y=0: biomeis(x, z, 64, minecraft:desert) ? rand() : rand();"
+                        + "biome y=-64..319: minecraft:desert}");
+        assertTrue(twoD.errors().stream().anyMatch(e -> e.contains("2d cannot be combined with biomeis")),
+                twoD.errors().toString());
+    }
+
     /** 指南/抽查清单里给出的组合示例（方块层用 rand() 替代，避免触碰注册表）。 */
     @Test
     void documentedExamplesParse() {

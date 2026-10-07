@@ -26,7 +26,8 @@
   2 = [biome:vanilla] —— 至少出现 2 种不同主世界群系（不再是清一色平原）；
   3 = biome 行两段全覆盖（深暗之域/沙漠）—— 两行都生效且无原版平原；
   4 = biome 行 + [biome-fallback:3d] —— 低段深暗之域 + 至少 2 种原版群系；
-  5 = biome 行按 terrain/surfis/blockis 分布 —— 冰刺之地/沙漠/恶地都要出现。
+  5 = biome 行按 terrain/surfis/blockis 分布 —— 冰刺之地/沙漠/恶地都要出现；
+  6 = [biome:vanilla] + 方块层 biomeis —— 两种"按群系铺的方块"都要出现。
 
 --features-smoke（P4.3）：装饰特性冒烟预设（下界固定玄武岩三角洲）：
   1 = [features:all] —— 装饰方块（黑石/荧石/岩浆块至少一种）应出现；
@@ -164,6 +165,12 @@ BIOME_SMOKE_RULES["4"] = {
 BIOME_SMOKE_RULES["5"] = {
     "expect": {"overworld": ("minecraft:ice_spikes", "minecraft:desert", "minecraft:badlands")},
     "forbid": {"overworld": ("minecraft:plains",)},
+}
+# 6 = [biome:vanilla] + 方块层 biomeis（配合 --biome-biomeis）：海洋列应铺海晶灯；
+# 沙漠不在出生区——金块必须不出现（否则说明 biomeis 恒真）。
+BIOME_SMOKE_RULES["6"] = {
+    "expect": {"overworld": ("minecraft:sea_lantern", "minecraft:ocean")},
+    "forbid": {"overworld": ("minecraft:gold_block",)},
 }
 
 # P4.3 特性冒烟（配合 smoke-server-config.py --features-all / --features-none）：

@@ -176,6 +176,17 @@ Default preset:
     expressions work). These three functions can only appear in biome lines;
     using them in block layers is an error.
 
+  * Block layers can read biomes back:
+      biomeis(x, z, y, <biome>)  is the biome at that position the given one?
+    Example (surface material by biome):
+      y=-63..64: biomeis(x, z, 64, minecraft:desert) ? minecraft:sandstone : minecraft:stone
+    Works with [biome:vanilla], [biome:<single biome>] and biome lines alike
+    (it reads the biome actually in effect at that position). Block layers
+    only; it cannot be combined with biome lines that read the terrain
+    (cycle), nor with [biome-fallback:2d] (its reference height needs biomes
+    that are not filled yet). The editor preview cannot evaluate biomeis
+    (it shows the false branch).
+
   * [biome-fallback:...] decides what happens above/below your biome lines
     (default none):
       [biome-fallback:none]  no takeover: biome lines must cover the whole

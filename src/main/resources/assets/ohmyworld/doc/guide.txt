@@ -154,6 +154,15 @@
     末位方块参数按方块校验（可写三元等方块表达式）；这三个函数只能出现在
     biome 行里，写进方块层会报错。
 
+  ★ 反过来，方块层也可以读群系：
+      biomeis(x, z, y, <群系>)   指定位置的群系是否指定群系 → 真 / 假
+    例（按群系铺地表材质）：
+      y=-63..64: biomeis(x, z, 64, minecraft:desert) ? minecraft:sandstone : minecraft:stone
+    [biome:vanilla]、[biome:<单一群系>] 与 biome 行产生的群系都能读（读的是
+    该位置实际生效的群系）。只允许写在方块层里；不能与"读地形的 biome 行"
+    同时出现（会成环），也不能与 [biome-fallback:2d] 组合（参考高度需要尚未
+    填充的群系）。编辑器预览无法求值 biomeis（按假分支显示）。
+
   ★ [biome-fallback:...] 决定 biome 行没覆盖到的高度怎么办（默认 none）：
       [biome-fallback:none] 不接管：biome 行必须覆盖整个维度，否则解析报错
       [biome-fallback:3d]   按实际高度交还原版（保留原版纵向分布：地表群系带、
