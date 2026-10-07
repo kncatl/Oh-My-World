@@ -350,4 +350,83 @@ class FormulaParserTest {
         assertTrue(unknown.errors().stream().anyMatch(e -> e.contains("Unknown variable: zzz")),
                 unknown.errors().toString());
     }
+
+    /** 群系行：简写 / 分层 / 共享 let / fallback 指令。 */
+    @Test
+    void biomeLinesParse() {
+        FormulaParser.DimensionParseResult shorthand = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: minecraft:desert; y=0: rand()}");
+        assertTrue(shorthand.errors().isEmpty(), shorthand.errors().toString());
+        FormulaParser.ParsedDimension overworld = shorthand.dimensions().get(FormulaParser.DIM_OVERWORLD);
+        assertEquals(1, overworld.biomeLayers().size());
+        assertTrue(overworld.biomeLayers().get(0).shorthand());
+        assertSame(DimensionRules.BiomeFallback.NONE, overworld.biomeFallback());
+
+        FormulaParser.DimensionParseResult layered = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d]"
+                        + " let warm = seedhash(x, z, 3);"
+                        + " biome: warm < 0.5 ? minecraft:desert : minecraft:plains;"
+                        + " biome y=0..320: warm < 0.3 ? minecraft:swamp : minecraft:forest;"
+                        + " y=0: rand()}");
+        assertTrue(layered.errors().isEmpty(), layered.errors().toString());
+        overworld = layered.dimensions().get(FormulaParser.DIM_OVERWORLD);
+        assertEquals(2, overworld.biomeLayers().size());
+        assertTrue(overworld.biomeLayers().get(0).shorthand());
+        assertFalse(overworld.biomeLayers().get(1).shorthand());
+        assertEquals(0, overworld.biomeLayers().get(1).yStart());
+        assertEquals(320, overworld.biomeLayers().get(1).yEnd());
+        assertSame(DimensionRules.BiomeFallback.THREE_D, overworld.biomeFallback());
+    }
+
+    /** 群系行/指令的错误路径：未知群系、rand、返回数字、互斥、缺行、非法模式。 */
+    @Test
+    void biomeLinesReportErrors() {
+        FormulaParser.DimensionParseResult unknown = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: minecraft:not_a_biome; y=0: rand()}");
+        assertTrue(unknown.errors().stream().anyMatch(e -> e.contains("Unknown biome: minecraft:not_a_biome")),
+                unknown.errors().toString());
+
+        FormulaParser.DimensionParseResult rand = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: rand(); y=0: rand()}");
+        assertTrue(rand.errors().stream().anyMatch(e -> e.contains("cannot be used in a biome expression")),
+                rand.errors().toString());
+
+        FormulaParser.DimensionParseResult number = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: 1 + 2; y=0: rand()}");
+        assertTrue(number.errors().stream().anyMatch(e -> e.contains("must return a biome")),
+                number.errors().toString());
+
+        FormulaParser.DimensionParseResult conflict = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:vanilla] biome: minecraft:desert; y=0: rand()}");
+        assertTrue(conflict.errors().stream().anyMatch(e -> e.contains("cannot be combined with biome lines")),
+                conflict.errors().toString());
+
+        FormulaParser.DimensionParseResult dangling = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:2d] y=0: rand()}");
+        assertTrue(dangling.errors().stream().anyMatch(e -> e.contains("requires at least one biome line")),
+                dangling.errors().toString());
+
+        FormulaParser.DimensionParseResult mode = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:2D] y=0: rand()}");
+        assertTrue(mode.errors().stream().anyMatch(e -> e.contains("invalid biome-fallback mode")),
+                mode.errors().toString());
+    }
+
+    /** fallback=none（缺省）要求群系行覆盖整维；简写与多段拼接都可以。 */
+    @Test
+    void biomeFallbackNoneRequiresFullCoverage() {
+        FormulaParser.DimensionParseResult gap = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome y=0..319: minecraft:plains; y=0: rand()}");
+        assertTrue(gap.errors().stream().anyMatch(e -> e.contains("must cover the whole dimension")),
+                gap.errors().toString());
+
+        FormulaParser.DimensionParseResult stitched = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome y=-64..0: minecraft:deep_dark; biome y=1..319: minecraft:plains; y=0: rand()}");
+        assertTrue(stitched.errors().isEmpty(), stitched.errors().toString());
+
+        FormulaParser.DimensionParseResult topLevel = FormulaParser.parseDimensionsWithErrors(
+                "biome y=0..319: minecraft:plains; y=0: rand()");
+        assertTrue(topLevel.errors().stream().anyMatch(e -> e.contains("must cover the whole dimension")),
+                topLevel.errors().toString());
+    }
 }

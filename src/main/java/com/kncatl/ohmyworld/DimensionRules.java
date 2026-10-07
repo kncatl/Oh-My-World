@@ -57,6 +57,16 @@ public final class DimensionRules {
         }
     }
 
+    /**
+     * 公式群系未覆盖位置的回退方式（{@code [biome-fallback:none|2d|3d]}，缺省 none）。
+     *
+     * <p>none 要求 biome 行覆盖整个维度（解析期检查）；2d 按"参考 y"（公式地形表面）
+     * 采样原版一次后覆盖整列；3d 按实际 y 采样原版（保留原版纵向分层，如洞穴群系）。
+     */
+    public enum BiomeFallback {
+        NONE, TWO_D, THREE_D
+    }
+
     /** 规范化名称：去掉 {@code minecraft:} 前缀，其余命名空间保留。 */
     public static String normalizeName(String name) {
         String s = name.trim();

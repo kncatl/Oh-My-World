@@ -22,16 +22,23 @@ public class FormulaParser {
     public static final int MAX_INPUT_LENGTH = 1_048_576;
     private static final int MAX_LAYERS = 65_536;
 
-    public record ParseResult(List<Object> layers, List<String> errors) {}
+    public record ParseResult(List<Object> layers, List<String> errors,
+                              List<BiomeLayerDef> biomeLayers) {}
 
     /** 维度节的规范名（{@link DimensionParseResult} 与 PatternData 的键）。 */
     public static final String DIM_OVERWORLD = "overworld";
     public static final String DIM_NETHER = "the_nether";
     public static final String DIM_END = "the_end";
 
-    /** 解析出的单个维度：层表 + 可选指令（别名与目标共享同一实例）。 */
+    /**
+     * 解析出的单个维度：层表 + 群系层 + 可选指令（别名与目标共享同一实例）。
+     * {@code biomeLayers} 非空表示该维度使用公式群系；{@code biomeFallback} 只在
+     * 公式群系下有实际作用（缺省 none）。
+     */
     public record ParsedDimension(List<Object> layers, DimensionRules.StructureRule structure,
-                                  DimensionRules.BiomeRule biome, boolean featuresOff) {}
+                                  DimensionRules.BiomeRule biome, boolean featuresOff,
+                                  List<BiomeLayerDef> biomeLayers,
+                                  DimensionRules.BiomeFallback biomeFallback) {}
 
     /**
      * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
@@ -105,12 +112,22 @@ public class FormulaParser {
         if (cleaned.trim().startsWith("{")) return parseSections(cleaned.trim());
 
         ParseResult result = parseLayers(cleaned);
+        List<String> errors = new ArrayList<>(result.errors());
         Map<String, ParsedDimension> dimensions = new LinkedHashMap<>();
-        if (result.errors().isEmpty() && !result.layers().isEmpty()) {
-            dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
-                    DimensionRules.StructureRule.ALL, null, false));
+        if (errors.isEmpty() && !result.layers().isEmpty()) {
+            // 顶格写法无法声明 [biome-fallback:...]，等价于 none：biome 行必须覆盖整维。
+            Integer gap = firstUncoveredY(DIM_OVERWORLD, result.biomeLayers());
+            if (gap != null) {
+                errors.add("Biome lines must cover the whole dimension when biome-fallback is off; y=" + gap
+                        + ".." + vanillaMaxY(DIM_OVERWORLD)
+                        + " is uncovered (use dimension sections with [biome-fallback:2d|3d] to fall back)");
+            } else {
+                dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
+                        DimensionRules.StructureRule.ALL, null, false, result.biomeLayers(),
+                        DimensionRules.BiomeFallback.NONE));
+            }
         }
-        return new DimensionParseResult(Map.copyOf(dimensions), result.errors(), false);
+        return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), false);
     }
 
     /** 分节语法：{dim=...}{dim=...}；节间允许空白或 ';'，节内容=层语法或维度别名。 */
@@ -196,9 +213,11 @@ public class FormulaParser {
         // 可选指令：[structure:...] / [biome:...] / [features:...]，可各出现一次、顺序任意，之后必须是层语法。
         DimensionRules.StructureRule structure = DimensionRules.StructureRule.ALL;
         DimensionRules.BiomeRule biome = null;
+        DimensionRules.BiomeFallback biomeFallback = DimensionRules.BiomeFallback.NONE;
         boolean featuresOff = false;
         boolean structureSeen = false;
         boolean biomeSeen = false;
+        boolean biomeFallbackSeen = false;
         boolean featuresSeen = false;
         int pos = 0;
         while (true) {
@@ -227,6 +246,15 @@ public class FormulaParser {
                 biomeSeen = true;
                 biome = parseBiomeDirective(directive.substring("biome:".length()), name, errors);
                 if (biome == null) return;
+            } else if (directive.startsWith("biome-fallback:")) {
+                if (biomeFallbackSeen) {
+                    errors.add(name + ": duplicate biome-fallback directive");
+                    return;
+                }
+                biomeFallbackSeen = true;
+                biomeFallback = parseBiomeFallbackDirective(
+                        directive.substring("biome-fallback:".length()), name, errors);
+                if (biomeFallback == null) return;
             } else if (directive.startsWith("features:")) {
                 if (featuresSeen) {
                     errors.add(name + ": duplicate features directive");
@@ -238,7 +266,7 @@ public class FormulaParser {
                 featuresOff = off;
             } else {
                 errors.add(name + ": unknown directive [" + truncate(directive)
-                        + "] (available: structure, biome, features)");
+                        + "] (available: structure, biome, biome-fallback, features)");
                 return;
             }
         }
@@ -250,8 +278,28 @@ public class FormulaParser {
         }
         ParseResult result = parseLayers(layerText);
         for (String error : result.errors()) errors.add(name + ": " + error);
-        if (result.errors().isEmpty() && !result.layers().isEmpty()) {
-            dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff));
+        if (!result.errors().isEmpty()) return;
+
+        if (biome != null && !result.biomeLayers().isEmpty()) {
+            errors.add(name + ": [biome:...] cannot be combined with biome lines");
+            return;
+        }
+        if (biomeFallback != DimensionRules.BiomeFallback.NONE && result.biomeLayers().isEmpty()) {
+            errors.add(name + ": biome-fallback requires at least one biome line");
+            return;
+        }
+        if (biomeFallback == DimensionRules.BiomeFallback.NONE) {
+            Integer gap = firstUncoveredY(name, result.biomeLayers());
+            if (gap != null) {
+                errors.add(name + ": biome lines must cover the whole dimension when biome-fallback is off; y="
+                        + gap + ".." + vanillaMaxY(name)
+                        + " is uncovered (or use [biome-fallback:2d|3d])");
+                return;
+            }
+        }
+        if (!result.layers().isEmpty()) {
+            dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff,
+                    result.biomeLayers(), biomeFallback));
         }
     }
 
@@ -308,11 +356,23 @@ public class FormulaParser {
         }
         if (a.equals("vanilla")) return DimensionRules.BiomeRule.VANILLA;
         String normalized = DimensionRules.normalizeName(a);
-        if (!normalized.contains(":") && !KNOWN_BIOME_NAMES.contains(normalized)) {
+        if (!isKnownBiome(a)) {
             errors.add(dimension + ": unknown biome \"" + a + "\" (see the guide for available names)");
             return null;
         }
         return DimensionRules.BiomeRule.single(normalized);
+    }
+
+    /** [biome-fallback:none|2d|3d]。 */
+    private static DimensionRules.BiomeFallback parseBiomeFallbackDirective(String arg, String dimension,
+                                                                            List<String> errors) {
+        String a = arg.trim();
+        if (a.equals("none")) return DimensionRules.BiomeFallback.NONE;
+        if (a.equals("2d")) return DimensionRules.BiomeFallback.TWO_D;
+        if (a.equals("3d")) return DimensionRules.BiomeFallback.THREE_D;
+        errors.add(dimension + ": invalid biome-fallback mode \"" + truncate(a)
+                + "\" (available: none, 2d, 3d)");
+        return null;
     }
 
     /** [features:all|none]；返回 true 表示 none（关闭装饰特性）。 */
@@ -376,6 +436,7 @@ public class FormulaParser {
     private static ParseResult parseLayers(String cleaned) {
         List<Object> layers = new ArrayList<>();
         List<String> errors = new ArrayList<>();
+        List<BiomeLayerDef> biomeLayers = new ArrayList<>();
         String[] lines = smartSplit(cleaned);
 
         // 第一遍：收集共享节级 let（`let 名称 = 表达式`），供本段所有层/群系行复用。
@@ -390,10 +451,10 @@ public class FormulaParser {
                 errors.add("Shared let (segment " + (lineIdx + 1) + "): " + e.getMessage());
             }
         }
-        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors));
+        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of());
 
         for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-            if (layers.size() + errors.size() >= MAX_LAYERS) {
+            if (layers.size() + biomeLayers.size() + errors.size() >= MAX_LAYERS) {
                 errors.add("Formula contains too many layers; maximum is " + MAX_LAYERS);
                 break;
             }
@@ -401,6 +462,10 @@ public class FormulaParser {
             if (line.isEmpty() || isSharedLet(line)) continue;
 
             try {
+                if (isBiomeLine(line)) {
+                    parseBiomeLayer(line, lineIdx, shared, biomeLayers, errors);
+                    continue;
+                }
                 int colonIdx = findColon(line);
                 if (colonIdx < 0) {
                     errors.add(layerError(lineIdx, "missing range separator ':'", line));
@@ -450,7 +515,7 @@ public class FormulaParser {
                     // 这里顺带修掉那个盲区）。
                     List<String> valErrors = new ArrayList<>();
                     for (CyclicEntry e : srcEntries) {
-                        ExprEvaluator.ValueType type = validateNode(e.expression(), valErrors, new HashMap<>());
+                        ExprEvaluator.ValueType type = validateNode(e.expression(), valErrors, new HashMap<>(), false);
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                             valErrors.add("Cyclic layer expression must return a block, got " + type);
                         }
@@ -468,7 +533,7 @@ public class FormulaParser {
                 } else {
                     ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(exprPart)).parse());
                     List<String> valErrors = new ArrayList<>();
-                    ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>());
+                    ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), false);
                     if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                         valErrors.add("Layer expression must return a block, got " + type);
                     }
@@ -487,8 +552,12 @@ public class FormulaParser {
                 errors.add(layerError(lineIdx, e.getMessage(), line));
             }
         }
-        if (layers.isEmpty() && errors.isEmpty()) errors.add("Formula contains no layers");
-        return new ParseResult(List.copyOf(layers), List.copyOf(errors));
+        if (layers.isEmpty() && errors.isEmpty()) {
+            errors.add(biomeLayers.isEmpty()
+                    ? "Formula contains no layers"
+                    : "Formula contains biome lines but no block layers");
+        }
+        return new ParseResult(List.copyOf(layers), List.copyOf(errors), List.copyOf(biomeLayers));
     }
 
     public static List<Object> parse(String input) {
@@ -498,7 +567,7 @@ public class FormulaParser {
     }
 
     private static ParseResult invalid(String error) {
-        return new ParseResult(List.of(), List.of(error));
+        return new ParseResult(List.of(), List.of(error), List.of());
     }
 
     private static String layerError(int lineIdx, String msg, String line) {
@@ -509,9 +578,135 @@ public class FormulaParser {
         return s.length() <= 60 ? s : s.substring(0, 57) + "...";
     }
 
-    /** 语义校验：同时推导表达式类型，避免非法结果在运行时静默变成空气。 */
+    // ---------------------------------------------------------------- 群系行
+
+    /** 段是否是群系行：`biome` 后不跟标识符字符（空白 / `:` / 行尾都算）。 */
+    private static boolean isBiomeLine(String line) {
+        if (!line.startsWith("biome")) return false;
+        if (line.length() == 5) return true;
+        char c = line.charAt(5);
+        return !(Character.isLetterOrDigit(c) || c == '_');
+    }
+
+    /** 群系行的语义错误前缀（与方块层错误区分，便于在编辑器里定位）。 */
+    private static String biomeError(int lineIdx, String msg, String line) {
+        return "Biome layer " + (lineIdx + 1) + ": " + msg + " in \"" + truncate(line) + "\"";
+    }
+
+    /** 群系字面量是否在编译期名单内（裸名查名单；带命名空间放行，运行时再向注册表解析）。 */
+    private static boolean isKnownBiome(String biomeId) {
+        String normalized = DimensionRules.normalizeName(biomeId);
+        return normalized.contains(":") || KNOWN_BIOME_NAMES.contains(normalized);
+    }
+
+    /** 原版维度最低高度（含）。分节语法只支持原版三维度，与预览的假设一致。 */
+    public static int vanillaMinY(String dimension) {
+        return DIM_OVERWORLD.equals(dimension) ? -64 : 0;
+    }
+
+    /** 原版维度最高高度（含）。 */
+    public static int vanillaMaxY(String dimension) {
+        return DIM_OVERWORLD.equals(dimension) ? 319 : 255;
+    }
+
+    /**
+     * biome-fallback=none 的覆盖检查：返回第一个未被任何群系行覆盖的 y；
+     * 空表或已覆盖整维返回 null（简写行覆盖整维）。
+     */
+    private static Integer firstUncoveredY(String dimension, List<BiomeLayerDef> biomeLayers) {
+        if (biomeLayers.isEmpty()) return null;
+        int min = vanillaMinY(dimension);
+        int max = vanillaMaxY(dimension);
+        List<int[]> ranges = new ArrayList<>();
+        for (BiomeLayerDef layer : biomeLayers) {
+            if (layer.shorthand()) return null;
+            ranges.add(new int[] {layer.yStart(), layer.yEnd()});
+        }
+        ranges.sort((a, b) -> Integer.compare(a[0], b[0]));
+        int cursor = min;
+        for (int[] range : ranges) {
+            if (range[1] < cursor) continue;
+            if (range[0] > cursor) return cursor;
+            if (range[1] >= max) return null;
+            cursor = range[1] + 1;
+        }
+        return cursor <= max ? cursor : null;
+    }
+
+    /** 解析一行群系层：{@code biome: 表达式}（整维简写）或 {@code biome y=a..b: 表达式}。 */
+    private static void parseBiomeLayer(String line, int lineIdx, List<ExprNode.LetBinding> shared,
+                                        List<BiomeLayerDef> biomeLayers, List<String> errors) {
+        try {
+            String rest = line.substring("biome".length()).trim();
+            boolean shorthand;
+            int yStart;
+            int yEnd;
+            String exprPart;
+            if (rest.startsWith(":")) {
+                shorthand = true;
+                yStart = Integer.MIN_VALUE;
+                yEnd = Integer.MAX_VALUE;
+                exprPart = rest.substring(1).trim();
+            } else {
+                if (!rest.startsWith("y")) {
+                    throw new IllegalArgumentException("expected 'biome:' or 'biome y=a..b:'");
+                }
+                shorthand = false;
+                int colonIdx = findColon(rest);
+                if (colonIdx < 0) throw new IllegalArgumentException("missing range separator ':'");
+                String rangePart = rest.substring(0, colonIdx).trim();
+                exprPart = rest.substring(colonIdx + 1).trim();
+                int eqIdx = rangePart.indexOf('=');
+                if (eqIdx < 0) throw new IllegalArgumentException("missing '=' in range \"" + rangePart + "\"");
+                String varName = rangePart.substring(0, eqIdx).trim();
+                if (!varName.equals("y")) {
+                    throw new IllegalArgumentException("only 'y' is supported as layer axis, got \"" + varName + "\"");
+                }
+                String valuePart = rangePart.substring(eqIdx + 1).trim();
+                int dotsIdx = valuePart.indexOf("..");
+                if (dotsIdx >= 0) {
+                    yStart = Integer.parseInt(valuePart.substring(0, dotsIdx).trim());
+                    yEnd = Integer.parseInt(valuePart.substring(dotsIdx + 2).trim());
+                } else {
+                    yStart = yEnd = Integer.parseInt(valuePart);
+                }
+                if (yStart > yEnd) {
+                    throw new IllegalArgumentException("range start " + yStart + " is greater than end " + yEnd);
+                }
+            }
+            if (exprPart.isEmpty()) throw new IllegalArgumentException("empty expression after ':'");
+
+            ExprNode expr = wrapShared(shared, new ExprParser(ExprLexer.tokenize(exprPart)).parse());
+            List<String> valErrors = new ArrayList<>();
+            ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), true);
+            if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
+                valErrors.add("Biome layer expression must return a biome, got " + type);
+            }
+            if (!valErrors.isEmpty()) {
+                for (String ve : valErrors) errors.add(biomeError(lineIdx, ve, line));
+                return;
+            }
+            // 与方块层同理：「是否与 y 相关」必须在编译前判定（编译后变量变成槽位下标）。
+            boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
+            biomeLayers.add(new BiomeLayerDef(yStart, yEnd, shorthand,
+                    ExprCompiler.compile(expr), !lyDependent));
+        } catch (StackOverflowError e) {
+            errors.add(biomeError(lineIdx, "expression nesting is too deep", line));
+        } catch (Exception e) {
+            errors.add(biomeError(lineIdx, e.getMessage(), line));
+        }
+    }
+
+    /**
+     * 语义校验：同时推导表达式类型，避免非法结果在运行时静默变成空气。
+     *
+     * <p>{@code biomeMode=true} 时按"群系表达式"校验：字面量查群系名单（带命名空间
+     * 放行、运行期再向注册表解析）、rand/randexcept 不可用，其余规则一致；群系值
+     * 沿用 {@code BLOCK} 类型槽位表示"不可参与算术的不透明值"。
+     */
     private static ExprEvaluator.ValueType validateNode(ExprNode node, List<String> errors,
-                                                        Map<String, ExprEvaluator.ValueType> variables) {
+                                                        Map<String, ExprEvaluator.ValueType> variables,
+                                                        boolean biomeMode) {
         switch (node) {
             case ExprNode.NumberNode n -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.VariableNode v -> {
@@ -521,6 +716,13 @@ public class FormulaParser {
                 return ExprEvaluator.ValueType.UNKNOWN;
             }
             case ExprNode.BlockNode b -> {
+                if (biomeMode) {
+                    if (!isKnownBiome(b.blockId())) {
+                        errors.add("Unknown biome: " + b.blockId());
+                        return ExprEvaluator.ValueType.UNKNOWN;
+                    }
+                    return ExprEvaluator.ValueType.BLOCK;
+                }
                 if (!BlockResolver.exists(b.blockId())) {
                     errors.add("Unknown block: " + b.blockId());
                     return ExprEvaluator.ValueType.UNKNOWN;
@@ -528,8 +730,8 @@ public class FormulaParser {
                 return ExprEvaluator.ValueType.BLOCK;
             }
             case ExprNode.BinaryNode bn -> {
-                ExprEvaluator.ValueType left = validateNode(bn.left(), errors, variables);
-                ExprEvaluator.ValueType right = validateNode(bn.right(), errors, variables);
+                ExprEvaluator.ValueType left = validateNode(bn.left(), errors, variables, biomeMode);
+                ExprEvaluator.ValueType right = validateNode(bn.right(), errors, variables, biomeMode);
                 return switch (bn.op()) {
                     case ADD, SUB, MUL, DIV, MOD -> {
                         requireNumber(left, "left operand of " + bn.op(), errors);
@@ -555,7 +757,7 @@ public class FormulaParser {
                 };
             }
             case ExprNode.UnaryNode u -> {
-                ExprEvaluator.ValueType operand = validateNode(u.operand(), errors, variables);
+                ExprEvaluator.ValueType operand = validateNode(u.operand(), errors, variables, biomeMode);
                 if (u.op() == ExprNode.UnaryOp.NOT) {
                     requireCondition(operand, "operand of !", errors);
                     return ExprEvaluator.ValueType.BOOLEAN;
@@ -564,10 +766,10 @@ public class FormulaParser {
                 return ExprEvaluator.ValueType.NUMBER;
             }
             case ExprNode.ConditionalNode c -> {
-                ExprEvaluator.ValueType condition = validateNode(c.condition(), errors, variables);
+                ExprEvaluator.ValueType condition = validateNode(c.condition(), errors, variables, biomeMode);
                 requireCondition(condition, "ternary condition", errors);
-                ExprEvaluator.ValueType thenType = validateNode(c.thenExpr(), errors, variables);
-                ExprEvaluator.ValueType elseType = validateNode(c.elseExpr(), errors, variables);
+                ExprEvaluator.ValueType thenType = validateNode(c.thenExpr(), errors, variables, biomeMode);
+                ExprEvaluator.ValueType elseType = validateNode(c.elseExpr(), errors, variables, biomeMode);
                 if (thenType != ExprEvaluator.ValueType.UNKNOWN && elseType != ExprEvaluator.ValueType.UNKNOWN && thenType != elseType) {
                     errors.add("Ternary branches must return the same type, got " + thenType + " and " + elseType);
                     return ExprEvaluator.ValueType.UNKNOWN;
@@ -575,15 +777,20 @@ public class FormulaParser {
                 return thenType == ExprEvaluator.ValueType.UNKNOWN ? elseType : thenType;
             }
             case ExprNode.FuncCallNode f -> {
+                if (biomeMode && (f.name().equals("rand") || f.name().equals("randexcept"))) {
+                    errors.add("Function '" + f.name() + "' cannot be used in a biome expression");
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, true);
+                    return ExprEvaluator.ValueType.UNKNOWN;
+                }
                 String msg = ExprEvaluator.validateFunction(f.name(), f.args().size());
                 if (msg != null) {
                     errors.add(msg);
-                    for (ExprNode a : f.args()) validateNode(a, errors, variables);
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
                 if (f.name().equals("rand") || f.name().equals("randexcept")) {
                     for (ExprNode a : f.args()) {
-                        ExprEvaluator.ValueType type = validateNode(a, errors, variables);
+                        ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode);
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                             errors.add("Function '" + f.name() + "' expects block arguments, got " + type);
                         }
@@ -591,7 +798,7 @@ public class FormulaParser {
                     return ExprEvaluator.ValueType.BLOCK;
                 }
                 for (ExprNode a : f.args()) {
-                    ExprEvaluator.ValueType type = validateNode(a, errors, variables);
+                    ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode);
                     requireNumber(type, "argument of " + f.name(), errors);
                 }
                 return ExprEvaluator.ValueType.NUMBER;
@@ -599,9 +806,9 @@ public class FormulaParser {
             case ExprNode.BlockExprNode be -> {
                 Map<String, ExprEvaluator.ValueType> local = new HashMap<>(variables);
                 for (ExprNode.LetBinding lb : be.bindings()) {
-                    local.put(lb.name(), validateNode(lb.value(), errors, local));
+                    local.put(lb.name(), validateNode(lb.value(), errors, local, biomeMode));
                 }
-                return validateNode(be.body(), errors, local);
+                return validateNode(be.body(), errors, local, biomeMode);
             }
             // 以下是编译后的形态。语义校验发生在编译之前（见本文件的处理顺序），
             // 因此这几个分支实际不会走到；这里只是为了让 switch 穷尽。
