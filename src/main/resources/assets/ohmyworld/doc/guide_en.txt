@@ -487,7 +487,11 @@ Default preset:
       cached per column automatically);
     · use seedhash/rand for per-block speckle, noise/fbm/worley for smooth shapes;
     · always keep the "original block" branch in cave recipes — a column of air
-      would erase the terrain.
+      would erase the terrain;
+    · the editor preview renders with the current seed: while the seed is not
+      fixed yet (world-creation screen), the preview may differ from the final
+      world; after entering a world the preview matches the real seed. The same
+      applies to rand()/seedhash.
 
 
 7. Blocks
