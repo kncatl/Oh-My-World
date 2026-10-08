@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.0-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Tuple let and multi-return functions**: `let (u, v) = warp2(...)` receives several values from one call — `warp2`/`warp3` (domain-warp displacements), `noise2g` (noise + analytic gradient), `worley2c` (F1/F2, per-cell random value and the nearest feature point) and `grad` (central-difference gradient of any expression). Components share the usual "independent of height" check: when they do not use `ly`, the whole call is evaluated once per column.
+- **Noise variants**: 7-argument `fbm2` (tunable lacunarity/gain plus per-octave lattice offsets that break the axial grid feel), `fbma2` (custom amplitude list), `ridged2`/`billow2` (ridged/billowy multifractals) and `fbm2e` (gradient-damped fbm: detail is suppressed on steep slopes; `k=0` equals `fbm2`).
+- **Math helpers**: `atan2`, `fract`, `step`, `smootherstep`, `tanh`, `hypot`, `bias`, `gain`, `saturate`, `select`, `terrace`; `min`/`max` now fold over any number of arguments.
+- **Loop and spatial helpers**: `sum(k, a, b, expr)` expands a compile-time loop sum (`min`/`max` have the same loop form; up to 64 iterations each, nested total up to 64); `shift(expr, dx, dz)` substitutes `x`/`z` inside the expression.
+- **Spatial helpers**: `slope` (gradient magnitude), `curv` (Laplacian) and `isodist` (distance estimate to the zero contour), all with 1-block central differences — combine them with `grad` for eroded terrain and river carving.
+- Guides (zh/en) document all of the above with examples; new `m1` smoke mode for the toolchain.
+
+### Notes
+- All new algorithms are frozen from this release (golden-sample tests lock them in): the same formula + seed generates the same world in every version.
+- Old formulas are unchanged.
+
 ## v1.2.6-beta.3
 
 > Beta release — please report any issue on GitHub.
