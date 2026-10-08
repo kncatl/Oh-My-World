@@ -23,12 +23,12 @@ class ClimateExprTest {
         return ((Number) ExprEvaluator.evalAt(node, x, z, 0, y)).doubleValue();
     }
 
-    private static void withView(ExprEvaluator.ClimateView view, Runnable body) {
-        ExprEvaluator.setClimateView(view);
+    private static void withView(ExprEvaluator.VanillaView view, Runnable body) {
+        ExprEvaluator.setVanillaView(view);
         try {
             body.run();
         } finally {
-            ExprEvaluator.setClimateView(null);
+            ExprEvaluator.setVanillaView(null);
         }
     }
 

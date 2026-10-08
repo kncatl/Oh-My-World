@@ -64,7 +64,7 @@ public class PatternData {
      * 生成器 → 共享气候视图（M3）：只在该维度公式用到 climate() 时登记；
      * 与生成器同生命周期（WeakHashMap）。热加载不会改变视图（RandomState 与公式无关）。
      */
-    private static final Map<ChunkGenerator, ExprEvaluator.ClimateView> CLIMATE_VIEWS = new WeakHashMap<>();
+    private static final Map<ChunkGenerator, ExprEvaluator.VanillaView> VANILLA_VIEWS = new WeakHashMap<>();
 
     /** 一条绑定：该生成器属于哪个维度、生效哪份公式。 */
     public record GeneratorBinding(ResourceKey<Level> dimension, PatternSnapshot snapshot) {}
@@ -199,18 +199,18 @@ public class PatternData {
     }
 
     /** 登记/清除某生成器的共享气候视图（null = 清除）。 */
-    public static void bindClimate(ChunkGenerator generator, ExprEvaluator.ClimateView view) {
+    public static void bindVanillaView(ChunkGenerator generator, ExprEvaluator.VanillaView view) {
         if (generator == null) return;
-        synchronized (CLIMATE_VIEWS) {
-            if (view == null) CLIMATE_VIEWS.remove(generator);
-            else CLIMATE_VIEWS.put(generator, view);
+        synchronized (VANILLA_VIEWS) {
+            if (view == null) VANILLA_VIEWS.remove(generator);
+            else VANILLA_VIEWS.put(generator, view);
         }
     }
 
     /** 该生成器的气候视图；未登记 → null（climate() 返回 0）。 */
-    public static ExprEvaluator.ClimateView climateFor(ChunkGenerator generator) {
-        synchronized (CLIMATE_VIEWS) {
-            return CLIMATE_VIEWS.get(generator);
+    public static ExprEvaluator.VanillaView vanillaViewFor(ChunkGenerator generator) {
+        synchronized (VANILLA_VIEWS) {
+            return VANILLA_VIEWS.get(generator);
         }
     }
 
@@ -290,8 +290,8 @@ public class PatternData {
             GENERATOR_PATTERNS.remove(generator);
             anyGeneratorBound = !GENERATOR_PATTERNS.isEmpty();
         }
-        synchronized (CLIMATE_VIEWS) {
-            CLIMATE_VIEWS.remove(generator);
+        synchronized (VANILLA_VIEWS) {
+            VANILLA_VIEWS.remove(generator);
         }
     }
 
@@ -300,8 +300,8 @@ public class PatternData {
             GENERATOR_PATTERNS.clear();
             anyGeneratorBound = false;
         }
-        synchronized (CLIMATE_VIEWS) {
-            CLIMATE_VIEWS.clear();
+        synchronized (VANILLA_VIEWS) {
+            VANILLA_VIEWS.clear();
         }
     }
 
@@ -404,16 +404,16 @@ public class PatternData {
      * 表面通道（surface 行）也在此阶段应用（地形铺完之后、雕刻与特征之前）。
      */
     public static void fillChunk(ChunkAccess chunk, PatternSnapshot snapshot,
-                                 ExprEvaluator.ClimateView climate) {
+                                 ExprEvaluator.VanillaView climate) {
         ExprEvaluator.BiomeView savedBiome = ExprEvaluator.biomeView();
-        ExprEvaluator.ClimateView savedClimate = ExprEvaluator.climateView();
+        ExprEvaluator.VanillaView savedClimate = ExprEvaluator.vanillaView();
         ExprEvaluator.setBiomeView(biomeViewFor(chunk));
-        ExprEvaluator.setClimateView(climate);
+        ExprEvaluator.setVanillaView(climate);
         try {
             fillChunkInternal(chunk, snapshot);
         } finally {
             ExprEvaluator.setBiomeView(savedBiome);
-            ExprEvaluator.setClimateView(savedClimate);
+            ExprEvaluator.setVanillaView(savedClimate);
         }
     }
 

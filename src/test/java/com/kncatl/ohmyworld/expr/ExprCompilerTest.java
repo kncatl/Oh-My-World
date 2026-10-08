@@ -79,6 +79,9 @@ class ExprCompilerTest {
             "{ let (d, w, s, o) = rivernet(192, 7); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
             // 1.3.2：共享气候（无视图 → 0；编译/未编译一致）
             "{ let t = climate(temperature, x, z) * 2 + climate(weirdness, x, 100, z); t }",
+            // 1.3.2：注册表密度函数 / 噪声（无视图 → 0；编译/未编译一致）
+            "df(minecraft:overworld/ridges, x, y, z) * 0.5 + df(minecraft:overworld/ridges, z, y, x)",
+            "noise(minecraft:temperature, x, y, z) + noise(minecraft:temperature, x, y, z, 0.5)",
     };
 
     private static String describe(Object value) {

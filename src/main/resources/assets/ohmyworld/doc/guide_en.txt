@@ -538,6 +538,20 @@ Default preset:
     ★ The editor preview builds the climate locally from the creation screen's seed
       (matching the final world); contexts without a climate view return 0.
 
+  -- Vanilla density functions / noises (M3; generation and the editor preview) --
+  df(id, x, y, z)              evaluate a registered density function
+                               (e.g. minecraft:overworld/ridges; single-point)
+  noise(id, x, y, z[, xzScale[, yScale]])
+                               evaluate a registered noise (e.g. minecraft:temperature);
+                               xzScale applies to x/z, yScale to y only (default 1)
+
+    ★ Ids need a namespace (datapack entries work too); missing entries return 0 and
+      are logged once per id.
+    ★ Single-point evaluation has no vanilla caching -- calling it per block is very
+      slow. Always wrap it in cache2d/cache3d, e.g.
+      cache2d(df(minecraft:overworld/ridges, x, y, z), 4).
+    ★ Values follow the dimension's noise settings and seed (same as the F3 entry).
+
 
 5. Expression Examples
 

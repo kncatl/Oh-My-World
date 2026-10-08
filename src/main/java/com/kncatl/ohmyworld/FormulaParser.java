@@ -1013,6 +1013,10 @@ public class FormulaParser {
                     validateClimateCall(f, errors, variables, biomeMode);
                     return ExprEvaluator.ValueType.NUMBER;
                 }
+                if (f.name().equals("df") || f.name().equals("noise")) {
+                    validateRegistryCall(f, errors, variables, biomeMode);
+                    return ExprEvaluator.ValueType.NUMBER;
+                }
                 boolean terrainQuery = isTerrainQueryFunction(f.name());
                 if (terrainQuery && !biomeMode) {
                     errors.add("Function '" + f.name() + "' can only be used in biome lines");
@@ -1306,13 +1310,35 @@ public class FormulaParser {
         }
     }
 
-    /** 需要原版数据的功能（M3；后续 df/noise/vheight 等一并加入）。 */
-    private static final Set<String> VANILLA_DATA_FUNCTIONS = Set.of("climate");
+    /** df()/noise() 的专项校验：首参必须是带命名空间的注册名字面量（运行期再查注册表）。 */
+    private static void validateRegistryCall(ExprNode.FuncCallNode f, List<String> errors,
+                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+        String arity = ExprEvaluator.validateFunction(f.name(), f.args().size());
+        if (arity != null) {
+            // 只报个数错误：首参是注册名不是方块，不能走通用的方块存在性校验
+            errors.add(arity);
+            return;
+        }
+        ExprNode id = f.args().get(0);
+        if (!(id instanceof ExprNode.BlockNode)) {
+            errors.add("Function '" + f.name() + "': the first argument must be a namespaced registry id "
+                    + "(e.g. minecraft:overworld/ridges)");
+        }
+        for (int i = 1; i < f.args().size(); i++) {
+            requireNumber(validateNode(f.args().get(i), errors, variables, biomeMode),
+                    "argument of " + f.name(), errors);
+        }
+    }
+
+    /** 需要原版数据的功能（M3；后续 vheight 等一并加入）。 */
+    private static final Set<String> VANILLA_DATA_FUNCTIONS = Set.of("climate", "df", "noise");
 
     /** 表达式是否用到需要原版数据的功能（按名字查未编译调用、按编号查编译后调用）。 */
     private static boolean usesVanillaData(ExprNode node) {
         return walkFunctions(node, VANILLA_DATA_FUNCTIONS::contains,
-                id -> id == ExprEvaluator.FN_CLIMATE);
+                id -> id == ExprEvaluator.FN_CLIMATE
+                        || id == ExprEvaluator.FN_DF
+                        || id == ExprEvaluator.FN_NOISE);
     }
 
     /** 某维度的解析结果是否用到需要原版数据的功能（方块层 / 循环层 / biome 行 / surface 行）。 */
@@ -1656,7 +1682,7 @@ public class FormulaParser {
         return rewriteClimateFields(expandLoops(node, 1));
     }
 
-    /** climate() 的字段名 → 序号（与 {@code ExprEvaluator.ClimateView} 的字段码一致）。 */
+    /** climate() 的字段名 → 序号（与 {@code ExprEvaluator.VanillaView} 的字段码一致）。 */
     private static Integer climateFieldCode(String name) {
         return ExprEvaluator.climateFieldCode(name);
     }

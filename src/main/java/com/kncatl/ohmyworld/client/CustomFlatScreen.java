@@ -74,8 +74,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private final CreateWorldScreen parent;
     /** 创建界面上下文（世界生成注册表 + 种子；构造后可空，用于预览的气候视图）。 */
     private final WorldCreationContext creationContext;
-    private long previewClimateSeed = Long.MIN_VALUE;
-    private final java.util.Map<String, ExprEvaluator.ClimateView> previewClimateViews = new java.util.HashMap<>();
+    private long previewVanillaSeed = Long.MIN_VALUE;
+    private final java.util.Map<String, ExprEvaluator.VanillaView> previewVanillaViews = new java.util.HashMap<>();
     private MultiLineBox.Handle formulaBox;
     private EditBox nameInput;
     private Button saveBtn;
@@ -158,15 +158,15 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     }
 
     /** 预览用气候视图：创建界面的世界生成注册表 + 种子框的值构建（懒加载、按种子缓存）。 */
-    private ExprEvaluator.ClimateView previewClimateView(String dimension) {
+    private ExprEvaluator.VanillaView previewVanillaView(String dimension) {
         if (this.creationContext == null) return null;
         long seed = this.creationContext.options().seed();
-        if (seed != this.previewClimateSeed) {
-            this.previewClimateViews.clear();
-            this.previewClimateSeed = seed;
+        if (seed != this.previewVanillaSeed) {
+            this.previewVanillaViews.clear();
+            this.previewVanillaSeed = seed;
         }
-        return this.previewClimateViews.computeIfAbsent(dimension, dim ->
-                com.kncatl.ohmyworld.BiomeControl.climateView(
+        return this.previewVanillaViews.computeIfAbsent(dimension, dim ->
+                com.kncatl.ohmyworld.BiomeControl.vanillaView(
                         this.creationContext.worldgenLoadContext(), previewDimensionKey(dim), seed));
     }
 
@@ -987,7 +987,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         if (key.equals(this.previewComputedFor)) return;
         FormulaParser.DimensionParseResult parsed = this.currentResult;
         this.previewRunning = true;
-        ExprEvaluator.ClimateView climate = this.previewClimateView(dimension);
+        ExprEvaluator.VanillaView climate = this.previewVanillaView(dimension);
         Thread worker = new Thread(() -> {
             FormulaPreview.Result result = null;
             try {

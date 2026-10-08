@@ -71,6 +71,11 @@ case "$MODE" in
         CHECK_ARGS="--expect overworld minecraft:sand,minecraft:polished_blackstone_bricks"
         CONSOLE_FORCELOAD="forceload add -192 -192 63 63"
         ;;
+    dfnoise)
+        CONFIG_FLAGS="--dfnoise"
+        CHECK_ARGS="--expect overworld minecraft:sand,minecraft:bricks,minecraft:gravel,minecraft:clay"
+        CONSOLE_FORCELOAD="forceload add -192 -192 63 63"
+        ;;
     biome-formula)
         CONFIG_FLAGS="--biome-formula"
         CHECK_ARGS="--biome-smoke 3"
@@ -108,7 +113,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac

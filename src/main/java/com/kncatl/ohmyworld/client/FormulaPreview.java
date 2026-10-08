@@ -38,7 +38,7 @@ public final class FormulaPreview {
     /** 计算指定维度、指定视野的预览；该维度不在公式里时返回 null。 */
     public static Result compute(FormulaParser.DimensionParseResult parsed, String dimension,
                                  int centerX, int centerZ, int spacing,
-                                 ExprEvaluator.ClimateView climate) {
+                                 ExprEvaluator.VanillaView climate) {
         if (dimension == null) return null;
         FormulaParser.ParsedDimension parsedDim = parsed.dimensions().get(dimension);
         if (parsedDim == null || parsedDim.layers().isEmpty()) return null;
@@ -54,7 +54,7 @@ public final class FormulaPreview {
         int origin = -cells / 2;
 
         // 预览线程上的气候视图（创建界面已加载的世界生成注册表 + 种子框；可为 null）
-        ExprEvaluator.setClimateView(climate);
+        ExprEvaluator.setVanillaView(climate);
         try {
             int[] colors = new int[cells * cells];
             for (int dz = 0; dz < cells; dz++) {
@@ -67,7 +67,7 @@ public final class FormulaPreview {
             }
             return new Result(colors, dimension, cells);
         } finally {
-            ExprEvaluator.setClimateView(null);
+            ExprEvaluator.setVanillaView(null);
         }
     }
 

@@ -121,7 +121,7 @@ public final class WorldLoadHandler {
         BiomeControl.apply(sl, generator);
         // 公式用到 climate() 时，登记该维度的原版气候视图（构建失败 → 视图为 null，climate() 返回 0）
         if (PatternData.usesVanillaDataFor(generator)) {
-            PatternData.bindClimate(generator, BiomeControl.climateViewFor(sl));
+            PatternData.bindVanillaView(generator, BiomeControl.vanillaViewFor(sl));
         }
     }
 

@@ -346,16 +346,16 @@ public final class BiomeControl {
     /**
      * 气候视图（M3，1.3.2）：把 {@code climate()} 的字段与坐标映射到该维度的原版气候
      * 采样器；26.3 起采样器由 {@code createClimateSampler} 构建（无缓存上下文足够，
-     * 4 格量化的每线程缓存由 {@link CachedClimateView} 负责）。
+     * 4 格量化的每线程缓存由 {@link CachedVanillaView} 负责）。
      * 构建失败返回 null（调用方置空视图，climate() 返回 0）。
      */
-    static ExprEvaluator.ClimateView climateViewFor(ServerLevel level) {
+    static ExprEvaluator.VanillaView vanillaViewFor(ServerLevel level) {
         // 噪声维度优先用生成器自带的设置（自定义维度也忠实）；其余（超平坦等）按维度键回退
         ChunkGenerator generator = level.getChunkSource().getGenerator();
         NoiseGeneratorSettings settings = generator instanceof NoiseBasedChunkGenerator noise
                 ? noise.generatorSettings().value()
                 : noiseSettings(level.registryAccess(), level.dimension());
-        return climateView(level.registryAccess(), settings, level.getSeed(),
+        return vanillaView(level.registryAccess(), settings, level.getSeed(),
                 ResourceIds.keyIdString(level.dimension()));
     }
 
@@ -363,9 +363,9 @@ public final class BiomeControl {
      * 由注册表 + 维度 + 种子构建气候视图（编辑器预览等无 ServerLevel 的场景）。
      * 预览路径用创建界面已加载的数据包注册表（{@code worldgenLoadContext()}）与种子框的值。
      */
-    public static ExprEvaluator.ClimateView climateView(HolderLookup.Provider registries,
+    public static ExprEvaluator.VanillaView vanillaView(HolderLookup.Provider registries,
                                                         ResourceKey<Level> dimension, long seed) {
-        return climateView(registries, noiseSettings(registries, dimension), seed,
+        return vanillaView(registries, noiseSettings(registries, dimension), seed,
                 ResourceIds.keyIdString(dimension));
     }
 
@@ -377,7 +377,7 @@ public final class BiomeControl {
     }
 
     /** 由注册表 + 具体噪声设置 + 种子构建（服务端生成与客户端预览共用）。 */
-    private static ExprEvaluator.ClimateView climateView(HolderLookup.Provider registries,
+    private static ExprEvaluator.VanillaView vanillaView(HolderLookup.Provider registries,
                                                          NoiseGeneratorSettings settings, long seed,
                                                          String label) {
         try {
@@ -390,27 +390,50 @@ public final class BiomeControl {
             RandomState state = RandomState.create(settings, noiseGetter, seed);
             Climate.Sampler sampler = state.sampler();
             //?}
-            return new CachedClimateView(sampler);
+            return new CachedVanillaView(registries, settings, seed, state, sampler);
         } catch (Exception e) {
-            LOGGER.error("ohmyworld: failed to build climate view for {}: {}",
+            LOGGER.error("ohmyworld: failed to build vanilla data view for {}: {}",
                     label, e.toString());
             return null;
         }
     }
 
     /**
-     * 气候视图实现：按原版 4 格量化坐标做每线程直接映射缓存。
-     * 原版气候本身就是 4 格分辨率（每次采样要算 6 条路由密度函数），逐方块直调
-     * 会让区块生成慢几十倍（实测可拖过看门狗 60 秒）；缓存后同格结果复用，
-     * 与直调采样器语义完全一致（同样的量化坐标 → 同样的值）。
+     * 原版数据视图实现（M3）：
+     * <ul>
+     *   <li>{@code climate()}：按原版 4 格量化坐标做每线程直接映射缓存——原版气候本身就是
+     *       4 格分辨率（每次采样要算 6 条路由密度函数），逐方块直调会让区块生成慢几十倍
+     *       （实测可拖过看门狗 60 秒）；缓存后同格结果复用，语义与直调采样器完全一致。</li>
+     *   <li>{@code df()}/{@code noise()}：按注册名懒构建求值器并按 id 缓存（每 id 一次）；
+     *       坐标本身**不做**缓存——密度/噪声逐方块变化，设计上由公式配合
+     *       cache2d / cache3d 摊薄成本。</li>
+     * </ul>
+     * 视图在多条生成线程间共享：注册名求值器用 ConcurrentHashMap 构建，线程安全。
      */
-    private static final class CachedClimateView implements ExprEvaluator.ClimateView {
+    private static final class CachedVanillaView implements ExprEvaluator.VanillaView {
         /** 2048 项：单个区块的量化工作集约 4×4 柱面 × 96 层 ≈ 1536 项。 */
         private static final int CACHE_SIZE = 2048;
+        /** 求值器缓存里表示"构建失败"的哨兵（按 id 只记一次日志）。 */
+        private static final Object MISSING = new Object();
+        /** 已报告过的缺失 id（避免每区块刷屏）。 */
+        private static final java.util.Set<String> LOGGED =
+                java.util.concurrent.ConcurrentHashMap.newKeySet();
+
         private final Climate.Sampler sampler;
         private final ThreadLocal<Cache> cache = ThreadLocal.withInitial(Cache::new);
+        private final HolderLookup.Provider registries;
+        private final NoiseGeneratorSettings settings;
+        private final long seed;
+        private final RandomState state;
+        private final java.util.concurrent.ConcurrentMap<String, Object> registryEvaluators =
+                new java.util.concurrent.ConcurrentHashMap<>();
 
-        CachedClimateView(Climate.Sampler sampler) {
+        CachedVanillaView(HolderLookup.Provider registries, NoiseGeneratorSettings settings, long seed,
+                          RandomState state, Climate.Sampler sampler) {
+            this.registries = registries;
+            this.settings = settings;
+            this.seed = seed;
+            this.state = state;
             this.sampler = sampler;
         }
 
@@ -432,6 +455,133 @@ public final class BiomeControl {
                 c.values[slot * 6 + 5] = point.depth();
             }
             return c.values[slot * 6 + code] / 10000.0;
+        }
+
+        // ---------------------------------------------------------- df / noise（M3.2）
+
+        @Override
+        public double density(String id, int x, int y, int z) {
+            Object eval = this.registryEvaluators.computeIfAbsent("df:" + id, this::buildDensity);
+            return eval instanceof DensityEval d ? d.sample(x, y, z) : 0;
+        }
+
+        @Override
+        public double noise(String id, double x, double y, double z) {
+            Object eval = this.registryEvaluators.computeIfAbsent("noise:" + id, this::buildNoise);
+            return eval instanceof NoiseEval n ? n.sample(x, y, z) : 0;
+        }
+
+        /** 注册名（ns:path；缺省命名空间=minecraft）拆成 {namespace, path}。 */
+        private static String[] splitId(String id) {
+            int colon = id.indexOf(':');
+            return colon < 0 ? new String[] {"minecraft", id}
+                    : new String[] {id.substring(0, colon), id.substring(colon + 1)};
+        }
+
+        private Object buildDensity(String mapKey) {
+            String id = mapKey.substring("df:".length());
+            try {
+                String[] parts = splitId(id);
+                var key = net.minecraft.resources.ResourceKey.create(Registries.DENSITY_FUNCTION,
+                        ResourceIds.of(parts[0], parts[1]));
+                var fn = this.registries.lookupOrThrow(Registries.DENSITY_FUNCTION).getOrThrow(key);
+                //? >=26.3 {
+                var sampler = this.state.getSampler(fn.value());
+                return (DensityEval) (x, y, z) -> sampler.sampleValue(
+                        net.minecraft.world.level.levelgen.densityfunction.SamplerContext.EMPTY_UNCACHED, x, y, z);
+                //?} else {
+                var wired = fn.value().mapAll(wiringVisitor());
+                return (DensityEval) (x, y, z) -> wired.compute(
+                        new net.minecraft.world.level.levelgen.DensityFunction.SinglePointContext(x, y, z));
+                //?}
+            } catch (Exception e) {
+                logMissing("df", id, e);
+                return MISSING;
+            }
+        }
+
+        private Object buildNoise(String mapKey) {
+            String id = mapKey.substring("noise:".length());
+            try {
+                String[] parts = splitId(id);
+                var key = net.minecraft.resources.ResourceKey.create(Registries.NOISE,
+                        ResourceIds.of(parts[0], parts[1]));
+                //? >=26.3 {
+                var noise = this.state.getOrCreateNoise(key);
+                return (NoiseEval) (x, y, z) -> noise.get(x, y, z);
+                //?} else {
+                var noise = this.state.getOrCreateNoise(key);
+                return (NoiseEval) (x, y, z) -> noise.getValue(x, y, z);
+                //?}
+            } catch (Exception e) {
+                logMissing("noise", id, e);
+                return MISSING;
+            }
+        }
+
+        private static void logMissing(String kind, String id, Exception e) {
+            if (LOGGED.add(kind + ":" + id)) {
+                LOGGER.error("ohmyworld: {}('{}') is not available in this dimension: {}",
+                        kind, id, e.toString());
+            }
+        }
+
+        //? >=26.3 {
+        //?} else {
+        /**
+         * 1.21.x：把注册表密度函数接线到本维度的 RandomState——噪声实例走
+         * {@code getOrCreateNoise}，混合噪声/末地岛按原版 {@code NoiseWiringHelper}
+         * 的做法换成种子实例（不接线的话噪声为空值、结果恒 0）。
+         */
+        private net.minecraft.world.level.levelgen.DensityFunction.Visitor wiringVisitor() {
+            var terrainRandom = this.settings.getRandomSource().newInstance(this.seed).forkPositional()
+                    .fromHashOf(ResourceIds.of("minecraft", "terrain"));
+            java.util.Map<net.minecraft.world.level.levelgen.DensityFunction,
+                    net.minecraft.world.level.levelgen.DensityFunction> memo = new java.util.IdentityHashMap<>();
+            return new net.minecraft.world.level.levelgen.DensityFunction.Visitor() {
+                @Override
+                public net.minecraft.world.level.levelgen.DensityFunction apply(
+                        net.minecraft.world.level.levelgen.DensityFunction fn) {
+                    return memo.computeIfAbsent(fn, this::wrapNew);
+                }
+
+                private static final String END_ISLAND_CLASS =
+                        "net.minecraft.world.level.levelgen.DensityFunctions$EndIslandDensityFunction";
+
+                private net.minecraft.world.level.levelgen.DensityFunction wrapNew(
+                        net.minecraft.world.level.levelgen.DensityFunction fn) {
+                    if (fn instanceof net.minecraft.world.level.levelgen.synth.BlendedNoise blended) {
+                        return blended.withNewRandom(terrainRandom);
+                    }
+                    // 末地岛密度函数按世界种子重建（注册表里实例化的那份种子不对）。
+                    // 该内嵌类是 protected，连类型引用都不可见，只能按类名识别再走公开工厂。
+                    if (END_ISLAND_CLASS.equals(fn.getClass().getName())) {
+                        return net.minecraft.world.level.levelgen.DensityFunctions
+                                .endIslands(CachedVanillaView.this.seed);
+                    }
+                    return fn;
+                }
+
+                @Override
+                public net.minecraft.world.level.levelgen.DensityFunction.NoiseHolder visitNoise(
+                        net.minecraft.world.level.levelgen.DensityFunction.NoiseHolder holder) {
+                    var key = holder.noiseData().unwrapKey().orElse(null);
+                    if (key == null) return holder;
+                    return new net.minecraft.world.level.levelgen.DensityFunction.NoiseHolder(
+                            holder.noiseData(), CachedVanillaView.this.state.getOrCreateNoise(key));
+                }
+            };
+        }
+        //?}
+
+        /** 注册表密度函数求值器（坐标按方块）。 */
+        private interface DensityEval {
+            double sample(int x, int y, int z);
+        }
+
+        /** 注册表噪声求值器（坐标已含缩放，可取小数）。 */
+        private interface NoiseEval {
+            double sample(double x, double y, double z);
         }
 
         private static int slot(int qx, int qy, int qz) {

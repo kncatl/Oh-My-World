@@ -103,7 +103,7 @@ public class MixinFlatLevelSource {
         if (snapshot == null || snapshot.layers().isEmpty()) return false;
 
         try {
-            PatternData.fillChunk(chunk, snapshot, PatternData.climateFor((FlatLevelSource) (Object) this));
+            PatternData.fillChunk(chunk, snapshot, PatternData.vanillaViewFor((FlatLevelSource) (Object) this));
         } catch (Exception e) {
             // 兜底：任何公式求值/填充异常都不应破坏区块生成，
             // 回退到原版平坦生成并停用图案，避免反复报错。

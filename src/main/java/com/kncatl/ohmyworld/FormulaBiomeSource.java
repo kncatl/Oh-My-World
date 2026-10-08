@@ -51,7 +51,7 @@ public class FormulaBiomeSource extends BiomeSource {
     private final boolean fallback2d;
     private final ExprEvaluator.TerrainView terrain;
     /** 共享气候视图（biome 行用到 climate() 时构建；否则为 null）。 */
-    private final ExprEvaluator.ClimateView climate;
+    private final ExprEvaluator.VanillaView climate;
     private final AtomicBoolean warned = new AtomicBoolean();
 
     /**
@@ -66,7 +66,7 @@ public class FormulaBiomeSource extends BiomeSource {
         this.fallback2d = fallback2d;
         this.terrain = terrain;
         this.climate = FormulaParser.usesVanillaDataInBiomeLines(defs)
-                ? BiomeControl.climateViewFor(level) : null;
+                ? BiomeControl.vanillaViewFor(level) : null;
 
         int minY = LevelHeights.minY(level);
         int maxY = LevelHeights.maxY(level) - 1;
@@ -153,8 +153,8 @@ public class FormulaBiomeSource extends BiomeSource {
     }
 
     private Holder<Biome> biomeAt(Layer layer, int x, int y, int z) {
-        ExprEvaluator.ClimateView saved = ExprEvaluator.climateView();
-        ExprEvaluator.setClimateView(climate);
+        ExprEvaluator.VanillaView saved = ExprEvaluator.vanillaView();
+        ExprEvaluator.setVanillaView(climate);
         try {
             Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(), y,
                     this::resolveBiomeLiteral, terrain);
@@ -165,7 +165,7 @@ public class FormulaBiomeSource extends BiomeSource {
             }
             return null;
         } finally {
-            ExprEvaluator.setClimateView(saved);
+            ExprEvaluator.setVanillaView(saved);
         }
     }
 

@@ -908,4 +908,47 @@ class FormulaParserTest {
                         biomeFlag.dimensions().get("overworld").biomeLayers()),
                 "biome 行的气候使用必须被识别");
     }
+
+    /** 1.3.2：df / noise 的公式级校验（注册名字面量 + 参数个数）与视图登记识别。 */
+    @Test
+    void registryCallsValidate() {
+        // 合法：带命名空间的注册名字面量 + 数值参数
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: df(minecraft:overworld/ridges, x, y, z) > 0 ? rand() : rand()")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: noise(minecraft:temperature, x, y, z) + noise(minecraft:temperature, x, y, z, 2, 3) >= 0"
+                                + " ? rand() : rand()")
+                .errors().isEmpty());
+
+        // 首参必须是带命名空间的注册名字面量
+        FormulaParser.ParseResult badId = FormulaParser.parseWithErrors("y=0: df(temperature, x, y, z)");
+        assertTrue(badId.errors().stream().anyMatch(e -> e.contains("namespaced registry id")),
+                badId.errors().toString());
+
+        // 参数个数
+        FormulaParser.ParseResult dfArity = FormulaParser.parseWithErrors(
+                "y=0: df(minecraft:overworld/ridges, x, y)");
+        assertTrue(dfArity.errors().stream().anyMatch(e -> e.contains("expects 4 arguments")),
+                dfArity.errors().toString());
+        FormulaParser.ParseResult noiseArity = FormulaParser.parseWithErrors(
+                "y=0: noise(minecraft:temperature, x, y, z, 2, 3, 4)");
+        assertTrue(noiseArity.errors().stream().anyMatch(e -> e.contains("expects 4 to 6 arguments")),
+                noiseArity.errors().toString());
+
+        // 编译后的调用（按编号）也必须被 usesVanillaData 识别（否则服务端不会登记视图）
+        FormulaParser.DimensionParseResult dfFlag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=let d = df(minecraft:overworld/ridges, x, y, z);"
+                        + " y=-64..319: d > 0 ? rand() : rand()}");
+        assertTrue(dfFlag.errors().isEmpty(), dfFlag.errors().toString());
+        assertTrue(FormulaParser.usesVanillaData(dfFlag.dimensions().get("overworld")),
+                "df 使用必须被识别（编译后按编号）");
+
+        FormulaParser.DimensionParseResult noiseFlag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=let n = noise(minecraft:temperature, x, y, z);"
+                        + " y=-64..319: n > 0 ? rand() : rand()}");
+        assertTrue(noiseFlag.errors().isEmpty(), noiseFlag.errors().toString());
+        assertTrue(FormulaParser.usesVanillaData(noiseFlag.dimensions().get("overworld")),
+                "noise 使用必须被识别（编译后按编号）");
+    }
 }

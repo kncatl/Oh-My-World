@@ -84,6 +84,11 @@
   的反对称比较铺沙 / 黑石砖；forceload 扩大采样范围；两种特征方块都要出现（--expect），
   证明气候视图构建、量化取值与公式取数整条链路真的跑过。
 
+--dfnoise（1.3.2）：原版数据冒烟——df(minecraft:overworld/ridges, …) 与
+  noise(minecraft:temperature, …) 各做一次反对称比较（沙/砖、砾/黏土四种特征方块，
+  y<=60 与 y>60 各覆盖一组）；配合显式 --expect，证明注册表密度函数/噪声
+  的构建、接线与求值整条链路真的跑过（df/noise 用 cache2d 摊薄成本）。
+
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
@@ -372,6 +377,23 @@ CLIMATE_FORMULA = (
     " ? minecraft:sand : minecraft:polished_blackstone_bricks) : minecraft:air}"
 )
 
+# 1.3.2 原版数据冒烟（--dfnoise；配合显式 --expect 的四种特征方块）：
+# df() 与 noise() 各用一次反对称比较（x/z 互换）：真实视图下两侧符号都会出现；
+# 无视图/注册名缺失时两侧同为 0 → 只剩另一种方块，核验直接失败（防假阳性）。
+# df/noise 单点求值很贵，这里用 cache2d 摊薄（也顺带冒烟 cache 与注册表函数的组合）。
+# y<=60 / y>60 确保两组比较都有采样。
+DFNOISE_FORMULA = (
+    "{overworld="
+    "let h = 60 + fbm2(x, z, 600, 4, 1) * 12;"
+    "let r1 = cache2d(df(minecraft:overworld/ridges, x, 64, z), 4);"
+    "let r2 = cache2d(df(minecraft:overworld/ridges, z, 64, x), 4);"
+    "let n1 = cache2d(noise(minecraft:temperature, x, 64, z), 4);"
+    "let n2 = cache2d(noise(minecraft:temperature, z, 64, x), 4);"
+    "y=-64..: y <= h ? (y <= 60"
+    " ? (r1 > r2 ? minecraft:sand : minecraft:bricks)"
+    " : (n1 > n2 ? minecraft:gravel : minecraft:clay)) : minecraft:air}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -412,6 +434,7 @@ def main():
     surface = "--surface" in sys.argv
     rivernet = "--rivernet" in sys.argv
     climate = "--climate" in sys.argv
+    dfnoise = "--dfnoise" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -443,7 +466,8 @@ def main():
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
             or biome_terrain or biome_biomeis or natural or features_all or features_none \
-            or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet or climate:
+            or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet or climate \
+            or dfnoise:
         # 群系/特性/超平坦雕刻冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -508,6 +532,8 @@ def main():
         formula = RIVERNET_FORMULA
     elif climate:
         formula = CLIMATE_FORMULA
+    elif dfnoise:
+        formula = DFNOISE_FORMULA
     else:
         formula = FORMULA
 
