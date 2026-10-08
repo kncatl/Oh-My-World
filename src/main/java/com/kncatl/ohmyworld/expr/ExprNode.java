@@ -78,20 +78,28 @@ public sealed interface ExprNode {
     record TupleComponentNode(int slot, int index, boolean tupleDependent) implements ExprNode {}
 
     /**
-     * 编译后的 rivernet（1.3.1）：河网查询（4 元组：距离 / 半宽 / 水面 / 流量）。
-     * {@code coarse} 为 null 时使用默认内部高度场；cs 与 salt 在编译期固化。
+     * 编译后的 rivernet（1.3.1/1.3.2）：河网查询（4 元组：距离 / 半宽 / 水面 / 流量）。
+     * {@code coarse} 为 null 时使用默认内部高度场；cs、salt、宽度基数/斜率与蜿蜒
+     * 幅度在编译期固化（默认 w0=3、wk=1、蜿蜒 0.12×cs）。
      * 语义与缓存约定同 {@link CompiledCache2dNode}（线程本地、按种子失效）。
      */
     final class CompiledRiverNetNode implements ExprNode {
         private final ExprNode coarse;
         private final int cs;
         private final double salt;
+        private final double w0;
+        private final double wk;
+        private final double warp;
         private final ThreadLocal<RiverCache> cache = ThreadLocal.withInitial(RiverCache::new);
 
-        public CompiledRiverNetNode(ExprNode coarse, int cs, double salt) {
+        public CompiledRiverNetNode(ExprNode coarse, int cs, double salt,
+                                    double w0, double wk, double warp) {
             this.coarse = coarse;
             this.cs = cs;
             this.salt = salt;
+            this.w0 = w0;
+            this.wk = wk;
+            this.warp = warp;
         }
 
         public ExprNode coarseExpr() { return coarse; }
@@ -100,7 +108,45 @@ public sealed interface ExprNode {
 
         public double salt() { return salt; }
 
+        /** 半宽基数（默认 3）。 */
+        public double w0() { return w0; }
+
+        /** 半宽流量斜率（默认 1）。 */
+        public double wk() { return wk; }
+
+        /** 蜿蜒幅度（格；默认 0.12×cs）。 */
+        public double warp() { return warp; }
+
         ThreadLocal<RiverCache> cache() { return cache; }
+    }
+
+    /**
+     * 编译后的 blur2（1.3.2）：世界对齐网格点上的 (2r+1)² 盒卷积 + 双线性插值。
+     *
+     * <p>网格点 (间距 step) 上的值 = 以该点为中心、半径 r（步长 step）的
+     * (2r+1)² 个格点的表达式平均；查询点用相邻四点双线性插值。值只由
+     * （网格、表达式、世界种子）决定，缓存只是每线程复用的性能优化。
+     * 表达式在校验期已保证不引用 let 绑定、ly/y 与视图类函数（同 cache2d）。
+     */
+    final class CompiledBlur2Node implements ExprNode {
+        private final ExprNode expr;
+        private final int radius;
+        private final int step;
+        private final ThreadLocal<CellCache> cache = ThreadLocal.withInitial(CellCache::new);
+
+        public CompiledBlur2Node(ExprNode expr, int radius, int step) {
+            this.expr = expr;
+            this.radius = radius;
+            this.step = step;
+        }
+
+        public ExprNode expr() { return expr; }
+
+        public int radius() { return radius; }
+
+        public int step() { return step; }
+
+        ThreadLocal<CellCache> cache() { return cache; }
     }
 
     /**

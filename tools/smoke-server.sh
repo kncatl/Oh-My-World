@@ -90,6 +90,10 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 9"
         CONSOLE_FORCELOAD="execute in minecraft:the_nether run forceload add -192 -192 63 63"
         ;;
+    biome-at-flat)
+        CONFIG_FLAGS="--biome-at-flat"
+        CHECK_ARGS="--biome-smoke 2"
+        ;;
     overlay-marker)
         CONFIG_FLAGS="--overlay-marker"
         CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:bricks,minecraft:gray_concrete,minecraft:glass,minecraft:terracotta,minecraft:amethyst_block,minecraft:magenta_glazed_terracotta,minecraft:stone"
@@ -131,7 +135,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | overlay-empty | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | overlay-empty | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac

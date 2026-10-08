@@ -861,6 +861,7 @@ public class FormulaParser {
                     || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
             case ExprNode.TupleComponentNode ignored -> false;
             case ExprNode.CompiledCache2dNode cache -> walkFunctions(cache.expr(), byName, byId);
+            case ExprNode.CompiledBlur2Node cache -> walkFunctions(cache.expr(), byName, byId);
             case ExprNode.CompiledCache3dNode cache -> walkFunctions(cache.expr(), byName, byId);
             case ExprNode.CompiledRiverNetNode river ->
                     river.coarseExpr() != null && walkFunctions(river.coarseExpr(), byName, byId);
@@ -1161,7 +1162,7 @@ public class FormulaParser {
                 return thenType == ExprEvaluator.ValueType.UNKNOWN ? elseType : thenType;
             }
             case ExprNode.FuncCallNode f -> {
-                if (f.name().equals("cache2d") || f.name().equals("cache3d")) {
+                if (f.name().equals("cache2d") || f.name().equals("cache3d") || f.name().equals("blur2")) {
                     validateCacheCall(f, errors, variables, biomeMode, overlay);
                     return ExprEvaluator.ValueType.NUMBER;
                 }
@@ -1343,6 +1344,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode cf -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.TupleComponentNode tc -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledCache2dNode c -> { return ExprEvaluator.ValueType.NUMBER; }
+            case ExprNode.CompiledBlur2Node c -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledCache3dNode c -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledRiverNetNode r -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.CompiledBlockNode cb -> { return ExprEvaluator.ValueType.UNKNOWN; }
@@ -1354,22 +1356,36 @@ public class FormulaParser {
                                           Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         String name = f.name();
         int argCount = f.args().size();
-        if (name.equals("cache2d")) {
+        if (name.equals("blur2")) {
+            if (argCount < 2 || argCount > 3) {
+                errors.add("Function 'blur2' expects 2 or 3 arguments (expression, r[, step]), got " + argCount);
+                return;
+            }
+            checkLiteralInt(f.args().get(1), 1, 4, errors,
+                    "Function 'blur2': r must be an integer literal in 1..4");
+            if (argCount == 3) {
+                checkLiteralInt(f.args().get(2), 1, 16, errors,
+                        "Function 'blur2': step must be an integer literal in 1..16");
+            }
+        } else if (name.equals("cache2d")) {
             if (argCount < 1 || argCount > 2) {
                 errors.add("Function 'cache2d' expects 1 or 2 arguments (expression[, step]), got " + argCount);
                 return;
             }
-        } else if (argCount != 1 && argCount != 4) {
-            errors.add("Function 'cache3d' expects 1 or 4 arguments (expression[, sx, sy, sz]), got " + argCount);
-            return;
-        }
-        for (int i = 1; i < argCount; i++) {
-            ExprNode arg = f.args().get(i);
-            if (!(arg instanceof ExprNode.NumberNode n)
-                    || n.value() != Math.rint(n.value())
-                    || n.value() < 1 || n.value() > 16) {
-                errors.add("Function '" + name + "': step arguments must be integer literals in 1..16");
-                break;
+            if (argCount == 2) {
+                checkLiteralInt(f.args().get(1), 1, 16, errors,
+                        "Function 'cache2d': step must be an integer literal in 1..16");
+            }
+        } else {
+            if (argCount != 1 && argCount != 4) {
+                errors.add("Function 'cache3d' expects 1 or 4 arguments (expression[, sx, sy, sz]), got " + argCount);
+                return;
+            }
+            if (argCount == 4) {
+                for (int i = 1; i <= 3; i++) {
+                    checkLiteralInt(f.args().get(i), 1, 16, errors,
+                            "Function 'cache3d': step arguments must be integer literals in 1..16");
+                }
             }
         }
         ExprNode expr = f.args().get(0);
@@ -1383,7 +1399,7 @@ public class FormulaParser {
             errors.add("Function '" + name + "': the expression cannot use "
                     + "terrain/surfis/blockis/biomeis/rand/randexcept");
         }
-        boolean forbidY = name.equals("cache2d");
+        boolean forbidY = name.equals("cache2d") || name.equals("blur2");
         if (ExprCompiler.usesVertical(expr, forbidY)) {
             errors.add("Function '" + name + "': the expression cannot reference "
                     + (forbidY ? "ly or y" : "ly"));
@@ -1427,6 +1443,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode ct -> true;
             case ExprNode.TupleComponentNode tc -> true;
             case ExprNode.CompiledCache2dNode c2 -> true;
+            case ExprNode.CompiledBlur2Node c2 -> true;
             case ExprNode.CompiledCache3dNode c3 -> true;
             case ExprNode.CompiledRiverNetNode r -> true;
             case ExprNode.CompiledBlockNode cb -> true;
@@ -1471,6 +1488,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode ct -> true;
             case ExprNode.TupleComponentNode tc -> true;
             case ExprNode.CompiledCache2dNode c2 -> true;
+            case ExprNode.CompiledBlur2Node c2 -> true;
             case ExprNode.CompiledCache3dNode c3 -> true;
             case ExprNode.CompiledRiverNetNode r -> true;
             case ExprNode.CompiledBlockNode cb -> true;
@@ -1617,6 +1635,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode t -> t.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);
             case ExprNode.TupleComponentNode ignored -> false;
             case ExprNode.CompiledCache2dNode cache -> walkVanillaBuiltin(cache.expr());
+            case ExprNode.CompiledBlur2Node cache -> walkVanillaBuiltin(cache.expr());
             case ExprNode.CompiledCache3dNode cache -> walkVanillaBuiltin(cache.expr());
             case ExprNode.CompiledRiverNetNode river ->
                     river.coarseExpr() != null && walkVanillaBuiltin(river.coarseExpr());
@@ -1634,20 +1653,40 @@ public class FormulaParser {
     }
 
     /** rivernet 的专项校验：cs/salt 为字面量、coarse 自包含且不含 ly/y 与视图/随机函数。 */
+    /**
+     * rivernet 校验（1.3.2 参数化）：形式 (cs, salt) / (coarse, cs, salt)，
+     * 尾部可选 (w0, wk[, warp])；cs 为 64..512 整数字面量、salt/w0/wk/warp
+     * 为数字字面量（w0/wk/warp ≥ 0），coarse 自包含。
+     */
     private static void validateRivernetCall(ExprNode.TupleCallNode call, List<String> errors,
                                              Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         int n = call.args().size();
-        if (n != 2 && n != 3) {
-            errors.add("Function 'rivernet' expects 2 or 3 arguments (cs, salt) or (coarse, cs, salt), got " + n);
+        if (n < 2 || n > 6) {
+            errors.add("Function 'rivernet' expects 2..6 arguments: (cs, salt)[, w0, wk[, warp]]"
+                    + " or (coarse, cs, salt)[, w0, wk[, warp]], got " + n);
             return;
         }
-        int csIdx = n == 3 ? 1 : 0;
+        boolean csForm;
+        if (n == 2 || n == 4) {
+            csForm = true;
+        } else if (n == 3) {
+            csForm = false;
+        } else if (n == 5) {
+            ExprNode first = call.args().get(0);
+            csForm = first instanceof ExprNode.NumberNode num
+                    && num.value() == Math.rint(num.value())
+                    && num.value() >= 64 && num.value() <= 512
+                    && call.args().get(1) instanceof ExprNode.NumberNode;
+        } else {
+            csForm = false;
+        }
+        int csIdx = csForm ? 0 : 1;
         checkLiteralInt(call.args().get(csIdx), 64, 512, errors,
                 "Function 'rivernet': cs must be an integer literal in 64..512");
         if (!(call.args().get(csIdx + 1) instanceof ExprNode.NumberNode)) {
             errors.add("Function 'rivernet': salt must be a number literal");
         }
-        if (n == 3) {
+        if (!csForm) {
             ExprNode coarse = call.args().get(0);
             requireNumber(validateNode(coarse, errors, variables, biomeMode, overlay), "first argument of rivernet", errors);
             if (referencesBoundVariables(coarse, variables, new HashSet<>())) {
@@ -1660,6 +1699,15 @@ public class FormulaParser {
             }
             if (ExprCompiler.usesVertical(coarse, true)) {
                 errors.add("Function 'rivernet': the coarse expression cannot reference ly or y");
+            }
+        }
+        int paramsStart = csForm ? 2 : 3;
+        int paramCount = n - paramsStart;
+        String[] paramNames = {"w0", "wk", "warp"};
+        for (int i = 0; i < paramCount; i++) {
+            ExprNode param = call.args().get(paramsStart + i);
+            if (!(param instanceof ExprNode.NumberNode num) || num.value() < 0) {
+                errors.add("Function 'rivernet': " + paramNames[i] + " must be a number literal >= 0");
             }
         }
     }
@@ -1913,6 +1961,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode t -> t;
             case ExprNode.TupleComponentNode t -> t;
             case ExprNode.CompiledCache2dNode c -> c;
+            case ExprNode.CompiledBlur2Node c -> c;
             case ExprNode.CompiledCache3dNode c -> c;
             case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.BuiltinNode b -> b;
@@ -2006,6 +2055,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode ct -> ct;
             case ExprNode.TupleComponentNode tc -> tc;
             case ExprNode.CompiledCache2dNode c2 -> c2;
+            case ExprNode.CompiledBlur2Node c2 -> c2;
             case ExprNode.CompiledCache3dNode c3 -> c3;
             case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.CompiledBlockNode cb -> cb;
@@ -2054,18 +2104,67 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode ct -> ct;
             case ExprNode.TupleComponentNode tc -> tc;
             case ExprNode.CompiledCache2dNode c2 -> c2;
+            case ExprNode.CompiledBlur2Node c2 -> c2;
             case ExprNode.CompiledCache3dNode c3 -> c3;
             case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.CompiledBlockNode cb -> cb;
         };
     }
 
-    /** min/max 的循环形式：4 参且首参不是内建变量名（a、b 的整数性在展开时报错说明）。 */
+    /**
+     * min/max 的循环形式：4 参、首参是（非内建）变量名、a/b 为整数字面量，
+     * 且第 4 参**引用了该变量**（否则按 4 参折叠处理——避免把 min(h, 62, 70, y)
+     * 这类普通折叠误判成循环）。
+     */
     private static boolean isLoopForm(ExprNode.FuncCallNode f) {
         if (!f.name().equals("min") && !f.name().equals("max")) return false;
         if (f.args().size() != 4) return false;
         if (!(f.args().get(0) instanceof ExprNode.VariableNode v)) return false;
-        return !KNOWN_VARS.contains(v.name());
+        if (KNOWN_VARS.contains(v.name())) return false;
+        if (intLiteral(f.args().get(1)) == null || intLiteral(f.args().get(2)) == null) return false;
+        return referencesName(f.args().get(3), v.name(), new HashSet<>());
+    }
+
+    /** 表达式是否引用指定变量名（考虑 let 遮蔽；用于循环形式的判定）。 */
+    private static boolean referencesName(ExprNode node, String name, Set<String> shadowed) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v -> v.name().equals(name) && !shadowed.contains(name);
+            case ExprNode.BinaryNode b -> referencesName(b.left(), name, shadowed)
+                    || referencesName(b.right(), name, shadowed);
+            case ExprNode.UnaryNode u -> referencesName(u.operand(), name, shadowed);
+            case ExprNode.ConditionalNode c -> referencesName(c.condition(), name, shadowed)
+                    || referencesName(c.thenExpr(), name, shadowed)
+                    || referencesName(c.elseExpr(), name, shadowed);
+            case ExprNode.FuncCallNode f -> f.args().stream()
+                    .anyMatch(arg -> referencesName(arg, name, shadowed));
+            case ExprNode.TupleCallNode t -> t.args().stream()
+                    .anyMatch(arg -> referencesName(arg, name, shadowed));
+            case ExprNode.BlockExprNode be -> {
+                Set<String> inner = new HashSet<>(shadowed);
+                boolean found = false;
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    if (referencesName(binding.value(), name, inner)) {
+                        found = true;
+                        break;
+                    }
+                    inner.addAll(binding.names());
+                }
+                yield found || referencesName(be.body(), name, inner);
+            }
+            case ExprNode.BuiltinNode b -> false;
+            // 以下形态不出现在展开前的 AST 里；保守视为引用（宁保留循环语义）
+            case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledFuncCallNode cf -> true;
+            case ExprNode.CompiledTupleCallNode ct -> true;
+            case ExprNode.TupleComponentNode tc -> true;
+            case ExprNode.CompiledCache2dNode c2 -> true;
+            case ExprNode.CompiledBlur2Node c2 -> true;
+            case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledRiverNetNode r -> true;
+            case ExprNode.CompiledBlockNode cb -> true;
+        };
     }
 
     private static ExprNode expandLoopCall(ExprNode.FuncCallNode f, int multiplier) {
@@ -2158,6 +2257,7 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode t -> t;
             case ExprNode.TupleComponentNode t -> t;
             case ExprNode.CompiledCache2dNode c -> c;
+            case ExprNode.CompiledBlur2Node c -> c;
             case ExprNode.CompiledCache3dNode c -> c;
             case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.BuiltinNode b -> b;

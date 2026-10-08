@@ -248,6 +248,12 @@ BIOME_AT_VALUE_FORMULA = (
     "y=0: minecraft:bedrock;y=1..127: minecraft:netherrack;y=128..255: minecraft:air}"
 )
 
+# 临时验证（biome_at 在超平坦主世界）：右半 biome_at(x*0.002,…)，左半沙漠基线
+BIOME_AT_FLAT_FORMULA = (
+    "{overworld=biome: x < 0 ? minecraft:desert : biome_at(x * 0.002, 0.0, 0.0, 0.0, 0.0, 0.0); "
+    "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
+)
+
 # M3.5：叠加模式冒烟（--overlay-marker）——普通噪声世界（server_mode 驱动）。
 # 在地表附近的石层里铺多种特征方块：
 #   带 1（keep）：偶数格写海晶灯、奇数格 keep（不改）→ 验证 keep 与"后写覆盖先写"；
@@ -395,7 +401,8 @@ M1_FORMULA = (
     "let extra = fbm2e(x, z, 800, 3, 2, 2) * 0.25"
     " + sum(k, 0, 2, k) * 0.02 + terrace(n, 4, 6) * 0.1"
     " + slope(fbm2(x, z, 200, 2, 11)) * 5"
-    " + clamp(isodist(n - 0.2), 0, 3) * 0.05;"
+    " + clamp(isodist(n - 0.2), 0, 3) * 0.05"
+    " + (blur2(noise2(x, z, 120, 21), 2) > noise2(x, z, 120, 21) ? 0.25 : -0.25);"
     "y=-64..: (n + ridge * 0.5 + cached * 0.2 + extra + (seedhash(x, z, 3) - 0.5) * 0.8) > 0.35"
     " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks}"
 )
@@ -419,7 +426,7 @@ SURFACE_FORMULA = (
 # 避免不同节点出生点准备区块数不同（覆盖面积不同）导致抽查不稳定。
 RIVERNET_FORMULA = (
     "{overworld="
-    "let (d, w, s, o) = rivernet(70 - (x * x + z * z) * 0.00001, 192, 7);"
+    "let (d, w, s, o) = rivernet(70 - (x * x + z * z) * 0.00001, 192, 7, 2.5, 0.5, 16);"
     "let base = 60 + fbm2(x, z, 600, 4, 1) * 20;"
     "let bed = min(base, s - 4 + max(d - w, 0) * 0.7);"
     "y=-64..: y <= bed ? (d < w ? minecraft:sand : minecraft:stone)"
@@ -485,6 +492,7 @@ def main():
     biome_vanilla = "--biome-vanilla" in sys.argv
     biome_vanilla_value = "--biome-vanilla-value" in sys.argv
     biome_at_value = "--biome-at-value" in sys.argv
+    biome_at_flat = "--biome-at-flat" in sys.argv
     overlay_marker = "--overlay-marker" in sys.argv
     overlay_empty = "--overlay-empty" in sys.argv
     biome_structures = "--biome-structures" in sys.argv
@@ -564,6 +572,8 @@ def main():
         formula = BIOME_VANILLA_VALUE_FORMULA
     elif biome_at_value:
         formula = BIOME_AT_VALUE_FORMULA
+    elif biome_at_flat:
+        formula = BIOME_AT_FLAT_FORMULA
     elif overlay_marker:
         formula = OVERLAY_MARKER_FORMULA
     elif overlay_empty:
@@ -619,7 +629,7 @@ def main():
     wrote_formula = (force or seed_formula or spawn_formula or open_ranges or water or river
                      or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
-                     or biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value
+                     or biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value or biome_at_flat
                      or overlay_marker or overlay_empty
                      or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \

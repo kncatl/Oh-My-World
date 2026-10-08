@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -160,6 +160,7 @@ case "$CHECK_MODE" in
     biome-vanilla)   SMOKE_CONFIG_MODE="--biome-vanilla" ;;
     biome-vanilla-value) SMOKE_CONFIG_MODE="--biome-vanilla-value" ;;
     biome-at-value)  SMOKE_CONFIG_MODE="--biome-at-value" ;;
+    biome-at-flat)   SMOKE_CONFIG_MODE="--biome-at-flat" ;;
     biome-structures) SMOKE_CONFIG_MODE="--biome-structures" ;;
     features-all)    SMOKE_CONFIG_MODE="--features-all" ;;
     features-none)   SMOKE_CONFIG_MODE="--features-none" ;;
@@ -347,6 +348,10 @@ case "$CHECK_MODE" in
         fi
         python3 "$TOOLS/smoke-check-world.py" --biome-smoke 9 "$SRV" \
             || fail "biome 行 vanilla 群系值核验失败：下界没有出现原版群系"
+        ;;
+    biome-at-flat)
+        python3 "$TOOLS/smoke-check-world.py" --biome-smoke 2 "$SRV" \
+            || fail "biome_at 超平坦冒烟核验失败：没有取到多种群系"
         ;;
     biome-at-value)
         if grep -q "formula biome uncovered" "$LOG"; then

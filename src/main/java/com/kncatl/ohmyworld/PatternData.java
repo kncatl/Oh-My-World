@@ -705,9 +705,10 @@ public class PatternData {
             new java.util.concurrent.atomic.AtomicBoolean();
 
     /**
-     * 叠加模式的结构保护域（M3.5）：本区块 structure starts 中所有靠近区块（12 格）
-     * 的部件的包围盒并集，再外扩 24（与 26.3 的 Beardifier.affectedBox 同口径；
-     * 且不筛 terrainAdaptation——NONE 部件也纳入保护，更保守）。没有部件时返回 null。
+     * 叠加模式的结构保护域（M3.5；1.3.2 调整 Y 外扩）：本区块 structure starts 中所有
+     * 靠近区块（12 格）的部件的包围盒并集，**水平外扩 24、垂直 ±4**——垂直方向的小
+     * 外扩避免把「废弃矿井/古城」这类地下结构上方的地表也冻结（Y 向只保护紧邻结构的
+     * 几格）。不筛 terrainAdaptation（NONE 部件也纳入保护，更保守）。没有部件返回 null。
      */
     private static BoundingBox protectionBox(ChunkAccess chunk) {
         ChunkPos chunkPos = chunk.getPos();
@@ -749,7 +750,7 @@ public class PatternData {
             }
         }
         if (!found) return null;
-        return new BoundingBox(minX - 24, minY - 24, minZ - 24, maxX + 24, maxY + 24, maxZ + 24);
+        return new BoundingBox(minX - 24, minY - 4, minZ - 24, maxX + 24, maxY + 4, maxZ + 24);
     }
 
     /**

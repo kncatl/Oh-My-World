@@ -335,6 +335,7 @@ public class FormulaBiomeSource extends BiomeSource {
             }
             case ExprNode.TupleComponentNode ignored -> {}
             case ExprNode.CompiledCache2dNode cache -> collectBiomeIds(cache.expr(), ids);
+            case ExprNode.CompiledBlur2Node cache -> collectBiomeIds(cache.expr(), ids);
             case ExprNode.CompiledCache3dNode cache -> collectBiomeIds(cache.expr(), ids);
             case ExprNode.CompiledRiverNetNode river -> {
                 if (river.coarseExpr() != null) collectBiomeIds(river.coarseExpr(), ids);

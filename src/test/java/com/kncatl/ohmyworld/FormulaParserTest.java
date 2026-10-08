@@ -786,7 +786,7 @@ class FormulaParserTest {
                 lyRef.errors().toString());
 
         FormulaParser.ParseResult badStep = FormulaParser.parseWithErrors("y=0: cache2d(x, 3.5)");
-        assertTrue(badStep.errors().stream().anyMatch(e -> e.contains("step arguments")),
+        assertTrue(badStep.errors().stream().anyMatch(e -> e.contains("step must be an integer literal")),
                 badStep.errors().toString());
 
         FormulaParser.ParseResult badArity = FormulaParser.parseWithErrors("y=0: cache3d(x, 4, 8)");
@@ -869,8 +869,93 @@ class FormulaParserTest {
 
         FormulaParser.ParseResult badArity = FormulaParser.parseWithErrors(
                 "y=0: { let (a, b, c, d) = rivernet(192); a > 0 ? rand() : rand() }");
+        assertTrue(badArity.errors().stream().anyMatch(e -> e.contains("expects 2..6 arguments")),
+                badArity.errors().toString());
+    }
+
+    /** 1.3.2：rivernet 参数化（w0/wk/warp）的公式级校验。 */
+    @Test
+    void rivernetParameterizedCallsValidate() {
+        // 合法：cs 形式带宽度/蜿蜒
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: { let (d, w, s, o) = rivernet(192, 7, 3, 1); d > 0 ? rand() : rand() }")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: { let (d, w, s, o) = rivernet(192, 7, 2, 0.5, 0); d > 0 ? rand() : rand() }")
+                .errors().isEmpty());
+        // 合法：coarse 形式带宽度/蜿蜒（首参非字面量）
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: { let (d, w, s, o) = rivernet(x + z, 192, 7, 3, 1, 20); d > 0 ? rand() : rand() }")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: { let (d, w, s, o) = rivernet(x + z, 192, 7, 3, 1); d > 0 ? rand() : rand() }")
+                .errors().isEmpty());
+
+        // 非法：w0/wk/warp 必须是 >= 0 的数字字面量
+        FormulaParser.ParseResult exprs = FormulaParser.parseWithErrors(
+                "y=0: { let (d, w, s, o) = rivernet(192, 7, x, 1); d > 0 ? rand() : rand() }");
+        assertTrue(exprs.errors().stream().anyMatch(e -> e.contains("w0 must be a number literal >= 0")),
+                exprs.errors().toString());
+        FormulaParser.ParseResult negative = FormulaParser.parseWithErrors(
+                "y=0: { let (d, w, s, o) = rivernet(192, 7, 3, 1, -1); d > 0 ? rand() : rand() }");
+        assertTrue(negative.errors().stream().anyMatch(e -> e.contains("warp must be a number literal >= 0")),
+                negative.errors().toString());
+
+        // 非法：参数个数
+        FormulaParser.ParseResult tooMany = FormulaParser.parseWithErrors(
+                "y=0: { let (d, w, s, o) = rivernet(192, 7, 3, 1, 0, 5, 2); d > 0 ? rand() : rand() }");
+        assertTrue(tooMany.errors().stream().anyMatch(e -> e.contains("expects 2..6 arguments")),
+                tooMany.errors().toString());
+    }
+
+    /** 1.3.2：blur2 的公式级校验（参数、自包含、禁用函数、纵向限制）。 */
+    @Test
+    void blur2CallsValidate() {
+        assertOnlyReturnsBlockTypeError("y=0: blur2(noise2(x, z, 300, 1), 2)");
+        assertOnlyReturnsBlockTypeError("y=0: blur2(x + z, 1, 8)");
+
+        FormulaParser.ParseResult badArity = FormulaParser.parseWithErrors("y=0: blur2(x)");
         assertTrue(badArity.errors().stream().anyMatch(e -> e.contains("expects 2 or 3 arguments")),
                 badArity.errors().toString());
+
+        FormulaParser.ParseResult badR = FormulaParser.parseWithErrors("y=0: blur2(x, 5)");
+        assertTrue(badR.errors().stream().anyMatch(e -> e.contains("r must be an integer literal in 1..4")),
+                badR.errors().toString());
+
+        FormulaParser.ParseResult badStep = FormulaParser.parseWithErrors("y=0: blur2(x, 2, 3.5)");
+        assertTrue(badStep.errors().stream().anyMatch(e -> e.contains("step must be an integer literal")),
+                badStep.errors().toString());
+
+        FormulaParser.ParseResult bound = FormulaParser.parseWithErrors("y=0: { let a = x; blur2(a, 2) }");
+        assertTrue(bound.errors().stream().anyMatch(e -> e.contains("self-contained")),
+                bound.errors().toString());
+
+        FormulaParser.ParseResult yRef = FormulaParser.parseWithErrors("y=0: blur2(y, 2)");
+        assertTrue(yRef.errors().stream().anyMatch(e -> e.contains("cannot reference ly or y")),
+                yRef.errors().toString());
+
+        FormulaParser.DimensionParseResult terrain = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] biome: blur2(terrain(x, z), 2)}");
+        assertTrue(terrain.errors().stream().anyMatch(e -> e.contains("cannot use terrain")),
+                terrain.errors().toString());
+    }
+
+    /** 1.3.2：min/max 的循环形式要求表达式引用循环变量（否则按 4 参折叠处理）。 */
+    @Test
+    void minMaxLoopVersusFold() {
+        // 参考循环变量 → 循环展开（合法）
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: { let m = min(k, 0, 3, k * 10); m > 0 ? rand() : rand() }")
+                .errors().isEmpty());
+        // 不引用循环变量（第 4 参是 y）→ 折叠形式；h 为 let 变量，4 参折叠合法
+        assertTrue(FormulaParser.parseWithErrors(
+                        "y=0: { let h = 64; let m = min(h, 62, 70, y); m > 0 ? rand() : rand() }")
+                .errors().isEmpty());
+        // 首参不是变量名 → 折叠形式，未定义名字报 Unknown variable
+        FormulaParser.ParseResult notLoop = FormulaParser.parseWithErrors(
+                "y=0: min(k, 0, 3, x * 2) > 0 ? rand() : rand()");
+        assertTrue(notLoop.errors().stream().anyMatch(e -> e.contains("Unknown variable: k")),
+                notLoop.errors().toString());
     }
 
     /** 1.3.2：climate / peaks 的公式级校验。 */

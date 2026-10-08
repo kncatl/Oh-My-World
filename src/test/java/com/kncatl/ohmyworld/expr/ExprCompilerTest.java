@@ -77,6 +77,12 @@ class ExprCompilerTest {
             "{ let (u, v) = warp2(x, z, 200, 30, 6); cache2d(u + v, 8) }",
             // 1.3.1：rivernet（编译路径带节点缓存；未编译路径直通）
             "{ let (d, w, s, o) = rivernet(192, 7); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
+            // 1.3.2：rivernet 参数化（宽度 / 蜿蜒；编译与直通一致）
+            "{ let (d, w, s, o) = rivernet(192, 7, 2.5, 0.5, 8); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
+            "{ let (d, w, s, o) = rivernet(x + z, 192, 7, 2, 1); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
+            // 1.3.2：blur2（编译路径带网格缓存；未编译路径直通）
+            "blur2(noise2(x, z, 300, 5) + x * 0.1, 2)",
+            "blur2(fbm2(x, z, 500, 2, 9), 1, 8)",
             // 1.3.2：共享气候（无视图 → 0；编译/未编译一致）
             "{ let t = climate(temperature, x, z) * 2 + climate(weirdness, x, 100, z); t }",
             // 1.3.2：注册表密度函数 / 噪声（无视图 → 0；编译/未编译一致）

@@ -46,6 +46,11 @@ class LoopMacrosTest {
     void minMaxStillFoldWithoutLoopForm() {
         assertEquals(1, eval("min(3, 2, 1)", 0, 0, 0));
         assertEquals(3, eval("max(3, 2, 1)", 0, 0, 0));
+        // 4 参折叠（表达式不引用首参变量）：min(h, 62, 70, y)
+        assertEquals(62, eval("{ let h = 64; min(h, 62, 70, y) }", 0, 0, 100));
+        assertEquals(3, eval("{ let h = 64; min(h, 62, 70, y) }", 0, 0, 3));
+        // 4 参折叠 + 引用首参（但首参是 let 变量、非循环变量）同样按折叠
+        assertEquals(1, eval("{ let h = 100; min(h, 5, 7, 1) }", 0, 0, 0));
     }
 
     @Test

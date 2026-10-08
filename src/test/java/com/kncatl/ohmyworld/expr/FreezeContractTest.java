@@ -86,6 +86,10 @@ class FreezeContractTest {
                 6007594302591915253L);
         check("cache3d", "cache3d(fbm3(x, y, z, 300, 3, 2) + x * 0.001, 4, 8, 4)",
                 8910270147888611996L);
+        check("blur2", "blur2(noise2(x, z, 350, 9) + fbm2(x, z, 800, 3, 4), 2)",
+                -2414733403062101391L);
+        check("blur2_step", "blur2(fbm2(x, z, 600, 2, 5), 1, 8)",
+                -1924096412525953433L);
     }
 
     @Test
@@ -93,6 +97,10 @@ class FreezeContractTest {
         check("rivernet",
                 "{ let (d, w, s, o) = rivernet(192, 7); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
                 594283715443291299L);
+        check("rivernet_params",
+                "{ let (d, w, s, o) = rivernet(192, 7, 2, 0.5, 0);"
+                        + " d * 0.001 + w + s * 0.01 + o * 0.0001 }",
+                8065931128923185541L);
     }
 
     @Test

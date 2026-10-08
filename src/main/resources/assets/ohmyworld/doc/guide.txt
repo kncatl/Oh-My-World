@@ -50,13 +50,14 @@
 
     {overworld=
       let h(px, pz) = 64 + noise2(px, pz, 900, 1) * 30;
-      let slope(px, pz) = h(px + 1, pz) - h(px, pz);
-      y=-64..319: y <= h(x, z) ? (slope(x, z) > 6 ? minecraft:stone : minecraft:grass_block)
+      let rise(px, pz) = h(px + 1, pz) - h(px, pz);
+      y=-64..319: y <= h(x, z) ? (rise(x, z) > 6 ? minecraft:stone : minecraft:grass_block)
                              : minecraft:air
     }
 
   宏可以再调用宏（自引用会被展开深度上限拦下）；块内同名 let 会遮蔽宏参数；
-  宏名不能与内置函数重名；声明顺序不限（都是编译期展开）。
+  宏名不能与内置函数重名（如 slope/step 等；普通 let 不受此限制）；
+  声明顺序不限（都是编译期展开）。
 
 【循环格式】
   y=<起始>..<结束>: <厚度>*[<表达式>],<厚度>*[<表达式>],...
@@ -112,7 +113,8 @@
 
 【结构与群系指令（可选）】
 
-  在每个维度的公式内容开头，可以写方括号指令（顺序任意、可不写）：
+  在每个维度的公式内容开头，可以写方括号指令（各出现一次、顺序任意；
+  例外：叠加模式的 [terrain:vanilla] 必须写在最前）：
 
     {the_nether=
       [structure:none]
@@ -176,7 +178,8 @@
     例（温度高处回落原版，否则沙漠）：
       biome: climate(temperature, x, z) > 0.3 ? vanilla : minecraft:desert
       biome: biome_at(0.3, 0.5, 0.2, 0.0, 0.1, 0.4)
-    末地与超平坦主世界没有参数表（biome_at 视为未命中走回退）；
+    末地没有参数表（biome_at 视为未命中走回退；超平坦主世界可用——参数表由
+    原版主世界预设构造，与生成器类型无关）；
     方块层里的 vanilla 仅在叠加模式下合法（见下文）——flat 模式下写方块层会报错。
 
    ── 叠加模式（[terrain:vanilla]；M3.5）──
@@ -196,16 +199,22 @@
        vanilla                     原版方块值（方块层）：保持原样
        vis(方块)                   当前坐标的原版方块是否是指定方块
        vsolid / vfluid / vair      原版方块是否固体 / 含流体 / 空气
-       sy / sw                     该列原版含水面高度 / 液体面高度（无水时同 sy）
+       sy / sw                     该列原版含水面高度 / 液体面高度（无水时与 sy 相同）
+                                   （sy = 最高非空气方块，原版 WORLD_SURFACE 语义；
+                                    sw = 最高流体方块，无水时回落到 sy）
        curis(方块)                 surface 行：当前（补铺进行中）方块是否是指定方块
        sdist(x, z)                 到最近结构保护盒的水平距离（域内 0；无结构时很大）
+     ★ sd/sdb/wd/slope 在叠加模式的 surface 行同样可用，基于**当前活方块**
+       （H1 写入后的地形 + 本条与先前 surface 行的补铺结果）；curis 只在叠加
+       模式的 surface 行合法（flat 模式会报错）。
      ★ 层范围可写 y=surf(a..b): <表达式>——以该列 sy 为基准（a、b 可为负；
        仅叠加模式；循环层不支持）。
      ★ 表面档位（写在维度内容开头）：
        [surface:vanilla]           默认：只跑原版材料/表面通道
        [surface:vanilla+patch]     原版之后再用 surface 行补铺（curis 找暴露面）
        [surface:none]              不跑原版材料/表面，只由 surface 行铺
-     ★ 结构保护：[overlay:protect-structures] 默认开（部件包围盒外扩 24 内不修改）；
+     ★ 结构保护：[overlay:protect-structures] 默认开（部件包围盒水平外扩 24、
+       垂直 ±4 内不修改——垂直小外扩不会冻结地下结构上方的地表）；
        [overlay:protect-structures=off] 关闭后可用 sdist 自行淡出。
      ★ 编辑器预览是近似（没有原版地形：vanilla 按空气、sy/sw 按 0）。
 
@@ -441,19 +450,27 @@
      ★ 循环在编译期展开（单层 ≤64 次、嵌套总数 ≤64）；循环变量会遮蔽同名变量。
      ★ 空间助手用"步长 1 格"的中心差分；参数表达式会在偏移位置重新求值
        （外层的 let 绑定按中心列的值参与差分）。
-     ★ min/max 的 4 参循环形式与多参数折叠：首参是变量名且 4 参 → 循环。
+     ★ min/max 的 4 参循环形式与多参数折叠：首参是变量名、a/b 为整数字面量、
+       且表达式**引用该变量**时 → 循环；否则按 4 参折叠（例：min(h, 62, 70, y)）。
 
-   ── 网格采样缓存（3D 密度地形省算力）──
+   ── 网格采样缓存与平滑（3D 密度地形省算力）──
    cache2d(表达式) / cache2d(表达式, 步长)          世界对齐网格的双线性插值
                                                    （步长 1..16，默认 4）
    cache3d(表达式) / cache3d(表达式, sx, sy, sz)    三维网格三线性插值
                                                    （默认 4, 8, 4；角点用绝对 y）
+   blur2(表达式, r) / blur2(表达式, r, 步长)        网格点上的 (2r+1)² 盒卷积
+                                                   （r 1..4；步长默认 4）
 
      ★ 值 = 网格角点上的表达式求值 + 插值；网格与世界坐标对齐、跨区块无缝，
        同一角点只算一次（各线程本地缓存）。
      ★ 表达式必须自包含：只能用内建量（x/y/z/ly/seed/spawnx/spawnz），
        不得引用 let 绑定，也不能用 terrain/surfis/blockis/biomeis/rand；
-       cache2d 不得引用 ly 与 y，cache3d 不得引用 ly（可以用 y）。
+       cache2d 与 blur2 不得引用 ly 与 y，cache3d 不得引用 ly（可以用 y）。
+     ★ blur2 的网格点值 = 以该点为中心、半径 r（间距 = 步长）的 (2r+1)² 个格点的
+       表达式平均；查询点用相邻四点双线性插值——用来把 0/1 掩膜、河网距离等
+       平滑成柔和过渡（例：blur2(riverMask, 2)）。
+     ★ 宏会在自包含检查之前展开：在 cache/blur2/rivernet 的表达式里可以调用
+       宏（展开后仍须满足自包含）。
      ★ 适合"每格都算很贵的场"降采样（如 3D 密度、大尺度噪声）。
 
    ── 表面通道（surface 行：实心之后按深度/水/坡度铺面）──
@@ -468,8 +485,10 @@
          sdb    本方块下方连续实心数（洞顶/洞底判断）
          wd     无水 = -1；否则上方连续流体块数（≥1）
          slope  本列顶面与四邻列顶面的最大高差（格距 1）
+       （无括号的 slope 是这里的列量；slope(表达式) 是函数——按上下文区分）
      ★ 实心 = 非空气且非流体；邻列顶面取自表面修改前的地形
        （跨区块一致、与规则顺序无关）。
+     ★ surface 行也可以读群系（biomeis(x, z, y, 群系)）——读的是当前已填充的群系。
      ★ 编辑器预览与结构落点按**表面修改前**的公式地形计算（surface 只在区块生成时生效）。
      ★ 例（水下铺沙 + 陡坡露石 + 其余保留）：
          surface wd >= 1 && sd == 0 ? minecraft:sand : keep;
@@ -478,20 +497,27 @@
    ── 河网（rivernet：非局部河流；配合 min 使用）──
    let (距离, 半宽, 水面, 流量) = rivernet(cs, 盐)       默认高度场
    let (…) = rivernet(coarse, cs, 盐)                   自定义高度场（列表达式）
+   可在盐后追加可调参数：(…, w0, wk) 半宽基数/流量斜率；(…, w0, wk, warp) 再调蜿蜒幅度。
+   全形式：rivernet(cs, 盐[, w0, wk[, warp]]) / rivernet(coarse, cs, 盐[, w0, wk[, warp]])。
 
-     ★ 抖动网格节点 + 严格下降的下游 + 深度 3 的流量累积 → 半宽 = 3 + √流量。
+     ★ 抖动网格节点 + 严格下降的下游 + 深度 3 的流量累积 →
+       半宽 = w0 + wk·√流量（默认 w0=3、wk=1）。
      ★ 返回：距离=到最近河中线的距离；半宽=该处河道半宽；水面=水面高度
        （节点海拔沿线插值 − 3）；流量=上游累积量。
-     ★ cs ∈ 64..512（整数字面量）；盐为数字字面量；海拔 ≤ 62 的节点是终点
-       （汇入海）。省略 coarse 时用内部高度场（62 ± 28 的多倍频噪声）。
+     ★ cs ∈ 64..512（整数字面量）；盐/w0/wk/warp 为数字字面量（w0/wk/warp ≥ 0）；
+       海拔 ≤ 62 的节点是终点（汇入海）。省略 coarse 时用内部高度场
+       （62 ± 28 的多倍频噪声）。warp = 蜿蜒幅度（格，默认 0.12×cs；0 = 直线折线）。
      ★ coarse 必须自包含（只能用内建量；不引用 ly/y；不含视图/随机函数）。
      ★ 附近没有河道时：距离=1e9、水面=1e9 —— 配合 min(base, …) 即"不接管"。
-     ★ 例（河道 + 河床 + 水体）：
-        let (d, w, s, o) = rivernet(192, 7);
+     ★ 例（河道 + 河床 + 水体；coarse 用与 base 同源的高度场，水面不超过地形太多）：
         let base = 60 + fbm2(x, z, 600, 4, 1) * 20;
-        let bed = min(base, s - 4 + max(d - w, 0) * 0.7);
-        y=..: y <= bed ? (d < w ? minecraft:sand : minecraft:stone)
-             : (d < w && y <= s ? minecraft:water : minecraft:air)
+        let (d, w, s, o) = rivernet(60 + fbm2(x, z, 600, 4, 1) * 20, 192, 7);
+        let surf = min(s, base + 2);
+        let bed = min(base, surf - 4 + max(d - w, 0) * 0.7);
+        y=..: y <= bed ? (d < w && y > bed - 3 ? minecraft:sand : minecraft:stone)
+             : (d < w && y <= surf ? minecraft:water : minecraft:air)
+     ★ 调参：w0 控制最小河宽、wk 控制汇流后变宽的速度；warp 越大河道越蜿蜒。
+       两处 fbm2 必须一致（同一高度场），否则水面与地形不同源会出现水柱。
 
    ── 共享气候（M3；生成与编辑器预览均可用）──
    climate(字段, x, z)          原版气候值（约 [-1,1]；2D 形式在 y=63 采样）
@@ -501,6 +527,8 @@
      ★ 字段：temperature / humidity / continentalness / erosion / weirdness / depth
        （字段名是关键字，不能写成变量；数值为原版量化值，步进 1e-4，
        按原版 4 格分辨率采样：同一 4×4×4 格内取值相同）。
+     ★ 地形直接用会有 4 格台阶——建议包一层 cache2d 做双线性平滑，例如
+       cache2d(climate(temperature, x, z), 4)。
      ★ 取值来自该维度的原版气候采样器（与 F3 的 NoiseRouter 行一致；
        下界/末地用各自维度设置）；同一套参数同时驱动地形、群系与河流。
      ★ 编辑器预览按创建界面的种子本地构建气候（与最终世界一致）；
@@ -517,7 +545,8 @@
      ★ 注册名要带命名空间（数据包里的条目也能用）；找不到的条目返回 0，
        每个缺失 id 只记一次日志。
      ★ df/noise 单点求值没有原版缓存——逐方块直接调用非常慢，务必用
-       cache2d / cache3d 包一层，例如：cache2d(df(minecraft:overworld/ridges, x, y, z), 4)。
+       cache2d / cache3d 包一层，例如固定高度：cache2d(df(minecraft:overworld/ridges, x, 63, z), 4)
+       （cache2d 不能引用变量 y；要按高度变化请用 cache3d）。
        vheight 自带列缓存（同一列只扫描一次），逐方块调用没有问题。
      ★ vheight 描述的是**原版噪声地形**（超平坦世界按该维度噪声设置估计），
        与公式层/叠加后的地形无关；整列无实心时返回维度最低 y。
@@ -755,6 +784,10 @@
     let top = 90 - r * 0.10 + edge;
     y=0..255: y <= top * smoothstep(0.55 - islands * 1.6) ? minecraft:end_stone : minecraft:air;
 
+    已知局限：主岛不保证完整（细胞噪声与平滑系数会削弱中心，可能开洞）——末影龙、
+    黑曜石柱等原版机制需要一块完整主岛；正式使用前请自行补一段"中心实心圆盘"
+    （如 r < 220 ? minecraft:end_stone : …）或只把它当作外岛风格参考。
+
   ▸ 球形构造的"毛绒"边缘（局部构造通用套路：径向距离 + 概率斜坡 + seedhash）：
 
     {overworld=
@@ -811,7 +844,7 @@
       let base = 63 + fbm2(x, z, 900, 4, 1) * 26;      // 缓起伏陆地（低于水位处成海/湖）
       let w = noise2(x, z, 700, 7);                     // 河道线 = 该噪声的零等值线
       let t = 1 - smoothstep(abs(w) / 0.012);           // 河谷强度：中心 1、河谷外 0
-      let h = lerp(base, 57, t * t);                    // 河床压到 57（水面 62 之下 5 格）
+      let h = min(base, lerp(base, 57, t * t));         // 河床压到 57（不抬高低地）
       y=..: y <= h
         ? (y > h - 3 ? minecraft:sand : (y > h - 8 ? minecraft:gravel : minecraft:stone))
         : (y <= 62 ? minecraft:water : minecraft:air)
@@ -824,6 +857,9 @@
       · 水面宽度自动窄于河谷（高地切出峡谷、低地是宽河）；
       · 水位 62、河床 57 → 水深 5 格；改 57 即可调整深浅；
       · base < 62 的低地自动成海/湖，与河流自然连通（原版同款）。
+    已知局限（建议需要连通河网时改用上面的 rivernet 配方）：单倍频噪声的河宽
+    随地形梯度变化（宽窄不均、陡坡处可能断开）；河床固定 57、没有顺流而下；
+    两条河相交处不会自动汇流。
 
   规则与性能：
     · 噪声/细胞函数是"冻结契约"：同公式 + 同种子在任何版本生成相同的世界；

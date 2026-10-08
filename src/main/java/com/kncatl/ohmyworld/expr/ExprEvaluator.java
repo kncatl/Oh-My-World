@@ -299,6 +299,8 @@ public class ExprEvaluator {
             Map.entry("isodist", 1),
             // 1.3.1：网格采样 + 插值（编译期转换为带缓存的节点）
             Map.entry("cache2d", -1), Map.entry("cache3d", -1),
+            // 1.3.2：网格点盒卷积（编译期转换为带缓存的节点）
+            Map.entry("blur2", -1),
             // 1.3.1：河网（多返回 4：距离 / 半宽 / 水面 / 流量）
             Map.entry("rivernet", -1),
             // 1.3.2：共享气候 / 原版数据（M3）
@@ -496,6 +498,12 @@ public class ExprEvaluator {
             }
             return null;
         }
+        if (name.equals("blur2")) {
+            if (argCount < 2 || argCount > 3) {
+                return "Function 'blur2' expects 2 or 3 arguments (expression, r[, step]), got " + argCount;
+            }
+            return null;
+        }
         if (name.equals("rivernet")) {
             if (argCount != 2 && argCount != 3) {
                 return "Function 'rivernet' expects 2 or 3 arguments (cs, salt) or (coarse, cs, salt), got " + argCount;
@@ -572,6 +580,7 @@ public class ExprEvaluator {
             case ExprNode.CompiledBlockNode cb -> evalCompiledBlock(cb, x, z, ly, context);
             case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
             case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
+            case ExprNode.CompiledBlur2Node c -> evalBlur2Compiled(c, x, z, ly, context);
             case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
             case ExprNode.CompiledRiverNetNode r -> evalRiverNetCompiled(r, x, z, context);
         };
@@ -736,6 +745,8 @@ public class ExprEvaluator {
             case ExprNode.CompiledFuncCallNode f -> true;
             case ExprNode.CompiledTupleCallNode t -> true;
             case ExprNode.CompiledCache2dNode c2 -> false;
+            // blur2 已校验不引用 ly/y
+            case ExprNode.CompiledBlur2Node c4 -> false;
             case ExprNode.CompiledCache3dNode c3 -> true;
             // rivernet 只依赖 x/z（coarse 已校验不含 ly/y）
             case ExprNode.CompiledRiverNetNode r -> false;
@@ -817,6 +828,7 @@ public class ExprEvaluator {
             case ExprNode.CompiledFuncCallNode f -> evalCompiledNumberFunc(f, x, z, ly, context);
             case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
             case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
+            case ExprNode.CompiledBlur2Node c -> evalBlur2Compiled(c, x, z, ly, context);
             case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
             default -> toDouble(eval(node, x, z, ly, context));
         };
@@ -1005,6 +1017,7 @@ public class ExprEvaluator {
             case "sdist" -> overlaySdistOf(args, x, z, ly, context);
             case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
             case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
+            case "blur2" -> evalBlur2Uncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
             case "terrain" -> terrainHeight(args, x, z, ly, context);
             case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
@@ -1677,6 +1690,65 @@ public class ExprEvaluator {
         return e0 + v * (e1 - e0);
     }
 
+    /** 未编译路径：无缓存直通（网格点盒卷积 + 双线性，语义与缓存版一致）。 */
+    private static double evalBlur2Uncached(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        ExprNode expr = args.get(0);
+        int r = shrink((int) evalNumber(args.get(1), x, z, ly, context), 1, 4, 1);
+        int step = args.size() > 2 ? shrink((int) evalNumber(args.get(2), x, z, ly, context), 1, 16, 4) : 4;
+        int x0 = Math.floorDiv(x, step) * step;
+        int z0 = Math.floorDiv(z, step) * step;
+        double u = (x - x0) / (double) step;
+        double v = (z - z0) / (double) step;
+        double c00 = blurCorner(expr, x0, z0, r, step, ly, context);
+        double c10 = blurCorner(expr, x0 + step, z0, r, step, ly, context);
+        double c01 = blurCorner(expr, x0, z0 + step, r, step, ly, context);
+        double c11 = blurCorner(expr, x0 + step, z0 + step, r, step, ly, context);
+        return bilinear(c00, c10, c01, c11, u, v);
+    }
+
+    /** 网格点上的 (2r+1)² 盒平均（blur2 的核心；编译版与直通版共用）。 */
+    private static double blurCorner(ExprNode expr, int cx, int cz, int r, int step, int ly,
+                                     EvalContext context) {
+        double sum = 0;
+        for (int dj = -r; dj <= r; dj++) {
+            for (int di = -r; di <= r; di++) {
+                sum += evalNumber(expr, cx + di * step, cz + dj * step, ly, context);
+            }
+        }
+        return sum / ((2 * r + 1) * (2 * r + 1));
+    }
+
+    /** 把整数夹到 [lo, hi]；越界时取 fallback。 */
+    private static int shrink(int value, int lo, int hi, int fallback) {
+        return value < lo || value > hi ? fallback : value;
+    }
+
+    /** 编译路径：blur2（线程本地网格点缓存 + 双线性）。 */
+    private static double evalBlur2Compiled(ExprNode.CompiledBlur2Node node, int x, int z, int ly,
+                                            EvalContext context) {
+        int step = node.step();
+        int x0 = Math.floorDiv(x, step) * step;
+        int z0 = Math.floorDiv(z, step) * step;
+        double u = (x - x0) / (double) step;
+        double v = (z - z0) / (double) step;
+        LongDoubleMap map = node.cache().get().map();
+        double c00 = cachedBlurCorner(map, node, x0, z0, ly, context);
+        double c10 = cachedBlurCorner(map, node, x0 + step, z0, ly, context);
+        double c01 = cachedBlurCorner(map, node, x0, z0 + step, ly, context);
+        double c11 = cachedBlurCorner(map, node, x0 + step, z0 + step, ly, context);
+        return bilinear(c00, c10, c01, c11, u, v);
+    }
+
+    private static double cachedBlurCorner(LongDoubleMap map, ExprNode.CompiledBlur2Node node,
+                                           int cx, int cz, int ly, EvalContext context) {
+        long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+        int index = map.find(key);
+        if (index >= 0) return map.valueAt(index);
+        double value = blurCorner(node.expr(), cx, cz, node.radius(), node.step(), ly, context);
+        map.put(key, value);
+        return value;
+    }
+
     /** 编译路径：cache2d（线程本地角点缓存 + 双线性）。 */
     private static double evalCache2dCompiled(ExprNode.CompiledCache2dNode node, int x, int z, int ly,
                                               EvalContext context) {
@@ -1751,12 +1823,15 @@ public class ExprEvaluator {
 
     private static final double RIVER_SEA_LEVEL = 62;
     private static final double RIVER_SURFACE_DROP = 3;
-    private static final double RIVER_W0 = 3;
-    private static final double RIVER_WK = 1;
+    /** 半宽默认值（w0 + k·√流量）与蜿蜒默认系数（×cs）；rivernet 尾参可覆盖。 */
+    static final double RIVER_W0 = 3;
+    static final double RIVER_WK = 1;
+    static final double RIVER_WARP = 0.12;
     private static final int RIVER_QUERY_RADIUS = 2;
 
     /** 一次查询的参数束（含节点缓存的引用）。 */
-    private record RiverParams(ExprNode coarse, int cs, double salt, RiverCache cache) {}
+    private record RiverParams(ExprNode coarse, int cs, double salt, double w0, double wk, double warp,
+                               RiverCache cache) {}
 
     /** 节点哈希（世界种子 + 盐 + 节点坐标 + 通道；冻结）。 */
     private static double riverHashUnit(int i, int j, int channel, double salt) {
@@ -1833,9 +1908,9 @@ public class ExprEvaluator {
         return sum;
     }
 
-    /** 河道半宽：w0 + k·√流量（深度 3）。 */
+    /** 河道半宽：w0 + k·√流量（深度 3；w0/k 默认 3 与 1，可由 rivernet 尾参覆盖）。 */
     private static double riverWidth(RiverNode node, RiverParams p, EvalContext context) {
-        return RIVER_W0 + RIVER_WK * Math.sqrt(riverFlow(node, RiverNode.MAX_DEPTH, p, context));
+        return p.w0() + p.wk() * Math.sqrt(riverFlow(node, RiverNode.MAX_DEPTH, p, context));
     }
 
     /**
@@ -1844,8 +1919,8 @@ public class ExprEvaluator {
      * 附近没有线段时返回 (1e9, 0, 1e9, 0)（配合 min(base, …) 即不接管）。
      */
     private static double[] riverQuery(RiverParams p, int x, int z, EvalContext context) {
-        double wx = x + p.cs() * 0.12 * Noise.noise2(x, z, p.cs(), p.salt() + 9901);
-        double wz = z + p.cs() * 0.12 * Noise.noise2(x, z, p.cs(), p.salt() + 9902);
+        double wx = x + p.warp() * Noise.noise2(x, z, p.cs(), p.salt() + 9901);
+        double wz = z + p.warp() * Noise.noise2(x, z, p.cs(), p.salt() + 9902);
         int ci = (int) Math.floor(wx / p.cs());
         int cj = (int) Math.floor(wz / p.cs());
         double bestDist = Double.MAX_VALUE;
@@ -1888,21 +1963,49 @@ public class ExprEvaluator {
     private static double[] evalRiverNetCompiled(ExprNode.CompiledRiverNetNode node, int x, int z,
                                                  EvalContext context) {
         RiverParams params = new RiverParams(node.coarseExpr(), node.cs(), node.salt(),
-                node.cache().get());
+                node.w0(), node.wk(), node.warp(), node.cache().get());
         return riverQuery(params, x, z, context);
     }
 
-    /** 未编译/兜底路径：一次性计算（无跨调用缓存，语义与缓存版一致）。 */
+    /**
+     * 未编译/兜底路径：一次性计算（无跨调用缓存，语义与缓存版一致）。
+     * 形式与编译期一致：cs 形式首参为 64..512 整数字面量、次参为数字字面量；
+     * 否则为 coarse 形式；尾部可选 (w0, wk[, warp])。
+     */
     private static double[] evalRiverNetUncached(List<ExprNode> args, int x, int z, int ly,
                                                  EvalContext context) {
         int n = args.size();
-        int csIdx = n == 3 ? 1 : 0;
+        boolean csForm = isRuntimeCsForm(args);
+        int csIdx = csForm ? 0 : 1;
         int cs = (int) evalNumber(args.get(csIdx), x, z, ly, context);
         if (cs < 64 || cs > 512) cs = 192;
         double salt = evalNumber(args.get(csIdx + 1), x, z, ly, context);
-        ExprNode coarse = n == 3 ? args.get(0) : null;
-        RiverParams params = new RiverParams(coarse, cs, salt, new RiverCache());
+        ExprNode coarse = csForm ? null : args.get(0);
+        int paramsStart = csForm ? 2 : 3;
+        int paramCount = n - paramsStart;
+        double w0 = RIVER_W0;
+        double wk = RIVER_WK;
+        double warp = RIVER_WARP * cs;
+        if (paramCount >= 2) {
+            w0 = evalNumber(args.get(paramsStart), x, z, ly, context);
+            wk = evalNumber(args.get(paramsStart + 1), x, z, ly, context);
+        }
+        if (paramCount == 3) {
+            warp = evalNumber(args.get(paramsStart + 2), x, z, ly, context);
+        }
+        RiverParams params = new RiverParams(coarse, cs, salt, w0, wk, warp, new RiverCache());
         return riverQuery(params, x, z, context);
+    }
+
+    /** 运行期判定 cs 形式：首参为 64..512 的整数字面量且次参为数字字面量。 */
+    private static boolean isRuntimeCsForm(List<ExprNode> args) {
+        int n = args.size();
+        if (n == 2 || n == 4) return true;
+        if (n == 3) return false;
+        if (n != 5) return false;
+        return args.get(0) instanceof ExprNode.NumberNode cs
+                && cs.value() == Math.rint(cs.value()) && cs.value() >= 64 && cs.value() <= 512
+                && args.get(1) instanceof ExprNode.NumberNode;
     }
 
     // ---------------------------------------------------------- 样条映射（1.2.6）
