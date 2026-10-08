@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.2-beta.2
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **`blur2(expr, r[, step])`**: grid-point (2r+1)² box convolution plus bilinear interpolation (r 1..4, step 1..16 default 4) — smooth 0/1 masks, river distances and other masks into soft transitions. Same self-containment rules as cache2d.
+- **rivernet gains parameters** (same name): `rivernet(cs, salt[, w0, wk[, warp]])` (and the coarse form) tunes the half-width (w0 + wk·√flow, defaults 3 and 1) and the meander amplitude (warp, default 0.12×cs; 0 gives straight polylines). Defaults reproduce the previous behavior exactly.
+
+### Fixed
+- **`min`/`max` 4-argument ambiguity**: `min(h, 62, 70, y)` was silently treated as the loop form and returned wrong values; the loop form now requires the expression to reference the loop variable (and a/b to be integer literals), otherwise the arguments fold.
+- Structure protection (`[overlay:protect-structures]`) now inflates ±4 vertically instead of 24, so underground structures (mineshafts, ancient cities) no longer freeze the surface above them.
+
+### Changed
+- Guide corrections: macro names cannot collide with built-in functions (example renamed), cache2d examples use a fixed y, rivernet examples use a same-source coarse field, directive order wording, sy/sw wording, biome_at on superflat overworlds (works — the earlier note was wrong), climate smoothing hint, surface-row notes, overlay live-block notes, river/End recipe known limitations.
+
 ## v1.3.2-beta
 
 > Beta release — please report any issue on GitHub.
