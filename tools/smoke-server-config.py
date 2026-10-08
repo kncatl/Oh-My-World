@@ -246,12 +246,13 @@ BIOME_AT_VALUE_FORMULA = (
 )
 
 # M3.5：叠加模式冒烟（--overlay-marker）——普通噪声世界（server_mode 驱动）。
-# 在地表深处的石层里铺多种特征方块：
+# 在地表附近的石层里铺多种特征方块：
 #   带 1（keep）：偶数格写海晶灯、奇数格 keep（不改）→ 验证 keep 与"后写覆盖先写"；
 #   带 2（vanilla）：偶数格写白混凝土、奇数格 vanilla（还原 H1 快照）→ 验证快照还原；
 #   带 3（vsolid）：深处恒固体 → 铺红砖（验证 vsolid 谓词）；
 #   带 4（vis）：y=20..25 处原版石头 → 铺灰混凝土（验证 vis 方块比较）；
-#   带 5（vair）：y=200 高空恒空气 → 铺玻璃（验证 vair 谓词）。
+#   带 5（vair）：y=200 高空恒空气 → 铺玻璃（验证 vair 谓词）；
+#   带 6（surf 窗口）：sy-34..sy-32（含水面基准）的固体处铺陶瓦 → 验证窗口语法。
 # 地表/群系应保持原版（stone 特征方块 = 没有被当成 flat 公式填平/填满）。
 OVERLAY_MARKER_FORMULA = (
     "{overworld=[terrain:vanilla] "
@@ -259,7 +260,8 @@ OVERLAY_MARKER_FORMULA = (
     "y=-40..-35: floormod(x + z, 2) == 0 ? minecraft:white_concrete : vanilla;"
     "y=-50..-45: vsolid ? minecraft:bricks : keep;"
     "y=20..25: vis(minecraft:stone) ? minecraft:gray_concrete : keep;"
-    "y=200..200: vair ? minecraft:glass : keep}"
+    "y=200..200: vair ? minecraft:glass : keep;"
+    "y=surf(-34..-32): vsolid ? minecraft:terracotta : keep}"
 )
 
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的

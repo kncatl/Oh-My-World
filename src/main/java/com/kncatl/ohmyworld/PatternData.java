@@ -519,8 +519,15 @@ public class PatternData {
                         int lo;
                         int hi;
                         if (obj instanceof FormulaLayerDef f) {
-                            lo = f.resolvedStart(minY);
-                            hi = f.yEnd();
+                            if (f.hasWindow()) {
+                                // y=surf(a..b)：以该列 sy（含水面）为基准，逐列计算范围
+                                int base = overlayView.sy(worldX, worldZ);
+                                lo = base + f.windowStart();
+                                hi = base + f.windowEnd();
+                            } else {
+                                lo = f.resolvedStart(minY);
+                                hi = f.yEnd();
+                            }
                         } else if (obj instanceof CyclicLayerDef c) {
                             lo = c.resolvedStart(minY);
                             hi = c.yEnd();

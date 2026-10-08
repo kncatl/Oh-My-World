@@ -208,6 +208,8 @@ Default preset:
   vsolid / vfluid / vair    is the vanilla block here solid / fluid / air?
   sy / sw                   vanilla water-inclusive surface y / liquid surface y
                             (sw falls back to sy when there is no liquid)
+  y=surf(a..b): <expr>      layer range relative to each column's sy (a and b may be
+                            negative; overlay mode only)
     * Overlay block layers only; they read the H1 snapshot of the vanilla terrain.
 
   * Biome lines can read the formula terrain (computed from the formula layers

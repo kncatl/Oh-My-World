@@ -592,13 +592,58 @@ public class FormulaParser {
                 }
 
                 String valuePart = rangePart.substring(eqIdx + 1).trim();
-                int[] range = parseYRange(valuePart);
-                int yStart = range[0], yEnd = range[1];
-                if (yStart > yEnd) {
-                    errors.add(layerError(lineIdx, "range start " + yStart + " is greater than end " + yEnd, line));
-                    continue;
+                boolean windowed = valuePart.startsWith("surf");
+                int yStart;
+                int yEnd;
+                int windowStart = 0;
+                int windowEnd = 0;
+                if (windowed) {
+                    // y=surf(a..b)：以该列 sy（含水面）为基准的叠加窗口（仅叠加模式）。
+                    if (!overlay) {
+                        errors.add(layerError(lineIdx,
+                                "y=surf(...) windows can only be used in [terrain:vanilla] overlay mode", line));
+                        continue;
+                    }
+                    int open = valuePart.indexOf('(');
+                    int close = valuePart.lastIndexOf(')');
+                    String inner = open >= 0 && close > open
+                            ? valuePart.substring(open + 1, close).trim() : null;
+                    int dots = inner == null ? -1 : inner.indexOf("..");
+                    if (dots < 0) {
+                        errors.add(layerError(lineIdx,
+                                "malformed window \"" + valuePart + "\" (expected surf(a..b))", line));
+                        continue;
+                    }
+                    try {
+                        windowStart = Integer.parseInt(inner.substring(0, dots).trim());
+                        windowEnd = Integer.parseInt(inner.substring(dots + 2).trim());
+                    } catch (NumberFormatException e) {
+                        errors.add(layerError(lineIdx,
+                                "malformed window \"" + valuePart + "\" (expected surf(a..b))", line));
+                        continue;
+                    }
+                    if (windowStart > windowEnd) {
+                        errors.add(layerError(lineIdx,
+                                "window start " + windowStart + " is greater than end " + windowEnd, line));
+                        continue;
+                    }
+                    yStart = windowStart;
+                    yEnd = windowEnd;
+                } else {
+                    int[] range = parseYRange(valuePart);
+                    yStart = range[0];
+                    yEnd = range[1];
+                    if (yStart > yEnd) {
+                        errors.add(layerError(lineIdx, "range start " + yStart + " is greater than end " + yEnd, line));
+                        continue;
+                    }
                 }
 
+                if (windowed && exprPart.contains("*[")) {
+                    errors.add(layerError(lineIdx,
+                            "y=surf(...) windows are not supported on cyclic layers", line));
+                    continue;
+                }
                 if (exprPart.contains("*[")) {
                     List<CyclicEntry> srcEntries = parseCyclic(exprPart, shared, macros);
                     if (srcEntries.isEmpty()) {
@@ -648,7 +693,10 @@ public class FormulaParser {
                     // 「是否与 y 相关」必须在编译前判定：编译后变量变成槽位下标，
                     // 无法再从名字反推来源。
                     boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
-                    layers.add(new FormulaLayerDef(yStart, yEnd, ExprCompiler.compile(expr), !lyDependent));
+                    ExprNode compiled = ExprCompiler.compile(expr);
+                    layers.add(windowed
+                            ? new FormulaLayerDef(yStart, yEnd, compiled, !lyDependent, windowStart, windowEnd)
+                            : new FormulaLayerDef(yStart, yEnd, compiled, !lyDependent));
                 }
             } catch (StackOverflowError e) {
                 errors.add(layerError(lineIdx, "expression nesting is too deep", line));

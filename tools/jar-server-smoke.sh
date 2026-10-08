@@ -387,7 +387,7 @@ case "$CHECK_MODE" in
         ;;
     overlay-marker)
         python3 "$TOOLS/smoke-check-world.py" \
-            --expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:bricks,minecraft:gray_concrete,minecraft:glass,minecraft:stone \
+            --expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:bricks,minecraft:gray_concrete,minecraft:glass,minecraft:terracotta,minecraft:stone \
             "$SRV" || fail "叠加模式冒烟核验失败：特征方块缺失或地形被当成 flat 公式"
         ;;
     dfnoise)

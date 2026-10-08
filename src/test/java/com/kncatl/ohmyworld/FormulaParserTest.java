@@ -1091,4 +1091,30 @@ class FormulaParserTest {
         assertTrue(visNumber.errors().stream().anyMatch(e -> e.contains("expects a block")),
                 visNumber.errors().toString());
     }
+
+    /** 1.3.2 M3.5：y=surf(a..b) 窗口（仅叠加模式；格式/范围校验）。 */
+    @Test
+    void overlaySurfWindowValidate() {
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] y=surf(-24..24): floormod(x + z, 2) == 0 ? keep : vanilla}")
+                .errors().isEmpty());
+
+        // flat 模式不可用
+        FormulaParser.DimensionParseResult flat = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=surf(-1..1): rand()}");
+        assertTrue(flat.errors().stream().anyMatch(e -> e.contains("overlay mode")), flat.errors().toString());
+
+        // 格式错误 / 范围颠倒
+        FormulaParser.DimensionParseResult bad = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] y=surf(abc): rand()}");
+        assertTrue(bad.errors().stream().anyMatch(e -> e.contains("surf(a..b)")), bad.errors().toString());
+        FormulaParser.DimensionParseResult inverted = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] y=surf(5..-5): rand()}");
+        assertTrue(inverted.errors().stream().anyMatch(e -> e.contains("greater")), inverted.errors().toString());
+
+        // 循环层不支持窗口
+        FormulaParser.DimensionParseResult cyclic = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] y=surf(-2..2): 1*[minecraft:stone] }");
+        assertTrue(cyclic.errors().stream().anyMatch(e -> e.contains("cyclic")), cyclic.errors().toString());
+    }
 }
