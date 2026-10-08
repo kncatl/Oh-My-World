@@ -77,6 +77,6 @@ class BiomeQueryExprTest {
     @Test
     void vanillaBiomeValueCompilesToSentinel() {
         ExprNode node = ExprCompiler.compile(new ExprParser(ExprLexer.tokenize("vanilla")).parse());
-        assertSame(ExprEvaluator.VANILLA_BIOME, ExprEvaluator.eval(node, 0, 0, 0));
+        assertSame(ExprEvaluator.VANILLA, ExprEvaluator.eval(node, 0, 0, 0));
     }
 }

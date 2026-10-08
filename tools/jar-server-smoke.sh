@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|biome-vanilla-value|biome-at-value) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|biome-vanilla-value|biome-at-value）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|biome-vanilla-value|biome-at-value) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|biome-vanilla-value|biome-at-value）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -175,6 +175,7 @@ case "$CHECK_MODE" in
     surface)         SMOKE_CONFIG_MODE="--surface" ;;
     rivernet)        SMOKE_CONFIG_MODE="--rivernet" ;;
     climate)         SMOKE_CONFIG_MODE="--climate" ;;
+    overlay-marker)  SMOKE_CONFIG_MODE="--overlay-marker" ;;
     dfnoise)         SMOKE_CONFIG_MODE="--dfnoise" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
@@ -383,6 +384,11 @@ case "$CHECK_MODE" in
         python3 "$TOOLS/smoke-check-world.py" \
             --expect overworld minecraft:sand,minecraft:polished_blackstone_bricks \
             "$SRV" || fail "共享气候冒烟核验失败：温度分带特征方块缺失"
+        ;;
+    overlay-marker)
+        python3 "$TOOLS/smoke-check-world.py" \
+            --expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:stone \
+            "$SRV" || fail "叠加模式冒烟核验失败：特征方块缺失或地形被当成 flat 公式"
         ;;
     dfnoise)
         python3 "$TOOLS/smoke-check-world.py" \

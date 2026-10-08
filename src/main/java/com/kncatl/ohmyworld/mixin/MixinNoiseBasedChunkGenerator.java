@@ -95,6 +95,22 @@ public class MixinNoiseBasedChunkGenerator {
             }
         }
     }
+
+    /**
+     * H1（26.3）：材料通道（buildSurface）之后、雕刻之前。
+     *
+     * <p>26.3 的材料系统会在 buildSurface 阶段重写大片分节（含深层深板岩/石），
+     * 因此后处理必须放在它之后才能保留（实测：放在 buildSurface 之前的写入
+     * 会在材料通道中被整段覆盖）。
+     */
+    @Inject(method = "generateCarvers", at = @At("HEAD"))
+    private void ohmyworld$beforeGenerateCarvers(ChunkAccess chunk, Blender blender, NoiseChunk noiseChunk,
+                                                 RandomState randomState, BiomeManager biomeManager,
+                                                 WorldGenRegion carverBiomeRegion,
+                                                 net.minecraft.world.level.levelgen.material.rule.MaterialRule materialRule,
+                                                 CallbackInfo ci) {
+        ohmyworld$overlayAfterTerrain(chunk);
+    }
     //?} else {
     @Inject(method = "fillFromNoise", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onFillFromNoise(Blender blender, RandomState randomState,
@@ -103,11 +119,31 @@ public class MixinNoiseBasedChunkGenerator {
         ohmyworld$fillFromPattern(chunk, cir);
     }
 
-    /** 公式接管地形时，不再让原版表面规则改写公式方块。 */
+    /**
+     * H1（1.21.x）：1.21 的 fillFromNoise 是异步 future（RETURN 时地形尚未写完），
+     * 因此在返回的 future 上追加后处理——它在同一异步线程、分节释放之后执行，
+     * 随后才是原版 buildSurface。
+     */
+    @Inject(method = "fillFromNoise", at = @At("RETURN"), cancellable = true)
+    private void ohmyworld$afterFillFromNoise(Blender blender, RandomState randomState,
+                                              StructureManager structureManager, ChunkAccess chunk,
+                                              CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot == null || !snapshot.overlay()) return;
+        CompletableFuture<ChunkAccess> original = cir.getReturnValue();
+        if (original == null) return;
+        cir.setReturnValue(original.thenApply(filled -> {
+            ohmyworld$overlayAfterTerrain(filled);
+            return filled;
+        }));
+    }
+
+    /** 公式接管地形时，不再让原版表面规则改写公式方块（叠加模式默认放行原版表面）。 */
     @Inject(method = "buildSurface", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onBuildSurface(WorldGenRegion region, StructureManager structureManager,
                                           RandomState randomState, ChunkAccess chunk, CallbackInfo ci) {
-        if (PatternData.snapshotFor((ChunkGenerator) (Object) this) != null) ci.cancel();
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot != null && !snapshot.overlay()) ci.cancel();
     }
 
     /** 公式接管地形时，不再让原版雕刻器在公式方块上挖洞；[carvers:vanilla] 可放行。 */
@@ -129,6 +165,8 @@ public class MixinNoiseBasedChunkGenerator {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null) return;
         if (snapshot.layers().isEmpty()) return;
+        // 叠加模式（R-D）：结构放置用原版高度，不反映叠加地形
+        if (snapshot.overlay()) return;
 
         try {
             cir.setReturnValue(PatternData.getBaseHeight(snapshot, x, z, type,
@@ -146,6 +184,8 @@ public class MixinNoiseBasedChunkGenerator {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null) return;
         if (snapshot.layers().isEmpty()) return;
+        // 叠加模式（R-D）：结构放置用原版列，不反映叠加地形
+        if (snapshot.overlay()) return;
 
         int minY = LevelHeights.minY(height);
         int total = height.getHeight();
@@ -163,6 +203,8 @@ public class MixinNoiseBasedChunkGenerator {
     private boolean ohmyworld$fillFromPattern(ChunkAccess chunk, CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || snapshot.layers().isEmpty()) return false;
+        // 叠加模式：不接管地形，让原版先跑，随后在 H1 做后处理（见 ohmyworld$overlayAfterTerrain）
+        if (snapshot.overlay()) return false;
 
         try {
             PatternData.fillChunk(chunk, snapshot, PatternData.vanillaViewFor((ChunkGenerator) (Object) this));
@@ -177,4 +219,25 @@ public class MixinNoiseBasedChunkGenerator {
         cir.setReturnValue(CompletableFuture.completedFuture(chunk));
         return true;
     }
+
+    /** 叠加模式（H1）：原版地形写完后的公式后处理；非 overlay 时无事发生。 */
+    private void ohmyworld$overlayAfterTerrain(ChunkAccess chunk) {
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot == null || !snapshot.overlay()) return;
+        if (OhMyWorldConfig.debugLogsEnabled() && OVERLAY_LOGGED.compareAndSet(false, true)) {
+            LOGGER.info("ohmyworld: overlay terrain processing first chunk {}", chunk.getPos());
+        }
+        try {
+            PatternData.overlayChunk(chunk, snapshot,
+                    PatternData.vanillaViewFor((ChunkGenerator) (Object) this));
+        } catch (Exception e) {
+            LOGGER.error("ohmyworld: overlay terrain processing failed, disabling pattern", e);
+            PatternData.clearActive();
+            PatternData.clearPending();
+        }
+    }
+
+    /** 调试日志：叠加后处理是否触发，只记录一次。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean OVERLAY_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
 }

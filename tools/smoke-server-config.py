@@ -84,6 +84,10 @@
   的反对称比较铺沙 / 黑石砖；forceload 扩大采样范围；两种特征方块都要出现（--expect），
   证明气候视图构建、量化取值与公式取数整条链路真的跑过。
 
+--overlay-marker（1.3.2 M3.5）：叠加模式冒烟——普通噪声世界（server_mode）；
+  叠加层在深层石层里铺 海晶灯/白混凝土 两种特征方块（keep 与 vanilla 还原各一半），
+  地表与群系保持原版（stone 仍在 = 没有被当成 flat 公式填平）。
+
 --dfnoise（1.3.2）：原版数据冒烟——df(minecraft:overworld/ridges, …) 与
   noise(minecraft:temperature, …) 各做一次反对称比较、vheight(x, z) 做一次
   x/z 互换比较（沙/砖、砾/黏土、白/灰混凝土六种特征方块，三个 y 特征带各一组）；
@@ -239,6 +243,17 @@ BIOME_AT_VALUE_FORMULA = (
     "{overworld=y=0: minecraft:stone;y=1..64: minecraft:air}"
     "{the_nether=biome: x < -100000 ? minecraft:nether_wastes : biome_at(x * 0.002, 0.0, 0.0, 0.0, 0.0, 0.0); "
     "y=0: minecraft:bedrock;y=1..127: minecraft:netherrack;y=128..255: minecraft:air}"
+)
+
+# M3.5：叠加模式冒烟（--overlay-marker）——普通噪声世界（server_mode 驱动）。
+# 在地表深处的石层里铺两种特征方块：
+#   带 1（keep）：偶数格写海晶灯、奇数格 keep（不改）→ 验证 keep 与"后写覆盖先写"；
+#   带 2（vanilla）：偶数格写白混凝土、奇数格 vanilla（还原 H1 快照）→ 验证快照还原。
+# 地表/群系应保持原版（stone 特征方块 = 没有被当成 flat 公式填平/填满）。
+OVERLAY_MARKER_FORMULA = (
+    "{overworld=[terrain:vanilla] "
+    "y=-30..-20: floormod(x + z, 2) == 0 ? minecraft:sea_lantern : keep;"
+    "y=-40..-35: floormod(x + z, 2) == 0 ? minecraft:white_concrete : vanilla}"
 )
 
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的
@@ -444,6 +459,7 @@ def main():
     biome_vanilla = "--biome-vanilla" in sys.argv
     biome_vanilla_value = "--biome-vanilla-value" in sys.argv
     biome_at_value = "--biome-at-value" in sys.argv
+    overlay_marker = "--overlay-marker" in sys.argv
     biome_structures = "--biome-structures" in sys.argv
     biome_formula = "--biome-formula" in sys.argv
     biome_formula_fallback = "--biome-formula-fallback" in sys.argv
@@ -479,8 +495,8 @@ def main():
                 key, _, value = line.partition("=")
                 props[key.strip()] = value.strip()
     props.update(PROPERTIES)
-    if carvers or carvers_off or spawn_formula:
-        # 雕刻器只存在于噪声生成器：必须用普通世界类型。
+    if carvers or carvers_off or spawn_formula or overlay_marker:
+        # 雕刻器/出生点/叠加模式只存在于噪声生成器：必须用普通世界类型。
         # 出生点专项同理：超平坦世界的出生点固定在 (0,0)，噪声世界的出生点随种子变化，
         # 才能区分"读到真实出生点"与"恒为 0"。
         props["level-type"] = "minecraft\\:normal"
@@ -521,6 +537,8 @@ def main():
         formula = BIOME_VANILLA_VALUE_FORMULA
     elif biome_at_value:
         formula = BIOME_AT_VALUE_FORMULA
+    elif overlay_marker:
+        formula = OVERLAY_MARKER_FORMULA
     elif biome_structures:
         formula = BIOME_STRUCTURES_FORMULA
     elif biome_formula:
@@ -573,6 +591,7 @@ def main():
                      or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value
+                     or overlay_marker
                      or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off

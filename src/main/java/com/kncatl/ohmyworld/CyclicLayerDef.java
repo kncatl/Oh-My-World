@@ -75,6 +75,24 @@ public class CyclicLayerDef {
     }
 
     /**
+     * 原样求值（叠加模式用）：按 pos 选中条目后返回原始结果
+     * （{@code BlockState} 或 {@link ExprEvaluator#VANILLA} / {@code SURFACE_KEEP} 哨兵）。
+     */
+    public Object evalResult(int worldX, int worldZ, int globalY, int dimensionMinY) {
+        if (cycleLength == 0) return Blocks.AIR.defaultBlockState();
+        int start = resolvedStart(dimensionMinY);
+        int pos = posOf(globalY, dimensionMinY);
+        long acc = 0;
+        for (Entry e : entries) {
+            if (pos < acc + e.thickness()) {
+                return ExprEvaluator.evalAt(e.expression(), worldX, worldZ, globalY - start, globalY);
+            }
+            acc += e.thickness();
+        }
+        return Blocks.AIR.defaultBlockState();
+    }
+
+    /**
      * @param expression  已编译的条目表达式
      * @param lyDependent 该条目是否引用 ly，需在编译前判定
      */

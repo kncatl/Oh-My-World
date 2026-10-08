@@ -26,4 +26,17 @@ public final class ChunkWrites {
         chunk.setBlockState(pos, state, false);
         //?}
     }
+
+    /**
+     * 标记该坐标参与"生成后处理"（新放置/移除的水、岩浆等流体）。
+     *
+     * <p>26.3 的方法名改成了 {@code markPosForPostProcessing}（首字母大写）。
+     */
+    public static void markForPostProcessing(ChunkAccess chunk, BlockPos pos) {
+        //? >=26.3 {
+        chunk.markPosForPostProcessing(pos);
+        //?} else {
+        chunk.markPosForPostprocessing(pos);
+        //?}
+    }
 }

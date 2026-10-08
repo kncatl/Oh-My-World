@@ -454,7 +454,7 @@ public final class ExprCompiler {
             case "wd" -> new ExprNode.BuiltinNode(10);
             case "slope" -> new ExprNode.BuiltinNode(11);
             // biome 行的 vanilla 群系值（语义校验只在 biome 行放行）
-            case "vanilla" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VANILLA_BIOME);
+            case "vanilla" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VANILLA);
             // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };

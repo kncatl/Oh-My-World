@@ -1044,4 +1044,24 @@ class FormulaParserTest {
                         + " y=-64..: rand()}");
         assertTrue(flatBiome.errors().isEmpty(), flatBiome.errors().toString());
     }
+
+    /** 1.3.2 M3.5：叠加层放行 vanilla/keep；默认雕刻器 = vanilla（可显式覆盖）。 */
+    @Test
+    void overlayLayerVariablesAndCarvers() {
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] y=-64..: floormod(x + z, 2) == 0 ? keep : vanilla}")
+                .errors().isEmpty());
+        FormulaParser.DimensionParseResult flatKeep = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=-64..: floormod(x + z, 2) == 0 ? keep : rand()}");
+        assertTrue(flatKeep.errors().stream().anyMatch(e -> e.contains("keep")),
+                flatKeep.errors().toString());
+
+        var overlay = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] y=-64..: rand()}").dimensions().get("overworld");
+        assertSame(DimensionRules.CarversMode.VANILLA, overlay.carvers());
+        var overlayNone = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] [carvers:none] y=-64..: rand()}")
+                .dimensions().get("overworld");
+        assertSame(DimensionRules.CarversMode.NONE, overlayNone.carvers());
+    }
 }

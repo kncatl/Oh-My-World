@@ -46,4 +46,13 @@ public class FormulaLayerDef {
         int start = resolvedStart(dimensionMinY);
         return ExprEvaluator.evalToBlock(expression, worldX, worldZ, globalY - start, globalY);
     }
+
+    /**
+     * 原样求值（叠加模式用）：返回 {@code BlockState}、{@link ExprEvaluator#VANILLA}
+     * 或 {@link ExprEvaluator#SURFACE_KEEP} 等哨兵，由调用方解释。
+     */
+    public Object evalResult(int worldX, int worldZ, int globalY, int dimensionMinY) {
+        int start = resolvedStart(dimensionMinY);
+        return ExprEvaluator.evalAt(expression, worldX, worldZ, globalY - start, globalY);
+    }
 }

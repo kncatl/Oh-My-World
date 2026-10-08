@@ -202,7 +202,7 @@ public class FormulaBiomeSource extends BiomeSource {
         try {
             Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(), y,
                     this::resolveBiomeLiteral, terrain);
-            if (result == ExprEvaluator.VANILLA_BIOME) {
+            if (result == ExprEvaluator.VANILLA) {
                 // vanilla 群系值：取该维度原版分布源在该 4×4×4 格的群系
                 // （与 [biome:vanilla] 一致；不走 2d 回退的参考高度）
                 return vanillaQuery == null

@@ -309,6 +309,9 @@ public class FormulaParser {
             firstDirective = false;
         }
 
+        // 叠加模式默认雕刻器 = 原版原生（含含水层）；显式 [carvers:...] 仍可覆盖（第九章 §9.1）
+        if (overlay && !carversSeen) carvers = DimensionRules.CarversMode.VANILLA;
+
         String layerText = content.substring(pos).trim();
         if (layerText.isEmpty()) {
             errors.add(name + ": dimension section is empty");
@@ -486,6 +489,16 @@ public class FormulaParser {
     }
 
     /** 旧入口的层解析主体（含 smartSplit 分段、共享 let 收集与逐层校验）。 */
+    /** 方块层语义校验的变量表：叠加模式下额外放行 vanilla（原版方块）与 keep。 */
+    private static Map<String, ExprEvaluator.ValueType> blockModeVariables(boolean overlay) {
+        Map<String, ExprEvaluator.ValueType> vars = new HashMap<>();
+        if (overlay) {
+            vars.put("vanilla", ExprEvaluator.ValueType.BLOCK);
+            vars.put("keep", ExprEvaluator.ValueType.BLOCK);
+        }
+        return vars;
+    }
+
     private static ParseResult parseLayers(String cleaned) {
         return parseLayers(cleaned, false);
     }
@@ -598,7 +611,8 @@ public class FormulaParser {
                     // 这里顺带修掉那个盲区）。
                     List<String> valErrors = new ArrayList<>();
                     for (CyclicEntry e : srcEntries) {
-                        ExprEvaluator.ValueType type = validateNode(e.expression(), valErrors, new HashMap<>(), false);
+                        ExprEvaluator.ValueType type = validateNode(e.expression(), valErrors,
+                                blockModeVariables(overlay), false);
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                             valErrors.add("Cyclic layer expression must return a block, got " + type);
                         }
@@ -618,7 +632,7 @@ public class FormulaParser {
                             expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
                     if (!usesBiomeQueries && usesBiomeQuery(expr)) usesBiomeQueries = true;
                     List<String> valErrors = new ArrayList<>();
-                    ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), false);
+                    ExprEvaluator.ValueType type = validateNode(expr, valErrors, blockModeVariables(overlay), false);
                     if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                         valErrors.add("Layer expression must return a block, got " + type);
                     }
@@ -1420,11 +1434,11 @@ public class FormulaParser {
     }
 
     /** 需要原版群系分布的功能（M3.3：biome_at / vanilla 群系值）。 */
-    private static final Set<String> VANILLA_BIOME_FUNCTIONS = Set.of("biome_at");
+    private static final Set<String> VANILLA_FUNCTIONS = Set.of("biome_at");
 
     /** 表达式是否用到原版群系分布（按名字/编号查 biome_at；vanilla 标识符编译为哨兵节点）。 */
     private static boolean usesVanillaBiome(ExprNode node) {
-        return walkFunctions(node, VANILLA_BIOME_FUNCTIONS::contains, id -> id == ExprEvaluator.FN_BIOME_AT)
+        return walkFunctions(node, VANILLA_FUNCTIONS::contains, id -> id == ExprEvaluator.FN_BIOME_AT)
                 || walkVanillaBuiltin(node);
     }
 
@@ -1443,7 +1457,7 @@ public class FormulaParser {
             case ExprNode.BlockExprNode be -> be.bindings().stream()
                     .anyMatch(binding -> walkVanillaBuiltin(binding.value()))
                     || walkVanillaBuiltin(be.body());
-            case ExprNode.BuiltinNode b -> b.kind() == ExprEvaluator.BUILTIN_VANILLA_BIOME;
+            case ExprNode.BuiltinNode b -> b.kind() == ExprEvaluator.BUILTIN_VANILLA;
             case ExprNode.SlotNode ignored -> false;
             case ExprNode.CompiledFuncCallNode f -> f.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);
             case ExprNode.CompiledTupleCallNode t -> t.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);

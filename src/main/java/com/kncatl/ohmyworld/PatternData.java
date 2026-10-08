@@ -26,6 +26,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 
@@ -457,6 +459,115 @@ public class PatternData {
     @FunctionalInterface
     private interface QuartBiomeSource {
         Holder<Biome> getNoiseBiome(int qx, int qy, int qz);
+    }
+
+    /**
+     * 叠加模式（[terrain:vanilla]，M3.5）：原版地形写完（H1）后，用公式层做后处理。
+     *
+     * <p>语义（第九章 §9.3）：{@code vanilla} = H1 前的原版方块快照；{@code keep} =
+     * 此前各层合成后的当前方块；表达式结果与当前值相同则不写；后写覆盖先写。
+     * 高度图按写入增量更新；新放置/移除的水与岩浆标记生成后处理。
+     */
+    public static void overlayChunk(ChunkAccess chunk, PatternSnapshot snapshot,
+                                    ExprEvaluator.VanillaView vanillaView) {
+        if (snapshot.layers().isEmpty()) return;
+        ExprEvaluator.BiomeView savedBiome = ExprEvaluator.biomeView();
+        ExprEvaluator.VanillaView savedVanilla = ExprEvaluator.vanillaView();
+        ExprEvaluator.setBiomeView(biomeViewFor(chunk));
+        ExprEvaluator.setVanillaView(vanillaView);
+        try {
+            overlayChunkInternal(chunk, snapshot);
+        } finally {
+            ExprEvaluator.setBiomeView(savedBiome);
+            ExprEvaluator.setVanillaView(savedVanilla);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void overlayChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
+        List<Object> layers = snapshot.layers();
+        int writes = 0;
+        Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        int cx = chunk.getPos().getMinBlockX();
+        int cz = chunk.getPos().getMinBlockZ();
+        int minY = LevelHeights.minY(chunk);
+        int maxY = LevelHeights.maxY(chunk);
+
+        // H1 快照：分节拷贝（null 分节 = 全空气；直接写入不会改动这份拷贝）
+        LevelChunkSection[] sections = chunk.getSections();
+        PalettedContainer<BlockState>[] vanilla = new PalettedContainer[sections.length];
+        for (int i = 0; i < sections.length; i++) {
+            if (sections[i] != null) vanilla[i] = sections[i].getStates().copy();
+        }
+
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos firstWrite = new BlockPos.MutableBlockPos();
+        boolean hasFirstWrite = false;
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int worldX = cx + x;
+                int worldZ = cz + z;
+                // 后写覆盖先写：按层序逐层求值、就地写入
+                for (Object obj : layers) {
+                    int lo;
+                    int hi;
+                    if (obj instanceof FormulaLayerDef f) {
+                        lo = f.resolvedStart(minY);
+                        hi = f.yEnd();
+                    } else if (obj instanceof CyclicLayerDef c) {
+                        lo = c.resolvedStart(minY);
+                        hi = c.yEnd();
+                    } else {
+                        continue;
+                    }
+                    lo = Math.max(lo, minY);
+                    hi = Math.min(hi, maxY - 1);
+                    for (int y = lo; y <= hi; y++) {
+                        Object result = obj instanceof FormulaLayerDef f
+                                ? f.evalResult(worldX, worldZ, y, minY)
+                                : ((CyclicLayerDef) obj).evalResult(worldX, worldZ, y, minY);
+                        if (result == ExprEvaluator.SURFACE_KEEP) continue;
+                        BlockState target = result == ExprEvaluator.VANILLA
+                                ? vanillaAt(chunk, vanilla, x, y, z)
+                                : result instanceof BlockState st ? st : null;
+                        if (target == null) continue;
+                        pos.set(worldX, y, worldZ);
+                        BlockState current = chunk.getBlockState(pos);
+                        if (target == current) continue;
+                        boolean wasFluid = !current.getFluidState().isEmpty();
+                        ChunkWrites.setBlock(chunk, pos, target);
+                        h0.update(x, y, z, target);
+                        h1.update(x, y, z, target);
+                        if (wasFluid || !target.getFluidState().isEmpty()) {
+                            ChunkWrites.markForPostProcessing(chunk, pos);
+                        }
+                        writes++;
+                        if (!hasFirstWrite) {
+                            hasFirstWrite = true;
+                            firstWrite.set(pos);
+                        }
+                    }
+                }
+            }
+        }
+        if (OhMyWorldConfig.debugLogsEnabled() && writes > 0
+                && OVERLAY_WRITES_LOGGED.compareAndSet(false, true)) {
+            LOGGER.info("ohmyworld: overlay writes in first processed chunk {} (first write at {} -> {})",
+                    writes, firstWrite, hasFirstWrite ? chunk.getBlockState(firstWrite) : "n/a");
+        }
+    }
+
+    /** 调试日志：叠加后处理的首次写入计数，只记录一次。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean OVERLAY_WRITES_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** 叠加模式的结果解释：keep→不改；vanilla→还原快照；方块→写入；其余忽略。 */
+    private static BlockState vanillaAt(ChunkAccess chunk, PalettedContainer<BlockState>[] vanilla,
+                                        int x, int y, int z) {
+        int index = chunk.getSectionIndex(y);
+        if (index < 0 || index >= vanilla.length || vanilla[index] == null) return AIR;
+        return vanilla[index].get(x & 15, y & 15, z & 15);
     }
 
     private static void fillChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {

@@ -112,14 +112,15 @@ public class ExprEvaluator {
     public static final Object SURFACE_KEEP = new Object();
 
     /**
-     * biome 行（M3.3）的 {@code vanilla} 群系值：求值返回该哨兵，由公式群系源
-     * 替换为该 4×4×4 格在回退源里的群系（与 {@code [biome:vanilla]} 逐格一致）。
-     * 只在 biome 行合法（解析期用变量表放行，照 {@code keep} 的成例）。
+     * {@code vanilla} 令牌的哨兵（M3.3/M3.5）：按上下文解释——
+     * biome 行 = 该 4×4×4 格的原版群系（由公式群系源替换）；
+     * 叠加模式方块层 = 当前坐标的原版方块（由叠加后处理还原为 H1 快照值）。
+     * 只在对应位置合法（解析期用变量表放行，照 {@code keep} 的成例）。
      */
-    public static final Object VANILLA_BIOME = new Object();
+    public static final Object VANILLA = new Object();
 
-    /** BuiltinNode kind：{@code vanilla} 群系值（7=keep、8..11=表面通道量）。 */
-    public static final int BUILTIN_VANILLA_BIOME = 12;
+    /** BuiltinNode kind：{@code vanilla}（7=keep、8..11=表面通道量）。 */
+    public static final int BUILTIN_VANILLA = 12;
 
     /**
      * biome 行读取原版群系分布的视图（M3.3）：{@code biome_at()} 用它查询参数表。
@@ -496,7 +497,7 @@ public class ExprEvaluator {
             case ExprNode.TupleCallNode t -> evalTupleCall(t.name(), t.args(), x, z, ly, context);
             // 编译后的形态：变量读取变成数组下标，不再有任何 Map 操作
             case ExprNode.BuiltinNode b -> b.kind() == 7 ? SURFACE_KEEP
-                    : b.kind() == BUILTIN_VANILLA_BIOME ? VANILLA_BIOME
+                    : b.kind() == BUILTIN_VANILLA ? VANILLA
                     : builtinValue(b.kind(), x, z, ly, context.globalY);
             case ExprNode.SlotNode s -> context.slot(s.slot());
             case ExprNode.CompiledFuncCallNode f -> evalCompiledFunc(f, x, z, ly, context);

@@ -90,6 +90,10 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 9"
         CONSOLE_FORCELOAD="execute in minecraft:the_nether run forceload add -192 -192 63 63"
         ;;
+    overlay-marker)
+        CONFIG_FLAGS="--overlay-marker"
+        CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:stone"
+        ;;
     biome-formula-fallback)
         CONFIG_FLAGS="--biome-formula-fallback"
         CHECK_ARGS="--biome-smoke 4"
@@ -123,7 +127,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac
