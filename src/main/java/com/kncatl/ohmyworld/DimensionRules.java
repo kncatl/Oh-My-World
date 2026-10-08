@@ -78,6 +78,16 @@ public final class DimensionRules {
         VANILLA
     }
 
+    /** 叠加模式（[terrain:vanilla]）的表面策略（M3.5；只对叠加模式有意义）。 */
+    public enum SurfaceMode {
+        /** 默认：只跑原版材料/表面通道（`[surface:vanilla]`）。 */
+        VANILLA,
+        /** 原版之后再用公式 surface 行补铺（`[surface:vanilla+patch]`，支持 curis）。 */
+        VANILLA_PATCH,
+        /** 不跑原版材料/表面，只由公式 surface 行铺（`[surface:none]`）。 */
+        NONE
+    }
+
     /** 规范化名称：去掉 {@code minecraft:} 前缀，其余命名空间保留。 */
     public static String normalizeName(String name) {
         String s = name.trim();

@@ -92,7 +92,7 @@ case "$MODE" in
         ;;
     overlay-marker)
         CONFIG_FLAGS="--overlay-marker"
-        CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:bricks,minecraft:gray_concrete,minecraft:glass,minecraft:terracotta,minecraft:stone"
+        CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:bricks,minecraft:gray_concrete,minecraft:glass,minecraft:terracotta,minecraft:amethyst_block,minecraft:stone"
         ;;
     biome-formula-fallback)
         CONFIG_FLAGS="--biome-formula-fallback"

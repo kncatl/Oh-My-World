@@ -90,7 +90,8 @@ public class PatternData {
                                   boolean featuresOff, List<BiomeLayerDef> biomeLayers,
                                   List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla,
-                                  boolean usesVanillaData, boolean overlay) {}
+                                  boolean usesVanillaData, boolean overlay,
+                                  DimensionRules.SurfaceMode surfaceMode) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -115,7 +116,7 @@ public class PatternData {
                         parsed.featuresOff(), List.copyOf(parsed.biomeLayers()),
                         List.copyOf(parsed.surfaceLayers()), parsed.biomeFallback(),
                         parsed.carvers() == DimensionRules.CarversMode.VANILLA,
-                        FormulaParser.usesVanillaData(parsed), parsed.overlay());
+                        FormulaParser.usesVanillaData(parsed), parsed.overlay(), parsed.surfaceMode());
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -163,7 +164,8 @@ public class PatternData {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
-                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false);
+                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false,
+                        DimensionRules.SurfaceMode.VANILLA);
             }
             return defaultSnapshot;
         }
@@ -502,7 +504,7 @@ public class PatternData {
         }
 
         // 叠加视图（sy/sw 列量与 vis/vsolid/vfluid/vair 快照谓词）在此区块求值期间生效
-        SnapshotOverlayView overlayView = new SnapshotOverlayView(minY, vanilla);
+        SnapshotOverlayView overlayView = new SnapshotOverlayView(minY, vanilla, chunk);
         ExprEvaluator.OverlayView savedOverlay = ExprEvaluator.overlayView();
         ExprEvaluator.setOverlayView(overlayView);
 
@@ -564,6 +566,14 @@ public class PatternData {
                     }
                 }
             }
+            // H3：表面补铺（[surface:vanilla+patch] 接原版之后；[surface:none] 原版已取消）
+            if (snapshot.surfaceMode() != DimensionRules.SurfaceMode.VANILLA) {
+                try {
+                    applyOverlaySurface(chunk, snapshot, overlayView, minY, maxY);
+                } finally {
+                    ExprEvaluator.clearSurfaceValues();
+                }
+            }
         } finally {
             ExprEvaluator.setOverlayView(savedOverlay);
         }
@@ -571,6 +581,108 @@ public class PatternData {
                 && OVERLAY_WRITES_LOGGED.compareAndSet(false, true)) {
             LOGGER.info("ohmyworld: overlay writes in first processed chunk {} (first write at {} -> {})",
                     writes, firstWrite, hasFirstWrite ? chunk.getBlockState(firstWrite) : "n/a");
+        }
+    }
+
+    /**
+     * 叠加模式的表面补铺（H3；M3.5）：在 H1 之后按 surface 行扫列（读当前区块方块）。
+     * {@code curis} 读到的就是当前（补铺进行中）方块；{@code sd/sdb/wd/slope} 语义与
+     * flat 表面通道一致。slope 的边框列按 H1 前快照近似（不读邻区块）。
+     * 仅在 [surface:vanilla+patch]（接原版之后）或 [surface:none]（原版被取消后）执行。
+     */
+    private static void applyOverlaySurface(ChunkAccess chunk, PatternSnapshot snapshot,
+                                            SnapshotOverlayView overlayView, int minY, int maxY) {
+        List<SurfaceLayerDef> rows = snapshot.surfaceLayers();
+        if (rows.isEmpty()) return;
+        int cx = chunk.getPos().getMinBlockX();
+        int cz = chunk.getPos().getMinBlockZ();
+        Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+
+        // 行范围：扫描只需覆盖各行区间的并集（sd/sdb/wd 从列顶往下累积）
+        int scanLo = Integer.MAX_VALUE;
+        for (SurfaceLayerDef line : rows) scanLo = Math.min(scanLo, line.resolvedStart(minY));
+        scanLo = Math.max(scanLo, minY);
+
+        // 18×18 顶面（内部列读区块；边框列按 H1 前快照近似）
+        int[] top = new int[18 * 18];
+        for (int gx = 0; gx < 18; gx++) {
+            for (int gz = 0; gz < 18; gz++) {
+                int worldX = cx + gx - 1;
+                int worldZ = cz + gz - 1;
+                boolean interior = gx >= 1 && gx <= 16 && gz >= 1 && gz <= 16;
+                int found = minY - 1;
+                for (int y = maxY - 1; y >= scanLo; y--) {
+                    BlockState state = interior
+                            ? chunk.getBlockState(pos.set(worldX, y, worldZ))
+                            : overlayView.stateAt(worldX, y, worldZ);
+                    if (isSurfaceSolid(state)) {
+                        found = y;
+                        break;
+                    }
+                }
+                top[gx * 18 + gz] = found;
+            }
+        }
+
+        // 每列自上而下应用（与 flat 表面通道同序）
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int gx = x + 1;
+                int gz = z + 1;
+                int here = top[gx * 18 + gz];
+                int slope = Math.max(
+                        Math.max(Math.abs(here - top[(gx - 1) * 18 + gz]),
+                                Math.abs(here - top[(gx + 1) * 18 + gz])),
+                        Math.max(Math.abs(here - top[gx * 18 + (gz - 1)]),
+                                Math.abs(here - top[gx * 18 + (gz + 1)])));
+
+                int worldX = cx + x;
+                int worldZ = cz + z;
+                int sdAbove = 0;
+                int fluidRun = 0;
+                for (int y = maxY - 1; y >= scanLo; y--) {
+                    pos.set(worldX, y, worldZ);
+                    BlockState state = chunk.getBlockState(pos);
+                    boolean fluid = !state.getFluidState().isEmpty();
+                    boolean solid = !state.isAir() && !fluid;
+                    double wd = fluidRun > 0 ? fluidRun : -1;
+                    if (solid) {
+                        int sd = sdAbove;
+                        for (SurfaceLayerDef line : rows) {
+                            if (y < line.resolvedStart(minY) || y > line.resolvedEnd(maxY - 1)) continue;
+                            if (sd > line.maxDepth()) continue;
+                            int sdb = 0;
+                            int lowest = Math.max(scanLo, y - 1 - line.maxDepth());
+                            for (int yy = y - 1; yy >= lowest; yy--) {
+                                if (isSurfaceSolid(chunk.getBlockState(pos.set(worldX, yy, worldZ)))) sdb++;
+                                else break;
+                            }
+                            pos.set(worldX, y, worldZ);
+                            ExprEvaluator.setSurfaceValues(sd, sdb, wd, slope);
+                            Object result = ExprEvaluator.evalToSurface(
+                                    line.expression(), worldX, worldZ, y - line.resolvedStart(minY), y);
+                            if (result != ExprEvaluator.SURFACE_KEEP && result instanceof BlockState replacement) {
+                                if (replacement == state) continue;
+                                boolean wasFluid = !state.getFluidState().isEmpty();
+                                ChunkWrites.setBlock(chunk, pos, replacement);
+                                h0.update(x, y, z, replacement);
+                                h1.update(x, y, z, replacement);
+                                if (wasFluid || !replacement.getFluidState().isEmpty()) {
+                                    ChunkWrites.markForPostProcessing(chunk, pos);
+                                }
+                                state = replacement;
+                                fluid = !replacement.getFluidState().isEmpty();
+                            }
+                        }
+                        if (solid) sdAbove++;
+                    } else {
+                        sdAbove = 0;
+                    }
+                    fluidRun = fluid ? fluidRun + 1 : 0;
+                }
+            }
         }
     }
 
@@ -585,14 +697,17 @@ public class PatternData {
     private static final class SnapshotOverlayView implements ExprEvaluator.OverlayView {
         private final int minY;
         private final PalettedContainer<BlockState>[] vanilla;
+        private final ChunkAccess chunk;
+        private final BlockPos.MutableBlockPos currentPos = new BlockPos.MutableBlockPos();
         private int memoX = Integer.MIN_VALUE;
         private int memoZ = Integer.MIN_VALUE;
         private int memoSy;
         private int memoSw;
 
-        SnapshotOverlayView(int minY, PalettedContainer<BlockState>[] vanilla) {
+        SnapshotOverlayView(int minY, PalettedContainer<BlockState>[] vanilla, ChunkAccess chunk) {
             this.minY = minY;
             this.vanilla = vanilla;
+            this.chunk = chunk;
         }
 
         /** 快照在该坐标的方块（越界/空分节 = 空气）。 */
@@ -602,6 +717,11 @@ public class PatternData {
             PalettedContainer<BlockState> container = vanilla[index];
             if (container == null) return AIR;
             return container.get(x & 15, y & 15, z & 15);
+        }
+
+        @Override
+        public boolean currentIs(int x, int y, int z, BlockState target) {
+            return chunk.getBlockState(currentPos.set(x, y, z)).is(target.getBlock());
         }
 
         @Override

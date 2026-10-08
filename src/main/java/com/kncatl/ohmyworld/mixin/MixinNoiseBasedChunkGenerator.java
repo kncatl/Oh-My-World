@@ -23,6 +23,7 @@ import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
 import com.kncatl.ohmyworld.OhMyWorldConfig;
+import com.kncatl.ohmyworld.DimensionRules;
 import com.kncatl.ohmyworld.PatternData;
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
@@ -111,6 +112,19 @@ public class MixinNoiseBasedChunkGenerator {
                                                  CallbackInfo ci) {
         ohmyworld$overlayAfterTerrain(chunk);
     }
+
+    /** [surface:none]：不跑原版的材料/表面通道（公式 surface 行随后补铺）。 */
+    @Inject(method = "buildSurface", at = @At("HEAD"), cancellable = true)
+    private void ohmyworld$onBuildSurface26(ChunkAccess chunk, NoiseChunk noiseChunk, RandomState randomState,
+                                            BiomeManager biomeManager, Set<Holder<Biome>> possibleBiomes,
+                                            net.minecraft.world.level.levelgen.material.rule.MaterialRule materialRule,
+                                            CallbackInfo ci) {
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot != null && snapshot.overlay()
+                && snapshot.surfaceMode() == DimensionRules.SurfaceMode.NONE) {
+            ci.cancel();
+        }
+    }
     //?} else {
     @Inject(method = "fillFromNoise", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onFillFromNoise(Blender blender, RandomState randomState,
@@ -120,30 +134,34 @@ public class MixinNoiseBasedChunkGenerator {
     }
 
     /**
-     * H1（1.21.x）：1.21 的 fillFromNoise 是异步 future（RETURN 时地形尚未写完），
-     * 因此在返回的 future 上追加后处理——它在同一异步线程、分节释放之后执行，
-     * 随后才是原版 buildSurface。
+     * 公式接管地形时（flat 公式模式），不再让原版表面规则改写公式方块。
+     * 叠加模式按 [surface:...] 处理：[surface:none] 取消原版并在原地跑 H1（表面由公式铺）；
+     * 其余模式放行原版（H1 在 RETURN 执行，统一为"原版表面之后"）。
      */
-    @Inject(method = "fillFromNoise", at = @At("RETURN"), cancellable = true)
-    private void ohmyworld$afterFillFromNoise(Blender blender, RandomState randomState,
-                                              StructureManager structureManager, ChunkAccess chunk,
-                                              CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
-        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot == null || !snapshot.overlay()) return;
-        CompletableFuture<ChunkAccess> original = cir.getReturnValue();
-        if (original == null) return;
-        cir.setReturnValue(original.thenApply(filled -> {
-            ohmyworld$overlayAfterTerrain(filled);
-            return filled;
-        }));
-    }
-
-    /** 公式接管地形时，不再让原版表面规则改写公式方块（叠加模式默认放行原版表面）。 */
     @Inject(method = "buildSurface", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onBuildSurface(WorldGenRegion region, StructureManager structureManager,
                                           RandomState randomState, ChunkAccess chunk, CallbackInfo ci) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot != null && !snapshot.overlay()) ci.cancel();
+        if (snapshot == null) return;
+        if (!snapshot.overlay()) {
+            ci.cancel();
+            return;
+        }
+        if (snapshot.surfaceMode() == DimensionRules.SurfaceMode.NONE) {
+            // 不跑原版表面：H1（含补铺）就地执行后取消原版（RETURN 里不再执行）
+            ohmyworld$overlayAfterTerrain(chunk);
+            ci.cancel();
+        }
+    }
+
+    /** H1（1.21.x）：原版表面之后（与 26.3 一致）、雕刻之前。 */
+    @Inject(method = "buildSurface", at = @At("RETURN"))
+    private void ohmyworld$afterBuildSurface(WorldGenRegion region, StructureManager structureManager,
+                                             RandomState randomState, ChunkAccess chunk, CallbackInfo ci) {
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot == null || !snapshot.overlay()) return;
+        if (snapshot.surfaceMode() == DimensionRules.SurfaceMode.NONE) return; // 已在 HEAD 执行
+        ohmyworld$overlayAfterTerrain(chunk);
     }
 
     /** 公式接管地形时，不再让原版雕刻器在公式方块上挖洞；[carvers:vanilla] 可放行。 */

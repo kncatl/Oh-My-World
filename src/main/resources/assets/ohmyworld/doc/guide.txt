@@ -184,7 +184,13 @@
    vsolid / vfluid / vair       当前坐标的原版方块是否固体 / 含流体 / 空气
    sy / sw                      该列原版含水面高度 / 液体面高度（无水时同 sy）
    y=surf(a..b): <表达式>       层范围以该列 sy 为基准（a、b 可为负；仅叠加模式）
-     ★ 只在 [terrain:vanilla] 的方块层里可用；读的是原版地形的 H1 快照。
+   curis(方块)                  surface 行：当前（补铺进行中）方块是否是指定方块
+     ★ 列量/vis 只在叠加方块层可用，读的是原版地形的 H1 快照；
+       curis 只在叠加 surface 行可用（[surface:vanilla+patch] / [surface:none]）。
+   ── 叠加模式的表面档位（写在维度内容开头；M3.5）──
+   [surface:vanilla]           默认：只跑原版材料/表面通道
+   [surface:vanilla+patch]     原版之后再用 surface 行补铺（curis 找暴露面）
+   [surface:none]              不跑原版材料/表面，只由 surface 行铺
 
   ★ biome 行可以读"公式地形"（只按公式层计算、不读已生成的方块，所以群系填充
     时就能用；循环层同样支持）：

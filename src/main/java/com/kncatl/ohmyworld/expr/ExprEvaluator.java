@@ -145,6 +145,12 @@ public class ExprEvaluator {
 
         /** 该列原版液体面高度（sw；无水时同 sy）。 */
         int sw(int x, int z);
+
+        /**
+         * 当前方块（叠加处理进行中的活方块，供 {@code curis}）：该坐标此刻的方块
+         * 是否是指定方块。默认实现返回假（无块级实现时）。
+         */
+        default boolean currentIs(int x, int y, int z, BlockState target) { return false; }
     }
 
     private static final ThreadLocal<OverlayView> OVERLAY_VIEW = new ThreadLocal<>();
@@ -296,7 +302,9 @@ public class ExprEvaluator {
             // 1.3.2：biome 行的原版群系查询（M3.3；只能出现在 biome 行）
             Map.entry("biome_at", 6),
             // 1.3.2：叠加模式快照谓词（M3.5；只能出现在 [terrain:vanilla] 方块层）
-            Map.entry("vis", 1));
+            Map.entry("vis", 1),
+            // 1.3.2：叠加模式 surface 行的当前方块谓词（M3.5）
+            Map.entry("curis", 1));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -349,6 +357,7 @@ public class ExprEvaluator {
     public static final int FN_VHEIGHT = 153;
     public static final int FN_BIOME_AT = 154;
     public static final int FN_VIS = 155;
+    public static final int FN_CURIS = 156;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -427,6 +436,7 @@ public class ExprEvaluator {
             case "vheight" -> FN_VHEIGHT;
             case "biome_at" -> FN_BIOME_AT;
             case "vis" -> FN_VIS;
+            case "curis" -> FN_CURIS;
             default -> FN_UNKNOWN;
         };
     }
@@ -981,6 +991,7 @@ public class ExprEvaluator {
             case "noise" -> noiseOf(args, x, z, ly, context);
             case "vheight" -> vheightOf(args, x, z, ly, context);
             case "vis" -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
+            case "curis" -> overlayCurisOf(args, x, z, ly, context) ? 1 : 0;
             case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
             case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
@@ -1121,6 +1132,7 @@ public class ExprEvaluator {
             case FN_NOISE -> noiseOf(args, x, z, ly, context);
             case FN_VHEIGHT -> vheightOf(args, x, z, ly, context);
             case FN_VIS -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
+            case FN_CURIS -> overlayCurisOf(args, x, z, ly, context) ? 1 : 0;
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -1528,6 +1540,18 @@ public class ExprEvaluator {
         BlockState target = blockValue(args.get(0), x, z, ly, context);
         if (target == null) return false;
         return view.vanillaIs(x, context.globalY, z, target);
+    }
+
+    /**
+     * {@code curis(方块)}：当前（活）方块是否是指定方块（仅叠加模式 surface 行）。
+     * 没有叠加视图时返回假。
+     */
+    private static boolean overlayCurisOf(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        OverlayView view = OVERLAY_VIEW.get();
+        if (view == null) return false;
+        BlockState target = blockValue(args.get(0), x, z, ly, context);
+        if (target == null) return false;
+        return view.currentIs(x, context.globalY, z, target);
     }
 
     /**

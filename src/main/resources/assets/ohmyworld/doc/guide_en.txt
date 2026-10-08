@@ -210,7 +210,14 @@ Default preset:
                             (sw falls back to sy when there is no liquid)
   y=surf(a..b): <expr>      layer range relative to each column's sy (a and b may be
                             negative; overlay mode only)
-    * Overlay block layers only; they read the H1 snapshot of the vanilla terrain.
+  curis(block)              surface rows: is the current (being-patched) block this one?
+    * Column values and vis are overlay block layers only (they read the H1 snapshot);
+      curis is overlay surface rows only ([surface:vanilla+patch] / [surface:none]).
+  -- Overlay surface modes (write at the start of the dimension; M3.5) --
+  [surface:vanilla]         default: only the vanilla material/surface pass
+  [surface:vanilla+patch]   vanilla first, then formula surface rows patch the result
+                            (curis finds exposed faces)
+  [surface:none]            no vanilla material/surface; formula surface rows do it all
 
   * Biome lines can read the formula terrain (computed from the formula layers
     only -- never from already generated blocks -- so it is available during

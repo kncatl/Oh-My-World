@@ -44,7 +44,8 @@ public class FormulaParser {
                                   DimensionRules.BiomeRule biome, boolean featuresOff,
                                   List<BiomeLayerDef> biomeLayers, List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback,
-                                  DimensionRules.CarversMode carvers, boolean overlay) {}
+                                  DimensionRules.CarversMode carvers, boolean overlay,
+                                  DimensionRules.SurfaceMode surfaceMode) {}
 
     /**
      * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
@@ -131,7 +132,7 @@ public class FormulaParser {
                 dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
                         DimensionRules.StructureRule.ALL, null, false, result.biomeLayers(),
                         result.surfaceLayers(), DimensionRules.BiomeFallback.NONE,
-                        DimensionRules.CarversMode.NONE, false));
+                        DimensionRules.CarversMode.NONE, false, DimensionRules.SurfaceMode.VANILLA));
             }
         }
         return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), false);
@@ -230,6 +231,8 @@ public class FormulaParser {
         boolean featuresSeen = false;
         boolean terrainSeen = false;
         boolean overlay = false;
+        boolean surfaceSeen = false;
+        DimensionRules.SurfaceMode surfaceMode = DimensionRules.SurfaceMode.VANILLA;
         int pos = 0;
         boolean firstDirective = true;
         while (true) {
@@ -259,6 +262,29 @@ public class FormulaParser {
                 }
                 terrainSeen = true;
                 overlay = true;
+            } else if (directive.startsWith("surface:")) {
+                if (surfaceSeen) {
+                    errors.add(name + ": duplicate surface directive");
+                    return;
+                }
+                surfaceSeen = true;
+                if (!overlay) {
+                    errors.add(name + ": [surface:" + directive.substring("surface:".length()).trim()
+                            + "] can only be used in [terrain:vanilla] overlay mode");
+                    return;
+                }
+                String value = directive.substring("surface:".length()).trim();
+                surfaceMode = switch (value) {
+                    case "vanilla" -> DimensionRules.SurfaceMode.VANILLA;
+                    case "vanilla+patch" -> DimensionRules.SurfaceMode.VANILLA_PATCH;
+                    case "none" -> DimensionRules.SurfaceMode.NONE;
+                    default -> null;
+                };
+                if (surfaceMode == null) {
+                    errors.add(name + ": unknown surface mode [" + truncate(directive)
+                            + "] (available: vanilla, vanilla+patch, none)");
+                    return;
+                }
             } else if (directive.startsWith("structure:")) {
                 if (structureSeen) {
                     errors.add(name + ": duplicate structure directive");
@@ -303,7 +329,7 @@ public class FormulaParser {
                 featuresOff = off;
             } else {
                 errors.add(name + ": unknown directive [" + truncate(directive)
-                        + "] (available: terrain, structure, biome, biome-fallback, carvers, features)");
+                        + "] (available: terrain, surface, structure, biome, biome-fallback, carvers, features)");
                 return;
             }
             firstDirective = false;
@@ -345,7 +371,7 @@ public class FormulaParser {
         }
         if (!result.layers().isEmpty()) {
             dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff,
-                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers, overlay));
+                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers, overlay, surfaceMode));
         }
     }
 
@@ -560,7 +586,7 @@ public class FormulaParser {
 
             try {
                 if (isSurfaceLine(line)) {
-                    parseSurfaceLine(line, lineIdx, shared, macros, surfaceLayers, errors);
+                    parseSurfaceLine(line, lineIdx, shared, macros, overlay, surfaceLayers, errors);
                     continue;
                 }
                 if (isBiomeLine(line)) {
@@ -884,7 +910,7 @@ public class FormulaParser {
      * 可选前缀 {@code surface[maxdepth=N]}（N ∈ 1..64，默认 8）。
      */
     private static void parseSurfaceLine(String line, int lineIdx, List<ExprNode.LetBinding> shared,
-                                         Map<String, ParametricLet> macros,
+                                         Map<String, ParametricLet> macros, boolean overlay,
                                          List<SurfaceLayerDef> surfaceLayers, List<String> errors) {
         String rest = line.substring("surface".length()).trim();
         int maxDepth = 8;
@@ -944,7 +970,7 @@ public class FormulaParser {
         surfaceVars.put("slope", ExprEvaluator.ValueType.NUMBER);
         surfaceVars.put("keep", ExprEvaluator.ValueType.BLOCK);
         List<String> valErrors = new ArrayList<>();
-        ExprEvaluator.ValueType type = validateNode(expr, valErrors, surfaceVars, false, false);
+        ExprEvaluator.ValueType type = validateNode(expr, valErrors, surfaceVars, false, overlay);
         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
             valErrors.add("Surface expression must return a block or keep, got " + type);
         }
@@ -1147,6 +1173,23 @@ public class FormulaParser {
                         ExprEvaluator.ValueType t = validateNode(a, errors, variables, false, overlay);
                         if (t != ExprEvaluator.ValueType.BLOCK && t != ExprEvaluator.ValueType.UNKNOWN) {
                             errors.add("Function 'vis' expects a block, got " + t);
+                        }
+                    }
+                    return ExprEvaluator.ValueType.BOOLEAN;
+                }
+                if (f.name().equals("curis")) {
+                    // 叠加模式 surface 行的"当前方块"谓词（M3.5）：[surface:vanilla+patch|none]
+                    String arity = ExprEvaluator.validateFunction("curis", f.args().size());
+                    if (arity != null) errors.add(arity);
+                    if (!overlay || biomeMode) {
+                        errors.add("Function 'curis' can only be used in [terrain:vanilla] overlay surface rows");
+                        for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode, overlay);
+                        return ExprEvaluator.ValueType.UNKNOWN;
+                    }
+                    for (ExprNode a : f.args()) {
+                        ExprEvaluator.ValueType t = validateNode(a, errors, variables, false, overlay);
+                        if (t != ExprEvaluator.ValueType.BLOCK && t != ExprEvaluator.ValueType.UNKNOWN) {
+                            errors.add("Function 'curis' expects a block, got " + t);
                         }
                     }
                     return ExprEvaluator.ValueType.BOOLEAN;

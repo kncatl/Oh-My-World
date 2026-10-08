@@ -252,16 +252,21 @@ BIOME_AT_VALUE_FORMULA = (
 #   带 3（vsolid）：深处恒固体 → 铺红砖（验证 vsolid 谓词）；
 #   带 4（vis）：y=20..25 处原版石头 → 铺灰混凝土（验证 vis 方块比较）；
 #   带 5（vair）：y=200 高空恒空气 → 铺玻璃（验证 vair 谓词）；
-#   带 6（surf 窗口）：sy-34..sy-32（含水面基准）的固体处铺陶瓦 → 验证窗口语法。
+#   带 6（surf 窗口）：sy-34..sy-32（含水面基准）的固体处铺陶瓦 → 验证窗口语法；
+#   带 7（切沟 + 补铺）：z∈(40,90) 的地带切掉顶部 10 个固体方块（露石），
+#      [surface:vanilla+patch] 的 surface 行用 curis(stone) 把暴露面补成紫水晶。
 # 地表/群系应保持原版（stone 特征方块 = 没有被当成 flat 公式填平/填满）。
 OVERLAY_MARKER_FORMULA = (
-    "{overworld=[terrain:vanilla] "
+    "{overworld=[terrain:vanilla] [surface:vanilla+patch] "
+    "let cutz = z > 40 && z < 90;"
     "y=-30..-20: floormod(x + z, 2) == 0 ? minecraft:sea_lantern : keep;"
     "y=-40..-35: floormod(x + z, 2) == 0 ? minecraft:white_concrete : vanilla;"
     "y=-50..-45: vsolid ? minecraft:bricks : keep;"
     "y=20..25: vis(minecraft:stone) ? minecraft:gray_concrete : keep;"
     "y=200..200: vair ? minecraft:glass : keep;"
-    "y=surf(-34..-32): vsolid ? minecraft:terracotta : keep}"
+    "y=surf(-34..-32): vsolid ? minecraft:terracotta : keep;"
+    "y=surf(0..9): vsolid && cutz ? minecraft:air : keep;"
+    "surface y=..: sd == 0 && curis(minecraft:stone) ? minecraft:amethyst_block : keep}"
 )
 
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的

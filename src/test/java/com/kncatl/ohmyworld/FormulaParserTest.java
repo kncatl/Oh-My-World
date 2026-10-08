@@ -1117,4 +1117,39 @@ class FormulaParserTest {
                 "{overworld=[terrain:vanilla] y=surf(-2..2): 1*[minecraft:stone] }");
         assertTrue(cyclic.errors().stream().anyMatch(e -> e.contains("cyclic")), cyclic.errors().toString());
     }
+
+    /** 1.3.2 M3.5：[surface:...] 三档与 curis（位置规则）。 */
+    @Test
+    void overlaySurfaceModesAndCuris() {
+        // 合法：vanilla+patch + curis（用 rand() 当方块位，测试环境不解析方块注册表）
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] [surface:vanilla+patch] "
+                                + "y=surf(0..2): rand();"
+                                + "surface y=..: sd == 0 && curis(rand()) ? rand() : keep}")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] [surface:none] "
+                                + "y=-64..: rand(); surface y=..: sd == 0 ? rand() : keep}")
+                .errors().isEmpty());
+
+        // 未知取值 / 重复
+        FormulaParser.DimensionParseResult bad = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] [surface:bad] y=-64..: rand()}");
+        assertTrue(bad.errors().stream().anyMatch(e -> e.contains("unknown surface mode")),
+                bad.errors().toString());
+        FormulaParser.DimensionParseResult dup = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] [surface:none] [surface:vanilla] y=-64..: rand()}");
+        assertTrue(dup.errors().stream().anyMatch(e -> e.contains("duplicate surface")),
+                dup.errors().toString());
+
+        // flat 模式不可用（[surface:...] 与 curis 都只在叠加模式合法）
+        FormulaParser.DimensionParseResult flatDirective = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[surface:none] y=-64..: rand()}");
+        assertTrue(flatDirective.errors().stream().anyMatch(e -> e.contains("overlay mode")),
+                flatDirective.errors().toString());
+        FormulaParser.DimensionParseResult flatCuris = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=-64..: rand(); surface y=..: curis(rand()) ? rand() : keep}");
+        assertTrue(flatCuris.errors().stream().anyMatch(e -> e.contains("overlay surface rows")),
+                flatCuris.errors().toString());
+    }
 }
