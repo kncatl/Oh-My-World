@@ -588,8 +588,8 @@ public class PatternData {
         } finally {
             ExprEvaluator.setOverlayView(savedOverlay);
         }
-        if (OhMyWorldConfig.debugLogsEnabled() && writes > 0
-                && OVERLAY_WRITES_LOGGED.compareAndSet(false, true)) {
+        if (OhMyWorldConfig.debugLogsEnabled() && DEBUG_LOGGED.compareAndSet(false, true)) {
+            // 空叠加（y=..: vanilla）时写入数必须为 0——见验收（与原版逐方块一致）
             LOGGER.info("ohmyworld: overlay writes in first processed chunk {} (first write at {} -> {})",
                     writes, firstWrite, hasFirstWrite ? chunk.getBlockState(firstWrite) : "n/a");
         }
@@ -701,7 +701,7 @@ public class PatternData {
     }
 
     /** 调试日志：叠加后处理的首次写入计数，只记录一次。 */
-    private static final java.util.concurrent.atomic.AtomicBoolean OVERLAY_WRITES_LOGGED =
+    private static final java.util.concurrent.atomic.AtomicBoolean DEBUG_LOGGED =
             new java.util.concurrent.atomic.AtomicBoolean();
 
     /**

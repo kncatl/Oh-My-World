@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|biome-vanilla-value|biome-at-value) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|biome-vanilla-value|biome-at-value）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -176,11 +176,16 @@ case "$CHECK_MODE" in
     rivernet)        SMOKE_CONFIG_MODE="--rivernet" ;;
     climate)         SMOKE_CONFIG_MODE="--climate" ;;
     overlay-marker)  SMOKE_CONFIG_MODE="--overlay-marker" ;;
+    overlay-empty)   SMOKE_CONFIG_MODE="--overlay-empty" ;;
     dfnoise)         SMOKE_CONFIG_MODE="--dfnoise" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
 # 先清世界再写配置：marker 模式会在配置阶段预置 world/ohmyworld_marker.txt
 rm -rf "$SRV/world" "$SRV/logs"
+if [[ "$CHECK_MODE" == "overlay-empty" ]]; then
+    # 空叠加验收要从日志读"首区块写入数"（0 = 与原版一致），需要 debug 日志
+    export SMOKE_DEBUG=1
+fi
 python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" $SMOKE_CONFIG_MODE
 
 # ---------- 4. 启动、等待、停止 ----------
@@ -384,6 +389,14 @@ case "$CHECK_MODE" in
         python3 "$TOOLS/smoke-check-world.py" \
             --expect overworld minecraft:sand,minecraft:polished_blackstone_bricks \
             "$SRV" || fail "共享气候冒烟核验失败：温度分带特征方块缺失"
+        ;;
+    overlay-empty)
+        if ! grep -q "overlay writes in first processed chunk 0 " "$LOG"; then
+            fail "空叠加验收失败：首区块出现非零写入（日志无 'first processed chunk 0'）"
+        fi
+        python3 "$TOOLS/smoke-check-world.py" \
+            --expect overworld minecraft:stone \
+            "$SRV" || fail "空叠加验收失败：原版地形没有生成"
         ;;
     overlay-marker)
         python3 "$TOOLS/smoke-check-world.py" \

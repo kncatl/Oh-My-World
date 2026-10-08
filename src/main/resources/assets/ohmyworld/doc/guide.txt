@@ -177,23 +177,37 @@
       biome: climate(temperature, x, z) > 0.3 ? vanilla : minecraft:desert
       biome: biome_at(0.3, 0.5, 0.2, 0.0, 0.1, 0.4)
     末地与超平坦主世界没有参数表（biome_at 视为未命中走回退）；
-    vanilla 写进方块层会报未知变量。
+    方块层里的 vanilla 仅在叠加模式下合法（见下文）——flat 模式下写方块层会报错。
 
-   ── 叠加模式的列量与谓词（[terrain:vanilla]；M3.5）──
-   vis(方块)                    当前坐标的原版方块是否是指定方块
-   vsolid / vfluid / vair       当前坐标的原版方块是否固体 / 含流体 / 空气
-   sy / sw                      该列原版含水面高度 / 液体面高度（无水时同 sy）
-   y=surf(a..b): <表达式>       层范围以该列 sy 为基准（a、b 可为负；仅叠加模式）
-   curis(方块)                  surface 行：当前（补铺进行中）方块是否是指定方块
-     ★ 列量/vis 只在叠加方块层可用，读的是原版地形的 H1 快照；
-       curis 只在叠加 surface 行可用（[surface:vanilla+patch] / [surface:none]）。
-   ── 叠加模式的表面档位（写在维度内容开头；M3.5）──
-   [surface:vanilla]           默认：只跑原版材料/表面通道
-   [surface:vanilla+patch]     原版之后再用 surface 行补铺（curis 找暴露面）
-   [surface:none]              不跑原版材料/表面，只由 surface 行铺
-   [overlay:protect-structures]        默认开：结构部件包围盒（外扩 24）内不修改
-   [overlay:protect-structures=off]    关闭保护（可用 sdist 自行淡出）
-   sdist(x, z)                 到最近结构保护盒的水平距离（域内 0；无结构时很大）
+   ── 叠加模式（[terrain:vanilla]；M3.5）──
+   在**原版噪声地形**上做公式后处理：维度内容开头写 [terrain:vanilla] 开启
+   （必须是第一条指令），其余照常写层：
+      {overworld=[terrain:vanilla] [surface:vanilla+patch]
+        y=surf(-30..30): …}
+
+     ★ 语义：
+     - 未被任何层覆盖的坐标保持原版（等价于隐含首层 y=..: vanilla）；
+     - vanilla = 该坐标的原版方块（层顺序无关的快照）；keep = 之前各层的结果；
+       结果与当前值相同则不写；同一高度后写的层覆盖先写的；
+     - 默认雕刻器为 vanilla（原版含水层）；[carvers:...] 仍可显式覆盖；
+     - 只适用于带原版噪声地形的维度（超平坦/server_mode 世界的公式会被停用）；
+       叠加模式的 biome 行不能读公式地形（terrain/surfis/blockis 报错）。
+     ★ 叠加模式下可用的量：
+       vanilla                     原版方块值（方块层）：保持原样
+       vis(方块)                   当前坐标的原版方块是否是指定方块
+       vsolid / vfluid / vair      原版方块是否固体 / 含流体 / 空气
+       sy / sw                     该列原版含水面高度 / 液体面高度（无水时同 sy）
+       curis(方块)                 surface 行：当前（补铺进行中）方块是否是指定方块
+       sdist(x, z)                 到最近结构保护盒的水平距离（域内 0；无结构时很大）
+     ★ 层范围可写 y=surf(a..b): <表达式>——以该列 sy 为基准（a、b 可为负；
+       仅叠加模式；循环层不支持）。
+     ★ 表面档位（写在维度内容开头）：
+       [surface:vanilla]           默认：只跑原版材料/表面通道
+       [surface:vanilla+patch]     原版之后再用 surface 行补铺（curis 找暴露面）
+       [surface:none]              不跑原版材料/表面，只由 surface 行铺
+     ★ 结构保护：[overlay:protect-structures] 默认开（部件包围盒外扩 24 内不修改）；
+       [overlay:protect-structures=off] 关闭后可用 sdist 自行淡出。
+     ★ 编辑器预览是近似（没有原版地形：vanilla 按空气、sy/sw 按 0）。
 
   ★ biome 行可以读"公式地形"（只按公式层计算、不读已生成的方块，所以群系填充
     时就能用；循环层同样支持）：

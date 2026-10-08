@@ -84,6 +84,9 @@
   的反对称比较铺沙 / 黑石砖；forceload 扩大采样范围；两种特征方块都要出现（--expect），
   证明气候视图构建、量化取值与公式取数整条链路真的跑过。
 
+--overlay-empty（1.3.2 M3.5 验收）：空叠加恒等式 `y=..: vanilla`——断言首区块
+  写入数为 0（等价于与原版逐方块一致；需 SMOKE_DEBUG=1）+ 原版地形生成成功。
+
 --overlay-marker（1.3.2 M3.5）：叠加模式冒烟——普通噪声世界（server_mode）；
   叠加层在深层石层里铺 海晶灯/白混凝土 两种特征方块（keep 与 vanilla 还原各一半），
   地表与群系保持原版（stone 仍在 = 没有被当成 flat 公式填平）。
@@ -270,6 +273,13 @@ OVERLAY_MARKER_FORMULA = (
     "y=surf(0..9): vsolid && cutz ? minecraft:air : keep;"
     "y=surf(-24..-22): sdist(x, z) > 1000 ? minecraft:magenta_glazed_terracotta : keep;"
     "surface y=..: sd == 0 && curis(minecraft:stone) ? minecraft:amethyst_block : keep}"
+)
+
+# M3.5 验收（空叠加）：整维 `y=..: vanilla` 是恒等式——任何写入都会改变原版结果，
+# 因此「首区块写入数 = 0」等价于「与原版逐方块一致」（配合原版地形生成断言）。
+# 断言见 smoke-server.sh（overlay-empty 模式，需 SMOKE_DEBUG=1）。
+OVERLAY_EMPTY_FORMULA = (
+    "{overworld=[terrain:vanilla] y=-64..: vanilla}"
 )
 
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的
@@ -476,6 +486,7 @@ def main():
     biome_vanilla_value = "--biome-vanilla-value" in sys.argv
     biome_at_value = "--biome-at-value" in sys.argv
     overlay_marker = "--overlay-marker" in sys.argv
+    overlay_empty = "--overlay-empty" in sys.argv
     biome_structures = "--biome-structures" in sys.argv
     biome_formula = "--biome-formula" in sys.argv
     biome_formula_fallback = "--biome-formula-fallback" in sys.argv
@@ -511,7 +522,7 @@ def main():
                 key, _, value = line.partition("=")
                 props[key.strip()] = value.strip()
     props.update(PROPERTIES)
-    if carvers or carvers_off or spawn_formula or overlay_marker:
+    if carvers or carvers_off or spawn_formula or overlay_marker or overlay_empty:
         # 雕刻器/出生点/叠加模式只存在于噪声生成器：必须用普通世界类型。
         # 出生点专项同理：超平坦世界的出生点固定在 (0,0)，噪声世界的出生点随种子变化，
         # 才能区分"读到真实出生点"与"恒为 0"。
@@ -555,6 +566,8 @@ def main():
         formula = BIOME_AT_VALUE_FORMULA
     elif overlay_marker:
         formula = OVERLAY_MARKER_FORMULA
+    elif overlay_empty:
+        formula = OVERLAY_EMPTY_FORMULA
     elif biome_structures:
         formula = BIOME_STRUCTURES_FORMULA
     elif biome_formula:
@@ -607,7 +620,7 @@ def main():
                      or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
                      or biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value
-                     or overlay_marker
+                     or overlay_marker or overlay_empty
                      or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off
@@ -686,6 +699,10 @@ def main():
         label = "使用水域冒烟公式（spline 地形 + waterline 水位）"
     elif river:
         label = "使用河流冒烟公式（噪声零等值线河谷 + 水位淹没）"
+    elif overlay_marker:
+        label = "使用 [terrain:vanilla] 叠加模式冒烟公式"
+    elif overlay_empty:
+        label = "使用 [terrain:vanilla] 空叠加验收公式（整维 vanilla）"
     elif wrote_formula:
         label = "使用冒烟公式"
     else:

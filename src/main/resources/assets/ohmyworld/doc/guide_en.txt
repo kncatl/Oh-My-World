@@ -201,28 +201,49 @@ Default preset:
       biome: climate(temperature, x, z) > 0.3 ? vanilla : minecraft:desert
       biome: biome_at(0.3, 0.5, 0.2, 0.0, 0.1, 0.4)
     The End and superflat overworlds have no parameter table (biome_at misses and
-    falls through); vanilla in a block layer is an unknown variable.
+    falls through); vanilla in a block layer is only valid in overlay mode (see
+    below) -- flat-mode block layers report it as an error.
 
-  -- Overlay column values and predicates ([terrain:vanilla]; M3.5) --
-  vis(block)                is the vanilla block at this position the given block?
-  vsolid / vfluid / vair    is the vanilla block here solid / fluid / air?
-  sy / sw                   vanilla water-inclusive surface y / liquid surface y
-                            (sw falls back to sy when there is no liquid)
-  y=surf(a..b): <expr>      layer range relative to each column's sy (a and b may be
-                            negative; overlay mode only)
-  curis(block)              surface rows: is the current (being-patched) block this one?
-    * Column values and vis are overlay block layers only (they read the H1 snapshot);
-      curis is overlay surface rows only ([surface:vanilla+patch] / [surface:none]).
-  -- Overlay surface modes (write at the start of the dimension; M3.5) --
-  [surface:vanilla]         default: only the vanilla material/surface pass
-  [surface:vanilla+patch]   vanilla first, then formula surface rows patch the result
-                            (curis finds exposed faces)
-  [surface:none]            no vanilla material/surface; formula surface rows do it all
-  [overlay:protect-structures]      default on: no writes inside structure piece boxes
-                                    (inflated by 24)
-  [overlay:protect-structures=off]  protection off (use sdist to fade out yourself)
-  sdist(x, z)               horizontal distance to the nearest structure protection box
-                            (0 inside; very large when no structures are near)
+  -- Overlay mode ([terrain:vanilla]; M3.5) --
+  Run formula layers as a post-processing pass over the *vanilla noise terrain*:
+  write [terrain:vanilla] at the start of the dimension (it must be the first
+  directive), then write layers as usual:
+      {overworld=[terrain:vanilla] [surface:vanilla+patch]
+        y=surf(-30..30): ...}
+
+    * Semantics:
+    - Coordinates no layer covers stay vanilla (equivalent to an implicit first
+      layer y=..: vanilla);
+    - vanilla = the vanilla block at this position (an order-independent snapshot);
+      keep = the result of the layers before it; a result equal to the current
+      block is skipped; on the same height later layers override earlier ones;
+    - The default carver mode is vanilla (with aquifers); [carvers:...] still
+      overrides it;
+    - Overlay needs a dimension with vanilla noise terrain (formulas are disabled
+      on superflat / server_mode worlds); overlay biome lines cannot read the
+      formula terrain (terrain/surfis/blockis report an error).
+    * Values available in overlay mode:
+      vanilla                   vanilla block value (block layers): leave as is
+      vis(block)                is the vanilla block at this position the given block?
+      vsolid / vfluid / vair    is the vanilla block here solid / fluid / air?
+      sy / sw                   vanilla water-inclusive surface y / liquid surface y
+                                (sw falls back to sy when there is no liquid)
+      curis(block)              surface rows: is the current (being-patched) block
+                                this one?
+      sdist(x, z)               horizontal distance to the nearest structure
+                                protection box (0 inside; very large when none)
+    * Layer ranges may be written y=surf(a..b): <expr> -- anchored at each column's
+      sy (a and b may be negative; overlay only; cyclic layers are not supported).
+    * Surface modes (write at the start of the dimension):
+      [surface:vanilla]         default: only the vanilla material/surface pass
+      [surface:vanilla+patch]   vanilla first, then formula surface rows patch the
+                                result (curis finds exposed faces)
+      [surface:none]            no vanilla material/surface; surface rows do it all
+    * Structure protection: [overlay:protect-structures] is on by default (no
+      writes inside piece boxes inflated by 24); turn it off with
+      [overlay:protect-structures=off] and fade out yourself using sdist.
+    * The editor preview is approximate (there is no vanilla terrain: vanilla reads
+      as air, sy/sw as 0).
 
   * Biome lines can read the formula terrain (computed from the formula layers
     only -- never from already generated blocks -- so it is available during

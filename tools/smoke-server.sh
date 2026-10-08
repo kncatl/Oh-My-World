@@ -94,6 +94,10 @@ case "$MODE" in
         CONFIG_FLAGS="--overlay-marker"
         CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:white_concrete,minecraft:bricks,minecraft:gray_concrete,minecraft:glass,minecraft:terracotta,minecraft:amethyst_block,minecraft:magenta_glazed_terracotta,minecraft:stone"
         ;;
+    overlay-empty)
+        CONFIG_FLAGS="--overlay-empty"
+        CHECK_ARGS="--expect overworld minecraft:stone"
+        ;;
     biome-formula-fallback)
         CONFIG_FLAGS="--biome-formula-fallback"
         CHECK_ARGS="--biome-smoke 4"
@@ -127,10 +131,14 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | overlay-empty | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac
+if [ "$MODE" = "overlay-empty" ]; then
+    # 空叠加验收要从日志读"首区块写入数"（0 = 与原版一致），需要 debug 日志
+    export SMOKE_DEBUG=1
+fi
 CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT" $CONFIG_FLAGS)"
 echo "$CONFIG_OUT" | grep -v '^SMOKE_FORMULA=' || true
 SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
@@ -181,11 +189,15 @@ fi
 
 # 停止服务端：NeoForge 的 launch target 藏在 @serverRunVmArgs.txt 里（而且
 # cmdline 超过 pkill 的 4096 字节匹配窗口），Fabric 侧则是 devlaunchinjector。
-pkill -TERM -f 'serverRunVmArgs' 2>/dev/null || true
-pkill -TERM -f 'devlaunchinjector' 2>/dev/null || true
+# 模式按本节点目录定向（versions/$NODE/...）——多个节点同时在跑冒烟时不会互相误杀；
+# 同一节点的冒烟仍须串行（清理会终止该节点的所有服务器进程）。
+pkill -TERM -f "versions/$NODE/.*serverRunVmArgs" 2>/dev/null || true
+pkill -TERM -f "versions/$NODE/.*devlaunchinjector" 2>/dev/null || true
+pkill -TERM -f "versions/$NODE/" 2>/dev/null || true
 sleep 5
-pkill -KILL -f 'serverRunVmArgs' 2>/dev/null || true
-pkill -KILL -f 'devlaunchinjector' 2>/dev/null || true
+pkill -KILL -f "versions/$NODE/.*serverRunVmArgs" 2>/dev/null || true
+pkill -KILL -f "versions/$NODE/.*devlaunchinjector" 2>/dev/null || true
+pkill -KILL -f "versions/$NODE/" 2>/dev/null || true
 wait "$GRADLE_PID" 2>/dev/null || true
 
 fail() {
@@ -223,6 +235,14 @@ fi
 if [ "$MODE" = "biome-vanilla-value" ] || [ "$MODE" = "biome-at-value" ]; then
     if grep -q "formula biome uncovered" "$LOG"; then
         fail "群系查询解析失败（日志出现 formula biome uncovered）"
+    fi
+fi
+
+# M3.5 空叠加验收：整维 `y=..: vanilla` 是恒等式，任何写入都会改变原版结果——
+# 「首区块写入数 = 0」即「与原版逐方块一致」（第九章 §9.8 验收 1）。
+if [ "$MODE" = "overlay-empty" ]; then
+    if ! grep -q "overlay writes in first processed chunk 0 " "$LOG"; then
+        fail "空叠加验收失败：首区块出现非零写入（日志无 'first processed chunk 0'）"
     fi
 fi
 
