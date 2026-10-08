@@ -940,6 +940,34 @@ class FormulaParserTest {
                 terrain.errors().toString());
     }
 
+    /** 1.3.2：把 let 直接写在层/行冒号后的友好提示（块层 / surface / biome）。 */
+    @Test
+    void misplacedLetGetsAFriendlyError() {
+        FormulaParser.DimensionParseResult block = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=0: let a = 1; a > 0 ? rand() : rand()}");
+        assertTrue(block.errors().stream().anyMatch(e -> e.contains("cannot follow ':' directly")),
+                block.errors().toString());
+
+        FormulaParser.DimensionParseResult surface = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=surface y=0..: let a = 1; a > 0 ? rand() : keep; y=0: rand()}");
+        assertTrue(surface.errors().stream().anyMatch(e -> e.contains("cannot follow ':' directly")),
+                surface.errors().toString());
+
+        FormulaParser.DimensionParseResult biome = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] biome: let a = 1;"
+                        + " a > 0 ? minecraft:desert : minecraft:plains; y=0: rand()}");
+        assertTrue(biome.errors().stream().anyMatch(e -> e.contains("cannot follow ':' directly")),
+                biome.errors().toString());
+
+        // 合法写法不受影响：层内 { } 块与共享 let
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=y=0: { let a = 1; a > 0 ? rand() : rand() }}")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=let a = 1; y=0: a > 0 ? rand() : rand()}")
+                .errors().isEmpty());
+    }
+
     /** 1.3.2：min/max 的循环形式要求表达式引用循环变量（否则按 4 参折叠处理）。 */
     @Test
     void minMaxLoopVersusFold() {

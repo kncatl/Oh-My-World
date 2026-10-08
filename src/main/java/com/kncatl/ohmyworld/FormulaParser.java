@@ -632,6 +632,10 @@ public class FormulaParser {
                     errors.add(layerError(lineIdx, "empty expression after ':'", line));
                     continue;
                 }
+                if (startsWithLet(exprPart)) {
+                    errors.add(layerError(lineIdx, MISPLACED_LET_HELP, line));
+                    continue;
+                }
 
                 int eqIdx = rangePart.indexOf('=');
                 if (eqIdx < 0) {
@@ -793,6 +797,19 @@ public class FormulaParser {
 
     private static String truncate(String s) {
         return s.length() <= 60 ? s : s.substring(0, 57) + "...";
+    }
+
+    /**
+     * 常见错误的友好提示：把 {@code let} 直接写在层/行的 {@code ':'} 后面。
+     * {@code let} 只能放进 {@code { ... }} 块，或写成独占一行的共享 let。
+     */
+    private static final String MISPLACED_LET_HELP =
+            "a 'let' cannot follow ':' directly; wrap it in { ... } (y=..: { let a = ...; <expression> }) "
+            + "or write it as a shared let on its own line (let a = ...; before the layers)";
+
+    /** 表达式是否以 let 开头（误置 let 判定；`let (...)` 与 `let 名字` 都算）。 */
+    private static boolean startsWithLet(String exprPart) {
+        return exprPart.equals("let") || exprPart.startsWith("let(") || exprPart.startsWith("let ");
     }
 
     // ---------------------------------------------------------------- 群系行
@@ -985,6 +1002,7 @@ public class FormulaParser {
                 throw new IllegalArgumentException("range start " + yStart + " is greater than end " + yEnd);
             }
         }
+        if (startsWithLet(exprPart)) throw new IllegalArgumentException(MISPLACED_LET_HELP);
         if (exprPart.isEmpty()) throw new IllegalArgumentException("empty expression after ':'");
 
         ExprNode expr = wrapShared(shared,
@@ -1047,6 +1065,7 @@ public class FormulaParser {
                     throw new IllegalArgumentException("range start " + yStart + " is greater than end " + yEnd);
                 }
             }
+            if (startsWithLet(exprPart)) throw new IllegalArgumentException(MISPLACED_LET_HELP);
             if (exprPart.isEmpty()) throw new IllegalArgumentException("empty expression after ':'");
 
             ExprNode expr = wrapShared(shared,
