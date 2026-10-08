@@ -526,6 +526,84 @@ public final class BiomeControl {
             }
         }
 
+        // ---------------------------------------------------------- vheight（M3.4）
+
+        /** 列缓存槽数：直接映射 (x,z) → 高度，每线程一份（区块 16×16 列轻松装下）。 */
+        private static final int HEIGHT_CACHE_SIZE = 4096;
+        /** 自顶向下扫描步长（随后二分到格）。 */
+        private static final int VHEIGHT_STEP = 8;
+        private final ThreadLocal<HeightCache> heightCache = ThreadLocal.withInitial(HeightCache::new);
+        private final java.util.concurrent.atomic.AtomicReference<DensityEval> finalDensity =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        @Override
+        public double vheight(int x, int z) {
+            HeightCache c = this.heightCache.get();
+            long key = (((long) x << 32) | (z & 0xFFFFFFFFL)) ^ Long.MIN_VALUE;
+            int slot = (int) (key ^ (key >>> 32)) & (HEIGHT_CACHE_SIZE - 1);
+            if (c.keys[slot] == key) return c.values[slot];
+            int height = computeVheight(x, z);
+            c.keys[slot] = key;
+            c.values[slot] = height;
+            return height;
+        }
+
+        /** 自顶向下按步长找 finalDensity > 0，再二分；整列都非实心时返回维度最低 y。 */
+        private int computeVheight(int x, int z) {
+            DensityEval density = finalDensity();
+            if (density == null) return 0;
+            int minY = this.settings.noiseSettings().minY();
+            int top = minY + this.settings.noiseSettings().height() - 1;
+            if (density.sample(x, top, z) > 0) return top;
+            for (int y = top - VHEIGHT_STEP; y >= minY; y -= VHEIGHT_STEP) {
+                if (density.sample(x, y, z) > 0) {
+                    // 地表在 (y, y+step]：二分取最高的实心格
+                    int lo = y;
+                    int hi = y + VHEIGHT_STEP;
+                    while (hi - lo > 1) {
+                        int mid = (lo + hi) >>> 1;
+                        if (density.sample(x, mid, z) > 0) lo = mid;
+                        else hi = mid;
+                    }
+                    return lo;
+                }
+            }
+            return minY;
+        }
+
+        /**
+         * 该维度噪声设置自带的 finalDensity（正式路径；与生成器内部使用的是同一份，
+         * 26.3 从 settings.noiseRouter() 取、1.21.x 从已接线的 state.router() 取）。
+         */
+        private DensityEval finalDensity() {
+            DensityEval eval = this.finalDensity.get();
+            if (eval != null) return eval;
+            try {
+                DensityEval built;
+                //? >=26.3 {
+                var sampler = this.state.getSampler(this.settings.noiseRouter().finalDensity());
+                built = (x, y, z) -> sampler.sampleValue(
+                        net.minecraft.world.level.levelgen.densityfunction.SamplerContext.EMPTY_UNCACHED, x, y, z);
+                //?} else {
+                var fn = this.state.router().finalDensity();
+                built = (x, y, z) -> fn.compute(
+                        new net.minecraft.world.level.levelgen.DensityFunction.SinglePointContext(x, y, z));
+                //?}
+                this.finalDensity.compareAndSet(null, built);
+                return this.finalDensity.get();
+            } catch (Exception e) {
+                logMissing("vheight", "-", e);
+                DensityEval missing = (x, y, z) -> 0;
+                this.finalDensity.compareAndSet(null, missing);
+                return missing;
+            }
+        }
+
+        private static final class HeightCache {
+            final long[] keys = new long[HEIGHT_CACHE_SIZE];
+            final int[] values = new int[HEIGHT_CACHE_SIZE];
+        }
+
         //? >=26.3 {
         //?} else {
         /**

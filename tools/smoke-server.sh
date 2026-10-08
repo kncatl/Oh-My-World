@@ -73,7 +73,7 @@ case "$MODE" in
         ;;
     dfnoise)
         CONFIG_FLAGS="--dfnoise"
-        CHECK_ARGS="--expect overworld minecraft:sand,minecraft:bricks,minecraft:gravel,minecraft:clay"
+        CHECK_ARGS="--expect overworld minecraft:sand,minecraft:bricks,minecraft:gravel,minecraft:clay,minecraft:white_concrete,minecraft:gray_concrete"
         CONSOLE_FORCELOAD="forceload add -192 -192 63 63"
         ;;
     biome-formula)

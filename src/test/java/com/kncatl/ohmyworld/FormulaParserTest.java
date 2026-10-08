@@ -950,5 +950,15 @@ class FormulaParserTest {
         assertTrue(noiseFlag.errors().isEmpty(), noiseFlag.errors().toString());
         assertTrue(FormulaParser.usesVanillaData(noiseFlag.dimensions().get("overworld")),
                 "noise 使用必须被识别（编译后按编号）");
+
+        // vheight（M3.4）同样要能被识别（编译后按编号）
+        FormulaParser.ParseResult vheight = FormulaParser.parseWithErrors(
+                "y=0: vheight(x, z) > 0 ? rand() : rand()");
+        assertTrue(vheight.errors().isEmpty(), vheight.errors().toString());
+        FormulaParser.DimensionParseResult vheightFlag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=let vh = vheight(x, z); y=-64..319: vh > 60 ? rand() : rand()}");
+        assertTrue(vheightFlag.errors().isEmpty(), vheightFlag.errors().toString());
+        assertTrue(FormulaParser.usesVanillaData(vheightFlag.dimensions().get("overworld")),
+                "vheight 使用必须被识别（编译后按编号）");
     }
 }

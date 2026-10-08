@@ -1330,15 +1330,16 @@ public class FormulaParser {
         }
     }
 
-    /** 需要原版数据的功能（M3；后续 vheight 等一并加入）。 */
-    private static final Set<String> VANILLA_DATA_FUNCTIONS = Set.of("climate", "df", "noise");
+    /** 需要原版数据的功能（M3；后续叠加模式相关功能一并加入）。 */
+    private static final Set<String> VANILLA_DATA_FUNCTIONS = Set.of("climate", "df", "noise", "vheight");
 
     /** 表达式是否用到需要原版数据的功能（按名字查未编译调用、按编号查编译后调用）。 */
     private static boolean usesVanillaData(ExprNode node) {
         return walkFunctions(node, VANILLA_DATA_FUNCTIONS::contains,
                 id -> id == ExprEvaluator.FN_CLIMATE
                         || id == ExprEvaluator.FN_DF
-                        || id == ExprEvaluator.FN_NOISE);
+                        || id == ExprEvaluator.FN_NOISE
+                        || id == ExprEvaluator.FN_VHEIGHT);
     }
 
     /** 某维度的解析结果是否用到需要原版数据的功能（方块层 / 循环层 / biome 行 / surface 行）。 */

@@ -538,18 +538,28 @@ Default preset:
     ★ The editor preview builds the climate locally from the creation screen's seed
       (matching the final world); contexts without a climate view return 0.
 
-  -- Vanilla density functions / noises (M3; generation and the editor preview) --
+  -- Vanilla density functions / noises / surface height (M3; generation and preview) --
   df(id, x, y, z)              evaluate a registered density function
                                (e.g. minecraft:overworld/ridges; single-point)
   noise(id, x, y, z[, xzScale[, yScale]])
                                evaluate a registered noise (e.g. minecraft:temperature);
                                xzScale applies to x/z, yScale to y only (default 1)
+  vheight(x, z)                estimated vanilla surface height (finalDensity scan + bisect)
 
     ★ Ids need a namespace (datapack entries work too); missing entries return 0 and
       are logged once per id.
-    ★ Single-point evaluation has no vanilla caching -- calling it per block is very
-      slow. Always wrap it in cache2d/cache3d, e.g.
+    ★ df/noise single-point evaluation has no vanilla caching -- calling them per block
+      is very slow. Always wrap them in cache2d/cache3d, e.g.
       cache2d(df(minecraft:overworld/ridges, x, y, z), 4).
+      vheight has its own column cache (each column is scanned once), so per-block
+      calls are fine.
+    ★ vheight describes the *vanilla noise terrain* (on superflat worlds it follows the
+      dimension's noise settings), independent of formula/overlay terrain; a fully
+      non-solid column returns the dimension's bottom y.
+    ★ vheight costs a few dozen finalDensity samples per column (the column cache only
+      ensures one scan per column) -- calling it for every column slows generation
+      noticeably. Use it only where cross-column decisions need it, or restrict the
+      call sites with a lattice check (e.g. floormod(x, 8) == 0).
     ★ Values follow the dimension's noise settings and seed (same as the F3 entry).
 
 

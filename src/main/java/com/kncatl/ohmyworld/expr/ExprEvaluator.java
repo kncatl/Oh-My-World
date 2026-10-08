@@ -73,6 +73,12 @@ public class ExprEvaluator {
 
         /** noise()：按注册名调用原版噪声（找不到 id / 无法求值时 0）。 */
         default double noise(String id, double x, double y, double z) { return 0; }
+
+        /**
+         * vheight()：该列的原版地表高度估计（finalDensity 自顶向下扫描 + 二分；
+         * 列缓存由实现负责）。无此能力时返回 0。
+         */
+        default double vheight(int x, int z) { return 0; }
     }
 
     private static final ThreadLocal<VanillaView> VANILLA_VIEW = new ThreadLocal<>();
@@ -210,7 +216,8 @@ public class ExprEvaluator {
             Map.entry("rivernet", -1),
             // 1.3.2：共享气候 / 原版数据（M3）
             Map.entry("climate", -1), Map.entry("peaks", 1),
-            Map.entry("df", 4), Map.entry("noise", -1));
+            Map.entry("df", 4), Map.entry("noise", -1),
+            Map.entry("vheight", 2));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -260,6 +267,7 @@ public class ExprEvaluator {
     public static final int FN_SLOPE = 145, FN_GRAD = 146, FN_CURV = 147, FN_ISODIST = 148;
     public static final int FN_CLIMATE = 149, FN_PEAKS = 150;
     public static final int FN_DF = 151, FN_NOISE = 152;
+    public static final int FN_VHEIGHT = 153;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -335,6 +343,7 @@ public class ExprEvaluator {
             case "peaks" -> FN_PEAKS;
             case "df" -> FN_DF;
             case "noise" -> FN_NOISE;
+            case "vheight" -> FN_VHEIGHT;
             default -> FN_UNKNOWN;
         };
     }
@@ -854,6 +863,7 @@ public class ExprEvaluator {
             case "peaks" -> peaks(evalNumber(args.get(0), x, z, ly, context));
             case "df" -> dfOf(args, x, z, ly, context);
             case "noise" -> noiseOf(args, x, z, ly, context);
+            case "vheight" -> vheightOf(args, x, z, ly, context);
             case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
             case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
@@ -991,6 +1001,7 @@ public class ExprEvaluator {
             case FN_PEAKS -> peaks(evalNumber(args.get(0), x, z, ly, context));
             case FN_DF -> dfOf(args, x, z, ly, context);
             case FN_NOISE -> noiseOf(args, x, z, ly, context);
+            case FN_VHEIGHT -> vheightOf(args, x, z, ly, context);
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -1373,6 +1384,19 @@ public class ExprEvaluator {
         double xzScale = args.size() > 4 ? evalNumber(args.get(4), x, z, ly, context) : 1.0;
         double yScale = args.size() > 5 ? evalNumber(args.get(5), x, z, ly, context) : 1.0;
         return view.noise(idNode.blockId(), argX * xzScale, argY * yScale, argZ * xzScale);
+    }
+
+    /**
+     * {@code vheight(x, z)}：该列的原版地表高度估计（finalDensity 列扫描 + 二分）。
+     * 只描述**原版**地形（超平坦/叠加前的噪声地形），与公式层无关；没有视图时返回 0。
+     * 列缓存由视图负责，逐方块调用不会重复扫描。
+     */
+    private static double vheightOf(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        VanillaView view = VANILLA_VIEW.get();
+        if (view == null) return 0;
+        int argX = (int) Math.floor(evalNumber(args.get(0), x, z, ly, context));
+        int argZ = (int) Math.floor(evalNumber(args.get(1), x, z, ly, context));
+        return view.vheight(argX, argZ);
     }
 
     /** {@code peaks(w)}：原版峰谷折叠 {@code -3·(|(|w| - 2/3)| - 1/3)}（冻结）。 */

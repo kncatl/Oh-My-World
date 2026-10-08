@@ -366,8 +366,8 @@ case "$CHECK_MODE" in
         ;;
     dfnoise)
         python3 "$TOOLS/smoke-check-world.py" \
-            --expect overworld minecraft:sand,minecraft:bricks,minecraft:gravel,minecraft:clay \
-            "$SRV" || fail "原版数据冒烟核验失败：df/noise 特征方块缺失"
+            --expect overworld minecraft:sand,minecraft:bricks,minecraft:gravel,minecraft:clay,minecraft:white_concrete,minecraft:gray_concrete \
+            "$SRV" || fail "原版数据冒烟核验失败：df/noise/vheight 特征方块缺失"
         ;;
     open-ranges|water|river|m1)
         python3 "$TOOLS/smoke-check-world.py" --require-all "$SRV" \

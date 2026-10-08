@@ -465,17 +465,24 @@
      ★ 编辑器预览按创建界面的种子本地构建气候（与最终世界一致）；
        没有气候视图的环境返回 0。
 
-   ── 原版密度函数 / 噪声（M3；生成与编辑器预览均可用）──
+   ── 原版密度函数 / 噪声 / 地表高度（M3；生成与编辑器预览均可用）──
    df(注册名, x, y, z)          按注册名调用原版/数据包密度函数
                                 （如 minecraft:overworld/ridges；单点求值）
    noise(注册名, x, y, z[, xzScale[, yScale]])
                                 按注册名调用原版噪声（如 minecraft:temperature）
                                 xzScale 作用于 x/z，yScale 只作用于 y（省略为 1）
+   vheight(x, z)                原版地表高度估计（finalDensity 自顶向下扫描 + 二分）
 
      ★ 注册名要带命名空间（数据包里的条目也能用）；找不到的条目返回 0，
        每个缺失 id 只记一次日志。
-     ★ 单点求值没有原版缓存——逐方块直接调用非常慢，务必用 cache2d / cache3d
-       包一层，例如：cache2d(df(minecraft:overworld/ridges, x, y, z), 4)。
+     ★ df/noise 单点求值没有原版缓存——逐方块直接调用非常慢，务必用
+       cache2d / cache3d 包一层，例如：cache2d(df(minecraft:overworld/ridges, x, y, z), 4)。
+       vheight 自带列缓存（同一列只扫描一次），逐方块调用没有问题。
+     ★ vheight 描述的是**原版噪声地形**（超平坦世界按该维度噪声设置估计），
+       与公式层/叠加后的地形无关；整列无实心时返回维度最低 y。
+     ★ vheight 每列要做几十次 finalDensity 采样（列缓存只保证同列一次）——
+       逐列大量调用会明显拖慢生成；只在需要跨列决策处使用，
+       或用格点判断（如 floormod(x, 8) == 0）缩小调用面。
      ★ 数值随该维度的噪声设置与种子而定（与 F3 对应条目一致）。
 
    ★ 三角函数的参数单位是弧度。如需使用角度，用 torad() 转换：

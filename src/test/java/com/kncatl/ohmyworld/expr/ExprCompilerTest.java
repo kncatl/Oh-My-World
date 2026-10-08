@@ -82,6 +82,8 @@ class ExprCompilerTest {
             // 1.3.2：注册表密度函数 / 噪声（无视图 → 0；编译/未编译一致）
             "df(minecraft:overworld/ridges, x, y, z) * 0.5 + df(minecraft:overworld/ridges, z, y, x)",
             "noise(minecraft:temperature, x, y, z) + noise(minecraft:temperature, x, y, z, 0.5)",
+            // 1.3.2：原版地表高度估计（无视图 → 0；编译/未编译一致）
+            "vheight(x, z) + vheight(x + 3, z - 3) * 0.5",
     };
 
     private static String describe(Object value) {

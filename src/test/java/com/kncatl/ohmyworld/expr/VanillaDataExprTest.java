@@ -44,6 +44,16 @@ class VanillaDataExprTest {
             this.nz = z;
             return x * 100 + y * 10 + z;
         }
+
+        int vx;
+        int vz;
+
+        @Override
+        public double vheight(int x, int z) {
+            this.vx = x;
+            this.vz = z;
+            return 100 + x * 0.5 + z;
+        }
     }
 
     private static double eval(String source, int x, int z, int y) {
@@ -99,8 +109,26 @@ class VanillaDataExprTest {
     }
 
     @Test
+    void vheightReadsTheInjectedView() {
+        RecordingView view = new RecordingView();
+        ExprEvaluator.setVanillaView(view);
+        try {
+            assertEquals(100 + 10 * 0.5 + 3, eval("vheight(10, 3)", 0, 0, 0), 1e-9);
+            assertEquals(10, view.vx);
+            assertEquals(3, view.vz);
+            // 坐标可以是表达式（先向下取整）
+            assertEquals(100 + 5 * 0.5 + 7, eval("vheight(x + 5.9, z + 7.2)", 0, 0, 0), 1e-9);
+            assertEquals(5, view.vx);
+            assertEquals(7, view.vz);
+        } finally {
+            ExprEvaluator.setVanillaView(null);
+        }
+    }
+
+    @Test
     void returnsZeroWithoutAView() {
         assertEquals(0, eval("df(minecraft:overworld/ridges, 10, 2, 3)", 0, 0, 0), 1e-12);
         assertEquals(0, eval("noise(minecraft:temperature, 10, 2, 3)", 0, 0, 0), 1e-12);
+        assertEquals(0, eval("vheight(10, 3)", 0, 0, 0), 1e-12);
     }
 }

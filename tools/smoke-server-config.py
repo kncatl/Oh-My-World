@@ -85,9 +85,10 @@
   证明气候视图构建、量化取值与公式取数整条链路真的跑过。
 
 --dfnoise（1.3.2）：原版数据冒烟——df(minecraft:overworld/ridges, …) 与
-  noise(minecraft:temperature, …) 各做一次反对称比较（沙/砖、砾/黏土四种特征方块，
-  y<=60 与 y>60 各覆盖一组）；配合显式 --expect，证明注册表密度函数/噪声
-  的构建、接线与求值整条链路真的跑过（df/noise 用 cache2d 摊薄成本）。
+  noise(minecraft:temperature, …) 各做一次反对称比较、vheight(x, z) 做一次
+  x/z 互换比较（沙/砖、砾/黏土、白/灰混凝土六种特征方块，三个 y 特征带各一组）；
+  配合显式 --expect，证明注册表密度函数/噪声/地表估计的构建、接线与求值整条链路
+  真的跑过（df/noise 用 cache2d 摊薄；vheight 限定 8×8 格点以控制 forceload 成本）。
 
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
@@ -377,11 +378,12 @@ CLIMATE_FORMULA = (
     " ? minecraft:sand : minecraft:polished_blackstone_bricks) : minecraft:air}"
 )
 
-# 1.3.2 原版数据冒烟（--dfnoise；配合显式 --expect 的四种特征方块）：
-# df() 与 noise() 各用一次反对称比较（x/z 互换）：真实视图下两侧符号都会出现；
-# 无视图/注册名缺失时两侧同为 0 → 只剩另一种方块，核验直接失败（防假阳性）。
-# df/noise 单点求值很贵，这里用 cache2d 摊薄（也顺带冒烟 cache 与注册表函数的组合）。
-# y<=60 / y>60 确保两组比较都有采样。
+# 1.3.2 原版数据冒烟（--dfnoise；配合显式 --expect 的六种特征方块）：
+# df()/noise() 各用一次反对称比较（x/z 互换），vheight() 用 x/z 互换的两列高度比较；
+# 真实视图下三种比较都会产生两种结果（六种特征方块齐全），无视图/注册名缺失时
+# 只剩单一分支，核验直接失败（防假阳性）。
+# df/noise 单点求值很贵，用 cache2d 摊薄；vheight 每列要做几十次 finalDensity 采样，
+# 限定在 8×8 格点上调用（真实用法建议同理），避免 256 区块 forceload 超出看门狗。
 DFNOISE_FORMULA = (
     "{overworld="
     "let h = 60 + fbm2(x, z, 600, 4, 1) * 12;"
@@ -389,9 +391,12 @@ DFNOISE_FORMULA = (
     "let r2 = cache2d(df(minecraft:overworld/ridges, z, 64, x), 4);"
     "let n1 = cache2d(noise(minecraft:temperature, x, 64, z), 4);"
     "let n2 = cache2d(noise(minecraft:temperature, z, 64, x), 4);"
-    "y=-64..: y <= h ? (y <= 60"
+    "y=-64..: y <= h ? (y <= 40"
     " ? (r1 > r2 ? minecraft:sand : minecraft:bricks)"
-    " : (n1 > n2 ? minecraft:gravel : minecraft:clay)) : minecraft:air}"
+    " : y <= 60 ? (n1 > n2 ? minecraft:gravel : minecraft:clay)"
+    " : ((floormod(x, 8) == 0 && floormod(z, 8) == 0)"
+    "   ? (vheight(x, z) != vheight(z, x) ? minecraft:white_concrete : minecraft:gray_concrete)"
+    "   : minecraft:gray_concrete)) : minecraft:air}"
 )
 
 
@@ -545,6 +550,7 @@ def main():
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off
                      or features_all or features_none or m1_functions or surface or rivernet or climate
+                     or dfnoise
                      or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；
