@@ -434,6 +434,24 @@
          surface wd >= 1 && sd == 0 ? minecraft:sand : keep;
          surface slope > 2 && sd <= 1 ? minecraft:stone : keep
 
+   ── 河网（rivernet：非局部河流；配合 min 使用）──
+   let (距离, 半宽, 水面, 流量) = rivernet(cs, 盐)       默认高度场
+   let (…) = rivernet(coarse, cs, 盐)                   自定义高度场（列表达式）
+
+     ★ 抖动网格节点 + 严格下降的下游 + 深度 3 的流量累积 → 半宽 = 3 + √流量。
+     ★ 返回：距离=到最近河中线的距离；半宽=该处河道半宽；水面=水面高度
+       （节点海拔沿线插值 − 3）；流量=上游累积量。
+     ★ cs ∈ 64..512（整数字面量）；盐为数字字面量；海拔 ≤ 62 的节点是终点
+       （汇入海）。省略 coarse 时用内部高度场（62 ± 28 的多倍频噪声）。
+     ★ coarse 必须自包含（只能用内建量；不引用 ly/y；不含视图/随机函数）。
+     ★ 附近没有河道时：距离=1e9、水面=1e9 —— 配合 min(base, …) 即"不接管"。
+     ★ 例（河道 + 河床 + 水体）：
+        let (d, w, s, o) = rivernet(192, 7);
+        let base = 60 + fbm2(x, z, 600, 4, 1) * 20;
+        let bed = min(base, s - 4 + max(d - w, 0) * 0.7);
+        y=..: y <= bed ? (d < w ? minecraft:sand : minecraft:stone)
+             : (d < w && y <= s ? minecraft:water : minecraft:air)
+
    ★ 三角函数的参数单位是弧度。如需使用角度，用 torad() 转换：
      例：sin(torad(30)) = 0.5
 

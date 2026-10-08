@@ -836,4 +836,40 @@ class FormulaParserTest {
         assertTrue(badDepth.errors().stream().anyMatch(e -> e.contains("maxdepth")),
                 badDepth.errors().toString());
     }
+
+    /** 1.3.1：rivernet 的公式级校验。 */
+    @Test
+    void rivernetCallsValidate() {
+        FormulaParser.ParseResult valid = FormulaParser.parseWithErrors(
+                "y=0: { let (d, w, s, o) = rivernet(192, 7); d > 10 ? rand() : rand() }");
+        assertTrue(valid.errors().isEmpty(), valid.errors().toString());
+        FormulaParser.ParseResult validCoarse = FormulaParser.parseWithErrors(
+                "y=0: { let (d, w, s, o) = rivernet(x + z, 192, 7); w > 3 ? rand() : rand() }");
+        assertTrue(validCoarse.errors().isEmpty(), validCoarse.errors().toString());
+
+        FormulaParser.ParseResult badCs = FormulaParser.parseWithErrors(
+                "y=0: { let (a, b, c, d) = rivernet(32, 7); a > 0 ? rand() : rand() }");
+        assertTrue(badCs.errors().stream().anyMatch(e -> e.contains("cs must be an integer literal")),
+                badCs.errors().toString());
+
+        FormulaParser.ParseResult badSalt = FormulaParser.parseWithErrors(
+                "y=0: { let (a, b, c, d) = rivernet(192, x); a > 0 ? rand() : rand() }");
+        assertTrue(badSalt.errors().stream().anyMatch(e -> e.contains("salt must be a number literal")),
+                badSalt.errors().toString());
+
+        FormulaParser.ParseResult boundCoarse = FormulaParser.parseWithErrors(
+                "y=0: { let q = x + z; let (a, b, c, d) = rivernet(q, 192, 7); a > 0 ? rand() : rand() }");
+        assertTrue(boundCoarse.errors().stream().anyMatch(e -> e.contains("self-contained")),
+                boundCoarse.errors().toString());
+
+        FormulaParser.ParseResult verticalCoarse = FormulaParser.parseWithErrors(
+                "y=0: { let (a, b, c, d) = rivernet(x + y, 192, 7); a > 0 ? rand() : rand() }");
+        assertTrue(verticalCoarse.errors().stream().anyMatch(e -> e.contains("cannot reference ly or y")),
+                verticalCoarse.errors().toString());
+
+        FormulaParser.ParseResult badArity = FormulaParser.parseWithErrors(
+                "y=0: { let (a, b, c, d) = rivernet(192); a > 0 ? rand() : rand() }");
+        assertTrue(badArity.errors().stream().anyMatch(e -> e.contains("expects 2 or 3 arguments")),
+                badArity.errors().toString());
+    }
 }

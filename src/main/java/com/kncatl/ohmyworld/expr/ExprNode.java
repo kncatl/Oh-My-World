@@ -78,6 +78,32 @@ public sealed interface ExprNode {
     record TupleComponentNode(int slot, int index, boolean tupleDependent) implements ExprNode {}
 
     /**
+     * 编译后的 rivernet（1.3.1）：河网查询（4 元组：距离 / 半宽 / 水面 / 流量）。
+     * {@code coarse} 为 null 时使用默认内部高度场；cs 与 salt 在编译期固化。
+     * 语义与缓存约定同 {@link CompiledCache2dNode}（线程本地、按种子失效）。
+     */
+    final class CompiledRiverNetNode implements ExprNode {
+        private final ExprNode coarse;
+        private final int cs;
+        private final double salt;
+        private final ThreadLocal<RiverCache> cache = ThreadLocal.withInitial(RiverCache::new);
+
+        public CompiledRiverNetNode(ExprNode coarse, int cs, double salt) {
+            this.coarse = coarse;
+            this.cs = cs;
+            this.salt = salt;
+        }
+
+        public ExprNode coarseExpr() { return coarse; }
+
+        public int cs() { return cs; }
+
+        public double salt() { return salt; }
+
+        ThreadLocal<RiverCache> cache() { return cache; }
+    }
+
+    /**
      * 编译后的 cache2d（1.3.1）：世界对齐网格上的双线性插值。
      *
      * <p>值语义只由（网格角点、表达式、世界种子）决定——缓存只是每线程复用的

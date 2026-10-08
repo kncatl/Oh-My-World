@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -171,6 +171,7 @@ case "$CHECK_MODE" in
     river)           SMOKE_CONFIG_MODE="--river" ;;
     m1)              SMOKE_CONFIG_MODE="--m1-functions" ;;
     surface)         SMOKE_CONFIG_MODE="--surface" ;;
+    rivernet)        SMOKE_CONFIG_MODE="--rivernet" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
 # 先清世界再写配置：marker 模式会在配置阶段预置 world/ohmyworld_marker.txt
@@ -208,6 +209,11 @@ console_commands() {
     elif [[ "$CHECK_MODE" == carvers* || "$CHECK_MODE" == flat-carvers* ]]; then
         # 雕刻器冒烟：forceload 256 区块再收 60 秒——隧道/峡谷稀疏，样本要大
         echo "execute in minecraft:overworld run forceload add 1024 0 1279 255"
+    elif [[ "$CHECK_MODE" == "rivernet" ]]; then
+        # 河网冒烟：26.x 启动只完整生成出生区块半径 2；forceload 256 区块覆盖原点
+        # 西南方向的河段（径向坡保证原点附近必有河），再收 75 秒生成
+        echo "execute in minecraft:overworld run forceload add -192 -192 63 63"
+        sleep 75
     elif [[ "$CHECK_MODE" == "spawn" ]]; then
         # 出生点冒烟：forceload 覆盖原点与出生点周边（16×16=256，上限内），
         # 便于用探针方块读出"各区块生成时读到的出生点"
@@ -337,6 +343,11 @@ case "$CHECK_MODE" in
         python3 "$TOOLS/smoke-check-world.py" \
             --expect overworld minecraft:sea_lantern,minecraft:polished_blackstone_bricks,minecraft:ochre_froglight,minecraft:glass \
             "$SRV" || fail "表面通道冒烟核验失败：sd/wd/slope 特征方块缺失"
+        ;;
+    rivernet)
+        python3 "$TOOLS/smoke-check-world.py" \
+            --expect overworld minecraft:sand,minecraft:water \
+            "$SRV" || fail "河网冒烟核验失败：河道沙/水体缺失"
         ;;
     open-ranges|water|river|m1)
         python3 "$TOOLS/smoke-check-world.py" --require-all "$SRV" \

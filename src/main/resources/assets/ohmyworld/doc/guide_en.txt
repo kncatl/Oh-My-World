@@ -501,6 +501,29 @@ Default preset:
         surface wd >= 1 && sd == 0 ? minecraft:sand : keep;
         surface slope > 2 && sd <= 1 ? minecraft:stone : keep
 
+  -- River network (rivernet: non-local rivers; combine with min) --
+  let (dist, wd, surf, order) = rivernet(cs, salt)         default height field
+  let (...) = rivernet(coarse, cs, salt)                   custom field (column expr)
+
+    ★ Jittered grid nodes + strictly descending downstream + depth-3 flow
+      accumulation → half-width = 3 + sqrt(flow).
+    ★ Returns: dist = distance to the nearest river centreline; wd = local half
+      width; surf = water surface (node elevation interpolated along the segment
+      minus 3); order = accumulated upstream flow.
+    ★ cs in 64..512 (integer literal); salt must be a number literal; nodes with
+      elevation <= 62 are terminals (they flow into the sea). When coarse is
+      omitted an internal field (62 ± 28 multifractal noise) is used.
+    ★ coarse must be self-contained (built-ins only, no ly/y, no view/random
+      functions).
+    ★ With no river nearby: dist = 1e9 and surf = 1e9 — min(base, ...) then keeps
+      the normal terrain.
+    ★ Example (river + bed + water):
+        let (d, w, s, o) = rivernet(192, 7);
+        let base = 60 + fbm2(x, z, 600, 4, 1) * 20;
+        let bed = min(base, s - 4 + max(d - w, 0) * 0.7);
+        y=..: y <= bed ? (d < w ? minecraft:sand : minecraft:stone)
+             : (d < w && y <= s ? minecraft:water : minecraft:air)
+
 
 5. Expression Examples
 

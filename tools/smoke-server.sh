@@ -27,6 +27,7 @@ echo "[smoke] 节点=$NODE  日志=$LOG"
 # 冒烟公式刻意使用白名单之外的方块（触发 RegistryLookup）并用特征方块核验世界。
 mkdir -p "$RUN_DIR"
 PORT=auto
+CONSOLE_FORCELOAD=""
 case "$MODE" in
     "")
         CONFIG_FLAGS=""
@@ -59,6 +60,11 @@ case "$MODE" in
     surface)
         CONFIG_FLAGS="--surface"
         CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:polished_blackstone_bricks,minecraft:ochre_froglight,minecraft:glass"
+        ;;
+    rivernet)
+        CONFIG_FLAGS="--rivernet"
+        CHECK_ARGS="--expect overworld minecraft:sand,minecraft:water"
+        CONSOLE_FORCELOAD="forceload add -192 -192 63 63"
         ;;
     biome-formula)
         CONFIG_FLAGS="--biome-formula"
@@ -97,7 +103,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac
@@ -107,8 +113,25 @@ SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
 
 rm -rf "$RUN_DIR/world"
 
-./gradlew "$NODE:runServer" --console=plain > "$LOG" 2>&1 &
-GRADLE_PID=$!
+if [ -n "$CONSOLE_FORCELOAD" ]; then
+    # 需要扩大生成范围的模式（河网）：等服务器就绪后从控制台 forceload（stdin 会
+    # 转发给 dev 服务器），留足生成时间再优雅停止——26.x 启动只完整生成出生区块
+    # 半径 2（25 区块），河道窄带不一定在其中。
+    (
+        for _ in $(seq 1 150); do
+            grep -q 'Done (' "$LOG" && break
+            sleep 2
+        done
+        sleep 3
+        echo "$CONSOLE_FORCELOAD"
+        sleep 90
+        echo "stop"
+    ) | ./gradlew "$NODE:runServer" --console=plain > "$LOG" 2>&1 &
+    GRADLE_PID=$!
+else
+    ./gradlew "$NODE:runServer" --console=plain > "$LOG" 2>&1 &
+    GRADLE_PID=$!
+fi
 
 started=0
 for _ in $(seq 1 300); do
@@ -118,7 +141,18 @@ for _ in $(seq 1 300); do
 done
 
 if [ "$started" = 1 ]; then
-    sleep "$SETTLE"
+    if [ -n "$CONSOLE_FORCELOAD" ]; then
+        # 控制台脚本在生成完成后发 stop；这里等进程退出（另设兜底超时）
+        (
+            sleep 180
+            kill -TERM "$GRADLE_PID" 2>/dev/null || true
+        ) &
+        GUARD=$!
+        wait "$GRADLE_PID" 2>/dev/null || true
+        kill "$GUARD" 2>/dev/null || true
+    else
+        sleep "$SETTLE"
+    fi
 fi
 
 # 停止服务端：NeoForge 的 launch target 藏在 @serverRunVmArgs.txt 里（而且

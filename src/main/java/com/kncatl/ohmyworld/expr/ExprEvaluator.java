@@ -165,11 +165,13 @@ public class ExprEvaluator {
             Map.entry("slope", 1), Map.entry("grad", 1), Map.entry("curv", 1),
             Map.entry("isodist", 1),
             // 1.3.1：网格采样 + 插值（编译期转换为带缓存的节点）
-            Map.entry("cache2d", -1), Map.entry("cache3d", -1));
+            Map.entry("cache2d", -1), Map.entry("cache3d", -1),
+            // 1.3.1：河网（多返回 4：距离 / 半宽 / 水面 / 流量）
+            Map.entry("rivernet", -1));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
-            "warp2", 2, "warp3", 3, "noise2g", 3, "worley2c", 5, "grad", 2);
+            "warp2", 2, "warp3", 3, "noise2g", 3, "worley2c", 5, "grad", 2, "rivernet", 4);
 
     /** 是否是已知的多返回函数。 */
     public static boolean isMultiFunction(String name) {
@@ -211,6 +213,7 @@ public class ExprEvaluator {
             FN_TERRACE = 132;
     public static final int FN_FBMA2 = 133, FN_RIDGED2 = 134, FN_BILLOW2 = 135, FN_FBM2E = 136;
     public static final int FN_WARP2 = 140, FN_WARP3 = 141, FN_NOISE2G = 142, FN_WORLEY2C = 143;
+    public static final int FN_RIVERNET = 144;
     public static final int FN_SLOPE = 145, FN_GRAD = 146, FN_CURV = 147, FN_ISODIST = 148;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
@@ -295,6 +298,7 @@ public class ExprEvaluator {
             case "noise2g" -> FN_NOISE2G;
             case "worley2c" -> FN_WORLEY2C;
             case "grad" -> FN_GRAD;
+            case "rivernet" -> FN_RIVERNET;
             default -> FN_UNKNOWN;
         };
     }
@@ -328,6 +332,12 @@ public class ExprEvaluator {
         if (name.equals("cache3d")) {
             if (argCount != 1 && argCount != 4) {
                 return "Function 'cache3d' expects 1 or 4 arguments (expression[, sx, sy, sz]), got " + argCount;
+            }
+            return null;
+        }
+        if (name.equals("rivernet")) {
+            if (argCount != 2 && argCount != 3) {
+                return "Function 'rivernet' expects 2 or 3 arguments (cs, salt) or (coarse, cs, salt), got " + argCount;
             }
             return null;
         }
@@ -383,6 +393,7 @@ public class ExprEvaluator {
             case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
             case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
             case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
+            case ExprNode.CompiledRiverNetNode r -> evalRiverNetCompiled(r, x, z, context);
         };
     }
 
@@ -518,6 +529,8 @@ public class ExprEvaluator {
             case ExprNode.CompiledTupleCallNode t -> true;
             case ExprNode.CompiledCache2dNode c2 -> false;
             case ExprNode.CompiledCache3dNode c3 -> true;
+            // rivernet 只依赖 x/z（coarse 已校验不含 ly/y）
+            case ExprNode.CompiledRiverNetNode r -> false;
             case ExprNode.CompiledBlockNode cb -> true;
         };
     }
@@ -928,6 +941,7 @@ public class ExprEvaluator {
                     evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
                     evalNumber(args.get(3), x, z, ly, context));
             case "grad" -> gradient(args.get(0), x, z, ly, context);
+            case "rivernet" -> evalRiverNetUncached(args, x, z, ly, context);
             default -> throw new IllegalArgumentException("Unknown multi-return function: " + name);
         };
     }
@@ -950,6 +964,7 @@ public class ExprEvaluator {
                     evalNumber(args.get(1), x, z, ly, context), evalNumber(args.get(2), x, z, ly, context),
                     evalNumber(args.get(3), x, z, ly, context));
             case FN_GRAD -> gradient(args.get(0), x, z, ly, context);
+            case FN_RIVERNET -> evalRiverNetUncached(args, x, z, ly, context);
             default -> throw new IllegalArgumentException("Unknown compiled tuple function id: " + id);
         };
     }
@@ -1369,6 +1384,168 @@ public class ExprEvaluator {
         double value = evalAtY(expr, cx, cz, cy, ly, context);
         map.put(key, value);
         return value;
+    }
+
+    // ---------------------------------------------------------- rivernet（1.3.1）
+    //
+    // 抖动网格节点 → 严格下降的下游（无环森林）→ 深度 3 的流量累积 → 半宽；
+    // 查询点取 5×5 节点的"节点→下游"线段，返回 (dist, wd, surf, order)。
+    // **算法冻结**：发布后不得更改（节点哈希、抖动、并列规则与常量都是契约）。
+
+    private static final double RIVER_SEA_LEVEL = 62;
+    private static final double RIVER_SURFACE_DROP = 3;
+    private static final double RIVER_W0 = 3;
+    private static final double RIVER_WK = 1;
+    private static final int RIVER_QUERY_RADIUS = 2;
+
+    /** 一次查询的参数束（含节点缓存的引用）。 */
+    private record RiverParams(ExprNode coarse, int cs, double salt, RiverCache cache) {}
+
+    /** 节点哈希（世界种子 + 盐 + 节点坐标 + 通道；冻结）。 */
+    private static double riverHashUnit(int i, int j, int channel, double salt) {
+        long h = Noise.mix64(Noise.worldSeed + Double.doubleToRawLongBits(salt) * 0x9E3779B97F4A7C15L);
+        h = Noise.mix64(h + i * 0x9E3779B97F4A7C15L);
+        h = Noise.mix64(h + j * 0xC2B2AE3D27D4EB4FL);
+        h = Noise.mix64(h + channel * 0xD1B54A32D192ED03L);
+        return Noise.unit(h);
+    }
+
+    /** 取/建一个节点（位置 + 海拔；下游与流量按需再算）。 */
+    private static RiverNode riverNode(RiverParams p, int i, int j, EvalContext context) {
+        long key = RiverCache.key(i, j);
+        RiverNode node = p.cache().nodes().get(key);
+        if (node != null) return node;
+        double hx = riverHashUnit(i, j, 0, p.salt());
+        double hz = riverHashUnit(i, j, 1, p.salt());
+        int px = (int) Math.round((i + 0.15 + 0.7 * hx) * p.cs());
+        int pz = (int) Math.round((j + 0.15 + 0.7 * hz) * p.cs());
+        double elevation = p.coarse() == null
+                ? 62 + Noise.fbm2(px, pz, p.cs() * 5.0, 4, p.salt() + 977) * 28
+                : evalNumber(p.coarse(), px, pz, 0, context);
+        node = new RiverNode(i, j, px, pz, elevation);
+        p.cache().nodes().put(key, node);
+        p.cache().maybeTrim();
+        return node;
+    }
+
+    /** 确定节点的下游：8 邻中海拔最低且严格低于自身者；并列按哈希取小；海节点/无更低者为终点。 */
+    private static void riverResolveDown(RiverNode node, RiverParams p, EvalContext context) {
+        if (node.downReady) return;
+        node.downReady = true;
+        if (node.elevation <= RIVER_SEA_LEVEL) return;
+        double bestE = Double.MAX_VALUE;
+        double bestTie = Double.MAX_VALUE;
+        int bestI = RiverNode.NO_DOWN;
+        int bestJ = RiverNode.NO_DOWN;
+        for (int dj = -1; dj <= 1; dj++) {
+            for (int di = -1; di <= 1; di++) {
+                if (di == 0 && dj == 0) continue;
+                RiverNode neighbor = riverNode(p, node.i + di, node.j + dj, context);
+                if (neighbor.elevation >= node.elevation) continue;
+                double tie = riverHashUnit(node.i + di, node.j + dj, 2, p.salt());
+                if (neighbor.elevation < bestE
+                        || (neighbor.elevation == bestE && tie < bestTie)) {
+                    bestE = neighbor.elevation;
+                    bestTie = tie;
+                    bestI = neighbor.i;
+                    bestJ = neighbor.j;
+                }
+            }
+        }
+        node.downI = bestI;
+        node.downJ = bestJ;
+    }
+
+    /** 上游累积量（深度 d 封顶）：1 + Σ 指向本节点的邻居的 flow(d-1)。 */
+    private static double riverFlow(RiverNode node, int depth, RiverParams p, EvalContext context) {
+        if (depth <= 0) return 1;
+        if (node.hasFlow(depth)) return node.flow(depth);
+        riverResolveDown(node, p, context);
+        double sum = 1;
+        for (int dj = -1; dj <= 1; dj++) {
+            for (int di = -1; di <= 1; di++) {
+                if (di == 0 && dj == 0) continue;
+                RiverNode neighbor = riverNode(p, node.i + di, node.j + dj, context);
+                riverResolveDown(neighbor, p, context);
+                if (neighbor.downI == node.i && neighbor.downJ == node.j) {
+                    sum += riverFlow(neighbor, depth - 1, p, context);
+                }
+            }
+        }
+        node.setFlow(depth, sum);
+        return sum;
+    }
+
+    /** 河道半宽：w0 + k·√流量（深度 3）。 */
+    private static double riverWidth(RiverNode node, RiverParams p, EvalContext context) {
+        return RIVER_W0 + RIVER_WK * Math.sqrt(riverFlow(node, RiverNode.MAX_DEPTH, p, context));
+    }
+
+    /**
+     * 查询：先对查询点做内部域扭曲，再在 5×5 节点的线段中取最近者，
+     * 沿线插值半宽与水面（节点海拔 − 3），返回 (距离, 半宽, 水面, 流量)。
+     * 附近没有线段时返回 (1e9, 0, 1e9, 0)（配合 min(base, …) 即不接管）。
+     */
+    private static double[] riverQuery(RiverParams p, int x, int z, EvalContext context) {
+        double wx = x + p.cs() * 0.12 * Noise.noise2(x, z, p.cs(), p.salt() + 9901);
+        double wz = z + p.cs() * 0.12 * Noise.noise2(x, z, p.cs(), p.salt() + 9902);
+        int ci = (int) Math.floor(wx / p.cs());
+        int cj = (int) Math.floor(wz / p.cs());
+        double bestDist = Double.MAX_VALUE;
+        double bestWidth = 0;
+        double bestSurf = 1e9;
+        double bestOrder = 0;
+        for (int dj = -RIVER_QUERY_RADIUS; dj <= RIVER_QUERY_RADIUS; dj++) {
+            for (int di = -RIVER_QUERY_RADIUS; di <= RIVER_QUERY_RADIUS; di++) {
+                RiverNode node = riverNode(p, ci + di, cj + dj, context);
+                riverResolveDown(node, p, context);
+                if (node.downI == RiverNode.NO_DOWN) continue;
+                RiverNode down = riverNode(p, node.downI, node.downJ, context);
+                double vx = down.x - node.x;
+                double vz = down.z - node.z;
+                double len2 = vx * vx + vz * vz;
+                double t = len2 <= 0 ? 0 : ((wx - node.x) * vx + (wz - node.z) * vz) / len2;
+                t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                double projX = node.x + t * vx;
+                double projZ = node.z + t * vz;
+                double ddx = wx - projX;
+                double ddz = wz - projZ;
+                double dist = Math.sqrt(ddx * ddx + ddz * ddz);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    double wN = riverWidth(node, p, context);
+                    double wD = riverWidth(down, p, context);
+                    bestWidth = wN + (wD - wN) * t;
+                    double eN = node.elevation;
+                    double eD = down.elevation;
+                    bestSurf = eN + (eD - eN) * t - RIVER_SURFACE_DROP;
+                    bestOrder = riverFlow(node, RiverNode.MAX_DEPTH, p, context);
+                }
+            }
+        }
+        if (bestDist == Double.MAX_VALUE) return new double[]{1e9, 0, 1e9, 0};
+        return new double[]{bestDist, bestWidth, bestSurf, bestOrder};
+    }
+
+    /** 编译路径：按节点实例的线程本地缓存查询。 */
+    private static double[] evalRiverNetCompiled(ExprNode.CompiledRiverNetNode node, int x, int z,
+                                                 EvalContext context) {
+        RiverParams params = new RiverParams(node.coarseExpr(), node.cs(), node.salt(),
+                node.cache().get());
+        return riverQuery(params, x, z, context);
+    }
+
+    /** 未编译/兜底路径：一次性计算（无跨调用缓存，语义与缓存版一致）。 */
+    private static double[] evalRiverNetUncached(List<ExprNode> args, int x, int z, int ly,
+                                                 EvalContext context) {
+        int n = args.size();
+        int csIdx = n == 3 ? 1 : 0;
+        int cs = (int) evalNumber(args.get(csIdx), x, z, ly, context);
+        if (cs < 64 || cs > 512) cs = 192;
+        double salt = evalNumber(args.get(csIdx + 1), x, z, ly, context);
+        ExprNode coarse = n == 3 ? args.get(0) : null;
+        RiverParams params = new RiverParams(coarse, cs, salt, new RiverCache());
+        return riverQuery(params, x, z, context);
     }
 
     // ---------------------------------------------------------- 样条映射（1.2.6）

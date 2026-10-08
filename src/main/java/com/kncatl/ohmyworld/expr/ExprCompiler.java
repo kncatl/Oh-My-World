@@ -165,10 +165,14 @@ public final class ExprCompiler {
                     args.add(compiled.node());
                     dependent |= compiled.lyDependent();
                 }
+                List<ExprNode> compiledArgs = List.copyOf(args);
+                // 1.3.1：rivernet 编译为带节点缓存的专用节点
+                Compiled river = compileRiverNetNode(t.name(), t.args(), compiledArgs);
+                if (river != null) yield river;
                 int id = ExprEvaluator.tupleFunctionId(t.name());
                 ExprNode call = id == ExprEvaluator.FN_UNKNOWN
-                        ? new ExprNode.TupleCallNode(t.name(), List.copyOf(args))
-                        : new ExprNode.CompiledTupleCallNode(id, List.copyOf(args));
+                        ? new ExprNode.TupleCallNode(t.name(), compiledArgs)
+                        : new ExprNode.CompiledTupleCallNode(id, compiledArgs);
                 yield new Compiled(call, dependent);
             }
 
@@ -182,6 +186,8 @@ public final class ExprCompiler {
             // cache2d 与纵坐标无关；cache3d 可能引用 y（保守视为相关，只放弃提升）
             case ExprNode.CompiledCache2dNode c2 -> new Compiled(c2, false);
             case ExprNode.CompiledCache3dNode c3 -> new Compiled(c3, true);
+            // rivernet 只依赖 x/z（coarse 已校验不含 ly/y）
+            case ExprNode.CompiledRiverNetNode r -> new Compiled(r, false);
             // 已编译的块无法再反查槽位来源，保守视为与 y 相关：只放弃提升，不影响正确性
             case ExprNode.CompiledBlockNode cb -> new Compiled(cb, true);
         };
@@ -223,12 +229,40 @@ public final class ExprCompiler {
 
     /** 1..16 的整数字面量；否则 -1（仅编译期使用）。 */
     private static int literalStep(ExprNode node) {
+        Integer value = literalIntIn(node, 1, 16);
+        return value == null ? -1 : value;
+    }
+
+    /** [lo, hi] 内的整数字面量；否则 null（仅编译期使用）。 */
+    private static Integer literalIntIn(ExprNode node, int lo, int hi) {
         if (node instanceof ExprNode.NumberNode n
                 && n.value() == Math.rint(n.value())
-                && n.value() >= 1 && n.value() <= 16) {
+                && n.value() >= lo && n.value() <= hi) {
             return (int) n.value();
         }
-        return -1;
+        return null;
+    }
+
+    /**
+     * 尝试把 rivernet 调用编译为带节点缓存的专用节点（1.3.1）。
+     * 只有 cs ∈ 64..512 的整数字面量、salt 为数字字面量、coarse 自包含时才转换；
+     * 否则保留普通多返回调用（运行期走无缓存直通，语义相同）。
+     */
+    private static Compiled compileRiverNetNode(String name, List<ExprNode> rawArgs, List<ExprNode> args) {
+        if (!name.equals("rivernet")) return null;
+        int n = args.size();
+        if (n != 2 && n != 3) return null;
+        int csIdx = n == 3 ? 1 : 0;
+        Integer cs = literalIntIn(rawArgs.get(csIdx), 64, 512);
+        if (cs == null) return null;
+        if (!(rawArgs.get(csIdx + 1) instanceof ExprNode.NumberNode saltNode)) return null;
+        ExprNode coarse = null;
+        if (n == 3) {
+            ExprNode rawCoarse = rawArgs.get(0);
+            if (referencesNonBuiltinVariables(rawCoarse) || usesVertical(rawCoarse, true)) return null;
+            coarse = args.get(0);
+        }
+        return new Compiled(new ExprNode.CompiledRiverNetNode(coarse, cs, saltNode.value()), false);
     }
 
     /** 编译期允许出现在自包含表达式里的内建量（cache2d/cache3d 的自由变量白名单）。 */
@@ -276,6 +310,7 @@ public final class ExprCompiler {
             case ExprNode.TupleComponentNode tc -> true;
             case ExprNode.CompiledCache2dNode c2 -> true;
             case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledRiverNetNode r -> true;
             case ExprNode.CompiledBlockNode cb -> true;
         };
     }
@@ -328,6 +363,7 @@ public final class ExprCompiler {
             case ExprNode.CompiledBlockNode cb -> true;
             case ExprNode.CompiledCache2dNode c2 -> false;
             case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledRiverNetNode r -> true;
         };
     }
 
@@ -370,8 +406,9 @@ public final class ExprCompiler {
             }
             case ExprNode.TupleComponentNode t -> t.tupleDependent();
             case ExprNode.CompiledCache2dNode c2 -> false;
-            // cache3d 可能引用 y；已编译后无法区分，保守视为相关（只放弃提升）
+            // cache3d 与 rivernet 的已编译形态：保守视为相关（只放弃提升）
             case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledRiverNetNode r -> false;
             // 以下形态不会出现在编译后的节点里，只为了让 switch 穷尽并保持保守
             case ExprNode.VariableNode v -> true;
             case ExprNode.BlockExprNode be -> true;

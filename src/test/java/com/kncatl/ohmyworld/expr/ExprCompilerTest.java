@@ -75,6 +75,8 @@ class ExprCompilerTest {
             "cache2d(x * 2 + z, 8)",
             "cache3d(noise2(x, z, 400, 3) + y * 0.1, 4, 8, 4)",
             "{ let (u, v) = warp2(x, z, 200, 30, 6); cache2d(u + v, 8) }",
+            // 1.3.1：rivernet（编译路径带节点缓存；未编译路径直通）
+            "{ let (d, w, s, o) = rivernet(192, 7); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
     };
 
     private static String describe(Object value) {

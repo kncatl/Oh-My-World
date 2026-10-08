@@ -717,6 +717,8 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode ignored -> false;
             case ExprNode.CompiledCache2dNode cache -> walkFunctions(cache.expr(), byName, byId);
             case ExprNode.CompiledCache3dNode cache -> walkFunctions(cache.expr(), byName, byId);
+            case ExprNode.CompiledRiverNetNode river ->
+                    river.coarseExpr() != null && walkFunctions(river.coarseExpr(), byName, byId);
             case ExprNode.CompiledBlockNode block ->
                     Arrays.stream(block.values()).anyMatch(v -> walkFunctions(v, byName, byId))
                             || walkFunctions(block.body(), byName, byId);
@@ -1116,6 +1118,7 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode tc -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledCache2dNode c -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledCache3dNode c -> { return ExprEvaluator.ValueType.NUMBER; }
+            case ExprNode.CompiledRiverNetNode r -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.CompiledBlockNode cb -> { return ExprEvaluator.ValueType.UNKNOWN; }
         }
     }
@@ -1199,6 +1202,7 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode tc -> true;
             case ExprNode.CompiledCache2dNode c2 -> true;
             case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledRiverNetNode r -> true;
             case ExprNode.CompiledBlockNode cb -> true;
         };
     }
@@ -1242,6 +1246,7 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode tc -> true;
             case ExprNode.CompiledCache2dNode c2 -> true;
             case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledRiverNetNode r -> true;
             case ExprNode.CompiledBlockNode cb -> true;
         };
     }
@@ -1265,10 +1270,54 @@ public class FormulaParser {
             errors.add("Tuple let binds " + binding.names().size() + " name(s) but '" + call.name()
                     + "' returns " + arity + " value(s)");
         }
+        if (call.name().equals("rivernet")) {
+            validateRivernetCall(call, errors, variables, biomeMode);
+            return;
+        }
         String msg = ExprEvaluator.validateFunction(call.name(), call.args().size());
         if (msg != null) errors.add(msg);
         for (ExprNode arg : call.args()) {
             requireNumber(validateNode(arg, errors, variables, biomeMode), "argument of " + call.name(), errors);
+        }
+    }
+
+    /** rivernet 的专项校验：cs/salt 为字面量、coarse 自包含且不含 ly/y 与视图/随机函数。 */
+    private static void validateRivernetCall(ExprNode.TupleCallNode call, List<String> errors,
+                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+        int n = call.args().size();
+        if (n != 2 && n != 3) {
+            errors.add("Function 'rivernet' expects 2 or 3 arguments (cs, salt) or (coarse, cs, salt), got " + n);
+            return;
+        }
+        int csIdx = n == 3 ? 1 : 0;
+        checkLiteralInt(call.args().get(csIdx), 64, 512, errors,
+                "Function 'rivernet': cs must be an integer literal in 64..512");
+        if (!(call.args().get(csIdx + 1) instanceof ExprNode.NumberNode)) {
+            errors.add("Function 'rivernet': salt must be a number literal");
+        }
+        if (n == 3) {
+            ExprNode coarse = call.args().get(0);
+            requireNumber(validateNode(coarse, errors, variables, biomeMode), "first argument of rivernet", errors);
+            if (referencesBoundVariables(coarse, variables, new HashSet<>())) {
+                errors.add("Function 'rivernet': the coarse expression must be self-contained "
+                        + "(built-ins only; no let bindings or surface variables)");
+            }
+            if (containsCacheForbiddenFunctions(coarse)) {
+                errors.add("Function 'rivernet': the coarse expression cannot use "
+                        + "terrain/surfis/blockis/biomeis/rand/randexcept");
+            }
+            if (ExprCompiler.usesVertical(coarse, true)) {
+                errors.add("Function 'rivernet': the coarse expression cannot reference ly or y");
+            }
+        }
+    }
+
+    /** 整数字面量范围校验（cache/rivernet 的字面量参数用）。 */
+    private static void checkLiteralInt(ExprNode node, int lo, int hi, List<String> errors, String message) {
+        if (!(node instanceof ExprNode.NumberNode n)
+                || n.value() != Math.rint(n.value())
+                || n.value() < lo || n.value() > hi) {
+            errors.add(message);
         }
     }
 
@@ -1513,6 +1562,7 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode t -> t;
             case ExprNode.CompiledCache2dNode c -> c;
             case ExprNode.CompiledCache3dNode c -> c;
+            case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.BuiltinNode b -> b;
             case ExprNode.SlotNode s -> s;
             case ExprNode.CompiledFuncCallNode cf -> cf;
@@ -1587,6 +1637,7 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode tc -> tc;
             case ExprNode.CompiledCache2dNode c2 -> c2;
             case ExprNode.CompiledCache3dNode c3 -> c3;
+            case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.CompiledBlockNode cb -> cb;
         };
     }
@@ -1690,6 +1741,7 @@ public class FormulaParser {
             case ExprNode.TupleComponentNode t -> t;
             case ExprNode.CompiledCache2dNode c -> c;
             case ExprNode.CompiledCache3dNode c -> c;
+            case ExprNode.CompiledRiverNetNode r -> r;
             case ExprNode.BuiltinNode b -> b;
             case ExprNode.SlotNode s -> s;
             case ExprNode.CompiledFuncCallNode cf -> cf;

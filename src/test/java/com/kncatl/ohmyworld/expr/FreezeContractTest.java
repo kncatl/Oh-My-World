@@ -89,6 +89,13 @@ class FreezeContractTest {
     }
 
     @Test
+    void riverNetwork() {
+        check("rivernet",
+                "{ let (d, w, s, o) = rivernet(192, 7); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
+                594283715443291299L);
+    }
+
+    @Test
     void fbm2eWithZeroDampingEqualsFbm2() {
         ExprEvaluator.setWorldSeed(777L);
         for (int x = -13; x <= 13; x += 7) {

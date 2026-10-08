@@ -77,6 +77,9 @@
   surface 行按 sd/wd/slope 分层铺 海晶灯 / 黑石砖 / 蛙明灯 / 玻璃，其余 keep。
   配合 smoke-check-world.py 的显式 --expect（四种特征方块都要出现）。
 
+--rivernet（1.3.1）：河网冒烟——rivernet(192, 7) 刻河道（河床沙、水体），
+  基础地形 fbm；配合显式 --expect（沙与水都要出现，证明河网真的接入生成）。
+
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
@@ -340,6 +343,19 @@ SURFACE_FORMULA = (
     "surface y=55..70: slope > 2 && sd == 2 ? minecraft:glass : keep}"
 )
 
+# 1.3.1 河网冒烟（--rivernet；配合显式 --expect 的 沙/水）：
+# rivernet 刻河道（河床沙 + 水体），基础地形为多倍频起伏；无河处保持原地形。
+# coarse 用"以原点为中心的径向坡"（70 - r²·1e-5）：保证原点附近必有河道，
+# 避免不同节点出生点准备区块数不同（覆盖面积不同）导致抽查不稳定。
+RIVERNET_FORMULA = (
+    "{overworld="
+    "let (d, w, s, o) = rivernet(70 - (x * x + z * z) * 0.00001, 192, 7);"
+    "let base = 60 + fbm2(x, z, 600, 4, 1) * 20;"
+    "let bed = min(base, s - 4 + max(d - w, 0) * 0.7);"
+    "y=-64..: y <= bed ? (d < w ? minecraft:sand : minecraft:stone)"
+    " : (d < w && y <= s ? minecraft:water : minecraft:air)}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -378,6 +394,7 @@ def main():
     features_none = "--features-none" in sys.argv
     m1_functions = "--m1-functions" in sys.argv
     surface = "--surface" in sys.argv
+    rivernet = "--rivernet" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -409,7 +426,7 @@ def main():
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
             or biome_terrain or biome_biomeis or natural or features_all or features_none \
-            or flat_carvers or flat_carvers_off or m1_functions or surface:
+            or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet:
         # 群系/特性/超平坦雕刻冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -470,6 +487,8 @@ def main():
         formula = M1_FORMULA
     elif surface:
         formula = SURFACE_FORMULA
+    elif rivernet:
+        formula = RIVERNET_FORMULA
     else:
         formula = FORMULA
 
@@ -480,7 +499,7 @@ def main():
                      or biome_desert or biome_vanilla or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off
-                     or features_all or features_none or m1_functions or surface
+                     or features_all or features_none or m1_functions or surface or rivernet
                      or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；
