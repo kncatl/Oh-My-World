@@ -501,55 +501,64 @@ public class PatternData {
             if (sections[i] != null) vanilla[i] = sections[i].getStates().copy();
         }
 
+        // 叠加视图（sy/sw 列量与 vis/vsolid/vfluid/vair 快照谓词）在此区块求值期间生效
+        SnapshotOverlayView overlayView = new SnapshotOverlayView(minY, vanilla);
+        ExprEvaluator.OverlayView savedOverlay = ExprEvaluator.overlayView();
+        ExprEvaluator.setOverlayView(overlayView);
+
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos firstWrite = new BlockPos.MutableBlockPos();
         boolean hasFirstWrite = false;
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                int worldX = cx + x;
-                int worldZ = cz + z;
-                // 后写覆盖先写：按层序逐层求值、就地写入
-                for (Object obj : layers) {
-                    int lo;
-                    int hi;
-                    if (obj instanceof FormulaLayerDef f) {
-                        lo = f.resolvedStart(minY);
-                        hi = f.yEnd();
-                    } else if (obj instanceof CyclicLayerDef c) {
-                        lo = c.resolvedStart(minY);
-                        hi = c.yEnd();
-                    } else {
-                        continue;
-                    }
-                    lo = Math.max(lo, minY);
-                    hi = Math.min(hi, maxY - 1);
-                    for (int y = lo; y <= hi; y++) {
-                        Object result = obj instanceof FormulaLayerDef f
-                                ? f.evalResult(worldX, worldZ, y, minY)
-                                : ((CyclicLayerDef) obj).evalResult(worldX, worldZ, y, minY);
-                        if (result == ExprEvaluator.SURFACE_KEEP) continue;
-                        BlockState target = result == ExprEvaluator.VANILLA
-                                ? vanillaAt(chunk, vanilla, x, y, z)
-                                : result instanceof BlockState st ? st : null;
-                        if (target == null) continue;
-                        pos.set(worldX, y, worldZ);
-                        BlockState current = chunk.getBlockState(pos);
-                        if (target == current) continue;
-                        boolean wasFluid = !current.getFluidState().isEmpty();
-                        ChunkWrites.setBlock(chunk, pos, target);
-                        h0.update(x, y, z, target);
-                        h1.update(x, y, z, target);
-                        if (wasFluid || !target.getFluidState().isEmpty()) {
-                            ChunkWrites.markForPostProcessing(chunk, pos);
+        try {
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    int worldX = cx + x;
+                    int worldZ = cz + z;
+                    // 后写覆盖先写：按层序逐层求值、就地写入
+                    for (Object obj : layers) {
+                        int lo;
+                        int hi;
+                        if (obj instanceof FormulaLayerDef f) {
+                            lo = f.resolvedStart(minY);
+                            hi = f.yEnd();
+                        } else if (obj instanceof CyclicLayerDef c) {
+                            lo = c.resolvedStart(minY);
+                            hi = c.yEnd();
+                        } else {
+                            continue;
                         }
-                        writes++;
-                        if (!hasFirstWrite) {
-                            hasFirstWrite = true;
-                            firstWrite.set(pos);
+                        lo = Math.max(lo, minY);
+                        hi = Math.min(hi, maxY - 1);
+                        for (int y = lo; y <= hi; y++) {
+                            Object result = obj instanceof FormulaLayerDef f
+                                    ? f.evalResult(worldX, worldZ, y, minY)
+                                    : ((CyclicLayerDef) obj).evalResult(worldX, worldZ, y, minY);
+                            if (result == ExprEvaluator.SURFACE_KEEP) continue;
+                            BlockState target = result == ExprEvaluator.VANILLA
+                                    ? overlayView.stateAt(worldX, y, worldZ)
+                                    : result instanceof BlockState st ? st : null;
+                            if (target == null) continue;
+                            pos.set(worldX, y, worldZ);
+                            BlockState current = chunk.getBlockState(pos);
+                            if (target == current) continue;
+                            boolean wasFluid = !current.getFluidState().isEmpty();
+                            ChunkWrites.setBlock(chunk, pos, target);
+                            h0.update(x, y, z, target);
+                            h1.update(x, y, z, target);
+                            if (wasFluid || !target.getFluidState().isEmpty()) {
+                                ChunkWrites.markForPostProcessing(chunk, pos);
+                            }
+                            writes++;
+                            if (!hasFirstWrite) {
+                                hasFirstWrite = true;
+                                firstWrite.set(pos);
+                            }
                         }
                     }
                 }
             }
+        } finally {
+            ExprEvaluator.setOverlayView(savedOverlay);
         }
         if (OhMyWorldConfig.debugLogsEnabled() && writes > 0
                 && OVERLAY_WRITES_LOGGED.compareAndSet(false, true)) {
@@ -562,12 +571,94 @@ public class PatternData {
     private static final java.util.concurrent.atomic.AtomicBoolean OVERLAY_WRITES_LOGGED =
             new java.util.concurrent.atomic.AtomicBoolean();
 
-    /** 叠加模式的结果解释：keep→不改；vanilla→还原快照；方块→写入；其余忽略。 */
-    private static BlockState vanillaAt(ChunkAccess chunk, PalettedContainer<BlockState>[] vanilla,
-                                        int x, int y, int z) {
-        int index = chunk.getSectionIndex(y);
-        if (index < 0 || index >= vanilla.length || vanilla[index] == null) return AIR;
-        return vanilla[index].get(x & 15, y & 15, z & 15);
+    /**
+     * 叠加视图实现（M3.5）：H1 快照（分节拷贝）上的坐标查询与 sy/sw 列量。
+     * sy/sw 用单槽列备忘——叠加处理按列推进，同一列的多次查询几乎总是命中。
+     */
+    private static final class SnapshotOverlayView implements ExprEvaluator.OverlayView {
+        private final int minY;
+        private final PalettedContainer<BlockState>[] vanilla;
+        private int memoX = Integer.MIN_VALUE;
+        private int memoZ = Integer.MIN_VALUE;
+        private int memoSy;
+        private int memoSw;
+
+        SnapshotOverlayView(int minY, PalettedContainer<BlockState>[] vanilla) {
+            this.minY = minY;
+            this.vanilla = vanilla;
+        }
+
+        /** 快照在该坐标的方块（越界/空分节 = 空气）。 */
+        BlockState stateAt(int x, int y, int z) {
+            int index = (y - minY) >> 4;
+            if (index < 0 || index >= vanilla.length) return AIR;
+            PalettedContainer<BlockState> container = vanilla[index];
+            if (container == null) return AIR;
+            return container.get(x & 15, y & 15, z & 15);
+        }
+
+        @Override
+        public boolean vanillaIs(int x, int y, int z, BlockState target) {
+            return stateAt(x, y, z).is(target.getBlock());
+        }
+
+        @Override
+        public boolean vanillaSolid(int x, int y, int z) {
+            return stateAt(x, y, z).isSolid();
+        }
+
+        @Override
+        public boolean vanillaFluid(int x, int y, int z) {
+            return !stateAt(x, y, z).getFluidState().isEmpty();
+        }
+
+        @Override
+        public boolean vanillaAir(int x, int y, int z) {
+            return stateAt(x, y, z).isAir();
+        }
+
+        @Override
+        public int sy(int x, int z) {
+            ensureColumn(x, z);
+            return memoSy;
+        }
+
+        @Override
+        public int sw(int x, int z) {
+            ensureColumn(x, z);
+            return memoSw;
+        }
+
+        /** 自顶向下扫一次：sy = 最高非空气；sw = 最高含流体（无水时同 sy）。 */
+        private void ensureColumn(int x, int z) {
+            if (x == memoX && z == memoZ) return;
+            memoX = x;
+            memoZ = z;
+            int localX = x & 15;
+            int localZ = z & 15;
+            boolean syFound = false;
+            boolean swFound = false;
+            int sy = minY - 1;
+            int sw = minY - 1;
+            for (int index = vanilla.length - 1; index >= 0 && !swFound; index--) {
+                PalettedContainer<BlockState> container = vanilla[index];
+                if (container == null) continue;
+                for (int localY = 15; localY >= 0 && !swFound; localY--) {
+                    BlockState state = container.get(localX, localY, localZ);
+                    if (!syFound && !state.isAir()) {
+                        sy = minY + (index << 4) + localY;
+                        syFound = true;
+                    }
+                    if (!state.getFluidState().isEmpty()) {
+                        sw = minY + (index << 4) + localY;
+                        swFound = true;
+                    }
+                }
+            }
+            if (!swFound) sw = sy;
+            memoSy = sy;
+            memoSw = sw;
+        }
     }
 
     private static void fillChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {

@@ -1064,4 +1064,31 @@ class FormulaParserTest {
                 .dimensions().get("overworld");
         assertSame(DimensionRules.CarversMode.NONE, overlayNone.carvers());
     }
+
+    /** 1.3.2 M3.5：叠加层的列量与谓词（sy/sw/vsolid/vfluid/vair/vis）。 */
+    @Test
+    void overlayColumnAndPredicateVariables() {
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] y=-64..: sy > 62 && vsolid ? keep : vanilla}")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] "
+                                + "y=-64..: sw < sy ? (vfluid ? keep : vanilla) : (vair ? keep : vanilla)}")
+                .errors().isEmpty());
+
+        // 位置限制：flat 方块层不可用（未知变量 / vis 位置错误）
+        FormulaParser.DimensionParseResult flatSy = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=-64..: sy > 62 ? rand() : rand()}");
+        assertTrue(flatSy.errors().stream().anyMatch(e -> e.contains("sy")), flatSy.errors().toString());
+        FormulaParser.DimensionParseResult flatVis = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=-64..: vis(x) ? rand() : rand()}");
+        assertTrue(flatVis.errors().stream().anyMatch(e -> e.contains("overlay")),
+                flatVis.errors().toString());
+
+        // vis 参数必须是方块
+        FormulaParser.DimensionParseResult visNumber = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] y=-64..: vis(x) ? keep : vanilla}");
+        assertTrue(visNumber.errors().stream().anyMatch(e -> e.contains("expects a block")),
+                visNumber.errors().toString());
+    }
 }

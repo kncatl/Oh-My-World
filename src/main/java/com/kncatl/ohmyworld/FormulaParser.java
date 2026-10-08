@@ -489,12 +489,17 @@ public class FormulaParser {
     }
 
     /** 旧入口的层解析主体（含 smartSplit 分段、共享 let 收集与逐层校验）。 */
-    /** 方块层语义校验的变量表：叠加模式下额外放行 vanilla（原版方块）与 keep。 */
+    /** 方块层语义校验的变量表：叠加模式下额外放行 vanilla/keep 与列量/谓词（M3.5）。 */
     private static Map<String, ExprEvaluator.ValueType> blockModeVariables(boolean overlay) {
         Map<String, ExprEvaluator.ValueType> vars = new HashMap<>();
         if (overlay) {
             vars.put("vanilla", ExprEvaluator.ValueType.BLOCK);
             vars.put("keep", ExprEvaluator.ValueType.BLOCK);
+            vars.put("sy", ExprEvaluator.ValueType.NUMBER);
+            vars.put("sw", ExprEvaluator.ValueType.NUMBER);
+            vars.put("vsolid", ExprEvaluator.ValueType.BOOLEAN);
+            vars.put("vfluid", ExprEvaluator.ValueType.BOOLEAN);
+            vars.put("vair", ExprEvaluator.ValueType.BOOLEAN);
         }
         return vars;
     }
@@ -612,7 +617,7 @@ public class FormulaParser {
                     List<String> valErrors = new ArrayList<>();
                     for (CyclicEntry e : srcEntries) {
                         ExprEvaluator.ValueType type = validateNode(e.expression(), valErrors,
-                                blockModeVariables(overlay), false);
+                                blockModeVariables(overlay), false, overlay);
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                             valErrors.add("Cyclic layer expression must return a block, got " + type);
                         }
@@ -632,7 +637,7 @@ public class FormulaParser {
                             expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
                     if (!usesBiomeQueries && usesBiomeQuery(expr)) usesBiomeQueries = true;
                     List<String> valErrors = new ArrayList<>();
-                    ExprEvaluator.ValueType type = validateNode(expr, valErrors, blockModeVariables(overlay), false);
+                    ExprEvaluator.ValueType type = validateNode(expr, valErrors, blockModeVariables(overlay), false, overlay);
                     if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                         valErrors.add("Layer expression must return a block, got " + type);
                     }
@@ -891,7 +896,7 @@ public class FormulaParser {
         surfaceVars.put("slope", ExprEvaluator.ValueType.NUMBER);
         surfaceVars.put("keep", ExprEvaluator.ValueType.BLOCK);
         List<String> valErrors = new ArrayList<>();
-        ExprEvaluator.ValueType type = validateNode(expr, valErrors, surfaceVars, false);
+        ExprEvaluator.ValueType type = validateNode(expr, valErrors, surfaceVars, false, false);
         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
             valErrors.add("Surface expression must return a block or keep, got " + type);
         }
@@ -956,7 +961,7 @@ public class FormulaParser {
             Map<String, ExprEvaluator.ValueType> biomeVars = new HashMap<>();
             biomeVars.put("vanilla", ExprEvaluator.ValueType.BLOCK);
             List<String> valErrors = new ArrayList<>();
-            ExprEvaluator.ValueType type = validateNode(expr, valErrors, biomeVars, true);
+            ExprEvaluator.ValueType type = validateNode(expr, valErrors, biomeVars, true, false);
             if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                 valErrors.add("Biome layer expression must return a biome, got " + type);
             }
@@ -984,7 +989,7 @@ public class FormulaParser {
      */
     private static ExprEvaluator.ValueType validateNode(ExprNode node, List<String> errors,
                                                         Map<String, ExprEvaluator.ValueType> variables,
-                                                        boolean biomeMode) {
+                                                        boolean biomeMode, boolean overlay) {
         switch (node) {
             case ExprNode.NumberNode n -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.VariableNode v -> {
@@ -1008,8 +1013,8 @@ public class FormulaParser {
                 return ExprEvaluator.ValueType.BLOCK;
             }
             case ExprNode.BinaryNode bn -> {
-                ExprEvaluator.ValueType left = validateNode(bn.left(), errors, variables, biomeMode);
-                ExprEvaluator.ValueType right = validateNode(bn.right(), errors, variables, biomeMode);
+                ExprEvaluator.ValueType left = validateNode(bn.left(), errors, variables, biomeMode, overlay);
+                ExprEvaluator.ValueType right = validateNode(bn.right(), errors, variables, biomeMode, overlay);
                 return switch (bn.op()) {
                     case ADD, SUB, MUL, DIV, MOD -> {
                         requireNumber(left, "left operand of " + bn.op(), errors);
@@ -1035,7 +1040,7 @@ public class FormulaParser {
                 };
             }
             case ExprNode.UnaryNode u -> {
-                ExprEvaluator.ValueType operand = validateNode(u.operand(), errors, variables, biomeMode);
+                ExprEvaluator.ValueType operand = validateNode(u.operand(), errors, variables, biomeMode, overlay);
                 if (u.op() == ExprNode.UnaryOp.NOT) {
                     requireCondition(operand, "operand of !", errors);
                     return ExprEvaluator.ValueType.BOOLEAN;
@@ -1044,10 +1049,10 @@ public class FormulaParser {
                 return ExprEvaluator.ValueType.NUMBER;
             }
             case ExprNode.ConditionalNode c -> {
-                ExprEvaluator.ValueType condition = validateNode(c.condition(), errors, variables, biomeMode);
+                ExprEvaluator.ValueType condition = validateNode(c.condition(), errors, variables, biomeMode, overlay);
                 requireCondition(condition, "ternary condition", errors);
-                ExprEvaluator.ValueType thenType = validateNode(c.thenExpr(), errors, variables, biomeMode);
-                ExprEvaluator.ValueType elseType = validateNode(c.elseExpr(), errors, variables, biomeMode);
+                ExprEvaluator.ValueType thenType = validateNode(c.thenExpr(), errors, variables, biomeMode, overlay);
+                ExprEvaluator.ValueType elseType = validateNode(c.elseExpr(), errors, variables, biomeMode, overlay);
                 if (thenType != ExprEvaluator.ValueType.UNKNOWN && elseType != ExprEvaluator.ValueType.UNKNOWN && thenType != elseType) {
                     errors.add("Ternary branches must return the same type, got " + thenType + " and " + elseType);
                     return ExprEvaluator.ValueType.UNKNOWN;
@@ -1056,15 +1061,15 @@ public class FormulaParser {
             }
             case ExprNode.FuncCallNode f -> {
                 if (f.name().equals("cache2d") || f.name().equals("cache3d")) {
-                    validateCacheCall(f, errors, variables, biomeMode);
+                    validateCacheCall(f, errors, variables, biomeMode, overlay);
                     return ExprEvaluator.ValueType.NUMBER;
                 }
                 if (f.name().equals("climate")) {
-                    validateClimateCall(f, errors, variables, biomeMode);
+                    validateClimateCall(f, errors, variables, biomeMode, overlay);
                     return ExprEvaluator.ValueType.NUMBER;
                 }
                 if (f.name().equals("df") || f.name().equals("noise")) {
-                    validateRegistryCall(f, errors, variables, biomeMode);
+                    validateRegistryCall(f, errors, variables, biomeMode, overlay);
                     return ExprEvaluator.ValueType.NUMBER;
                 }
                 if (f.name().equals("biome_at")) {
@@ -1073,41 +1078,58 @@ public class FormulaParser {
                     if (arity != null) errors.add(arity);
                     if (!biomeMode) {
                         errors.add("Function 'biome_at' can only be used in biome lines");
-                        for (ExprNode a : f.args()) validateNode(a, errors, variables, false);
+                        for (ExprNode a : f.args()) validateNode(a, errors, variables, false, overlay);
                         return ExprEvaluator.ValueType.UNKNOWN;
                     }
                     for (ExprNode a : f.args()) {
-                        requireNumber(validateNode(a, errors, variables, true), "argument of biome_at", errors);
+                        requireNumber(validateNode(a, errors, variables, true, overlay), "argument of biome_at", errors);
                     }
                     return ExprEvaluator.ValueType.BLOCK;
+                }
+                if (f.name().equals("vis")) {
+                    // 叠加模式快照谓词（M3.5）：只在 [terrain:vanilla] 的方块层可用
+                    String arity = ExprEvaluator.validateFunction("vis", f.args().size());
+                    if (arity != null) errors.add(arity);
+                    if (!overlay || biomeMode) {
+                        errors.add("Function 'vis' can only be used in [terrain:vanilla] overlay block layers");
+                        for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode, overlay);
+                        return ExprEvaluator.ValueType.UNKNOWN;
+                    }
+                    for (ExprNode a : f.args()) {
+                        ExprEvaluator.ValueType t = validateNode(a, errors, variables, false, overlay);
+                        if (t != ExprEvaluator.ValueType.BLOCK && t != ExprEvaluator.ValueType.UNKNOWN) {
+                            errors.add("Function 'vis' expects a block, got " + t);
+                        }
+                    }
+                    return ExprEvaluator.ValueType.BOOLEAN;
                 }
                 boolean terrainQuery = isTerrainQueryFunction(f.name());
                 if (terrainQuery && !biomeMode) {
                     errors.add("Function '" + f.name() + "' can only be used in biome lines");
-                    for (ExprNode a : f.args()) validateNode(a, errors, variables, false);
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, false, overlay);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
                 if (f.name().equals("biomeis") && biomeMode) {
                     errors.add("Function 'biomeis' can only be used in block layers");
-                    for (ExprNode a : f.args()) validateNode(a, errors, variables, true);
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, true, overlay);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
                 if (biomeMode && (f.name().equals("rand") || f.name().equals("randexcept"))) {
                     errors.add("Function '" + f.name() + "' cannot be used in a biome expression");
-                    for (ExprNode a : f.args()) validateNode(a, errors, variables, true);
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, true, overlay);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
                 String msg = ExprEvaluator.validateFunction(f.name(), f.args().size());
                 if (msg != null) {
                     errors.add(msg);
-                    for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode);
+                    for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode, overlay);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
                 if (terrainQuery) {
                     // biomeMode == true（非 biome 模式已在上面拦截）
                     if (f.name().equals("terrain")) {
                         for (ExprNode a : f.args()) {
-                            requireNumber(validateNode(a, errors, variables, true), "argument of terrain", errors);
+                            requireNumber(validateNode(a, errors, variables, true, overlay), "argument of terrain", errors);
                         }
                         return ExprEvaluator.ValueType.NUMBER;
                     }
@@ -1115,7 +1137,7 @@ public class FormulaParser {
                     int blockArg = f.name().equals("surfis") ? 2 : 3;
                     for (int i = 0; i < f.args().size(); i++) {
                         ExprEvaluator.ValueType type = validateNode(f.args().get(i), errors, variables,
-                                i != blockArg);
+                                i != blockArg, overlay);
                         if (i == blockArg) {
                             if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                                 errors.add("Function '" + f.name() + "' expects a block as its last argument, got " + type);
@@ -1130,7 +1152,7 @@ public class FormulaParser {
                     // biomeMode == false（biome 模式已在上面拦截）；末位是群系表达式：
                     // 单个群系字面量，或三元等组合（按群系语义校验）。
                     for (int i = 0; i < f.args().size() - 1; i++) {
-                        requireNumber(validateNode(f.args().get(i), errors, variables, false),
+                        requireNumber(validateNode(f.args().get(i), errors, variables, false, overlay),
                                 "argument of biomeis", errors);
                     }
                     ExprNode biomeArg = f.args().get(f.args().size() - 1);
@@ -1138,7 +1160,7 @@ public class FormulaParser {
                         errors.add("Function 'biomeis' cannot use terrain queries in its biome expression"
                                 + " (terrain queries are limited to biome lines)");
                     }
-                    ExprEvaluator.ValueType biomeType = validateNode(biomeArg, errors, variables, true);
+                    ExprEvaluator.ValueType biomeType = validateNode(biomeArg, errors, variables, true, overlay);
                     if (biomeType != ExprEvaluator.ValueType.BLOCK && biomeType != ExprEvaluator.ValueType.UNKNOWN) {
                         errors.add("Function 'biomeis' expects a biome (literal or biome expression)"
                                 + " as its last argument, got " + biomeType);
@@ -1147,7 +1169,7 @@ public class FormulaParser {
                 }
                 if (f.name().equals("rand") || f.name().equals("randexcept")) {
                     for (ExprNode a : f.args()) {
-                        ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode);
+                        ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode, overlay);
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                             errors.add("Function '" + f.name() + "' expects block arguments, got " + type);
                         }
@@ -1158,7 +1180,7 @@ public class FormulaParser {
                     checkAscendingPoints(f.name(), f.args(), errors);
                 }
                 for (ExprNode a : f.args()) {
-                    ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode);
+                    ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode, overlay);
                     requireNumber(type, "argument of " + f.name(), errors);
                 }
                 return ExprEvaluator.ValueType.NUMBER;
@@ -1167,18 +1189,18 @@ public class FormulaParser {
                 Map<String, ExprEvaluator.ValueType> local = new HashMap<>(variables);
                 for (ExprNode.LetBinding lb : be.bindings()) {
                     if (lb.names().size() == 1) {
-                        local.put(lb.names().get(0), validateNode(lb.value(), errors, local, biomeMode));
+                        local.put(lb.names().get(0), validateNode(lb.value(), errors, local, biomeMode, overlay));
                     } else {
-                        validateTupleBinding(lb, errors, local, biomeMode);
+                        validateTupleBinding(lb, errors, local, biomeMode, overlay);
                         for (String name : lb.names()) local.put(name, ExprEvaluator.ValueType.NUMBER);
                     }
                 }
-                return validateNode(be.body(), errors, local, biomeMode);
+                return validateNode(be.body(), errors, local, biomeMode, overlay);
             }
             case ExprNode.TupleCallNode t -> {
                 errors.add("Function '" + t.name() + "' returns multiple values: it can only be used "
                         + "as the right-hand side of 'let (a, b, ...) = ...'");
-                for (ExprNode a : t.args()) validateNode(a, errors, variables, biomeMode);
+                for (ExprNode a : t.args()) validateNode(a, errors, variables, biomeMode, overlay);
                 return ExprEvaluator.ValueType.UNKNOWN;
             }
             // 以下是编译后的形态。语义校验发生在编译之前（见本文件的处理顺序），
@@ -1197,7 +1219,7 @@ public class FormulaParser {
 
     /** cache2d / cache3d 的专项校验：表达式自包含、不引用 ly（cache2d 也不引用 y）、不含视图/随机函数。 */
     private static void validateCacheCall(ExprNode.FuncCallNode f, List<String> errors,
-                                          Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+                                          Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         String name = f.name();
         int argCount = f.args().size();
         if (name.equals("cache2d")) {
@@ -1219,7 +1241,7 @@ public class FormulaParser {
             }
         }
         ExprNode expr = f.args().get(0);
-        ExprEvaluator.ValueType type = validateNode(expr, errors, variables, biomeMode);
+        ExprEvaluator.ValueType type = validateNode(expr, errors, variables, biomeMode, overlay);
         requireNumber(type, "first argument of " + name, errors);
         if (referencesBoundVariables(expr, variables, new HashSet<>())) {
             errors.add("Function '" + name + "': the expression must be self-contained "
@@ -1325,12 +1347,12 @@ public class FormulaParser {
 
     /** 元组 let：值必须是多返回函数调用，名字个数 = 返回组件数，参数全为数值。 */
     private static void validateTupleBinding(ExprNode.LetBinding binding, List<String> errors,
-                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         ExprNode value = binding.value();
         if (!(value instanceof ExprNode.TupleCallNode call)) {
             errors.add("Tuple let '(...)' must be bound to a multi-return function call "
                     + "(warp2 / warp3 / noise2g / worley2c); got a different expression");
-            validateNode(value, errors, variables, biomeMode);
+            validateNode(value, errors, variables, biomeMode, overlay);
             return;
         }
         Integer arity = ExprEvaluator.multiReturnArity(call.name());
@@ -1343,19 +1365,19 @@ public class FormulaParser {
                     + "' returns " + arity + " value(s)");
         }
         if (call.name().equals("rivernet")) {
-            validateRivernetCall(call, errors, variables, biomeMode);
+            validateRivernetCall(call, errors, variables, biomeMode, overlay);
             return;
         }
         String msg = ExprEvaluator.validateFunction(call.name(), call.args().size());
         if (msg != null) errors.add(msg);
         for (ExprNode arg : call.args()) {
-            requireNumber(validateNode(arg, errors, variables, biomeMode), "argument of " + call.name(), errors);
+            requireNumber(validateNode(arg, errors, variables, biomeMode, overlay), "argument of " + call.name(), errors);
         }
     }
 
     /** climate() 的专项校验：首参必须是字段名（编译期已重写为序号），其余为数值。 */
     private static void validateClimateCall(ExprNode.FuncCallNode f, List<String> errors,
-                                            Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+                                            Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         if (f.args().size() != 3 && f.args().size() != 4) {
             errors.add("Function 'climate' expects 3 or 4 arguments (field, x, z) or (field, x, y, z), got "
                     + f.args().size());
@@ -1369,14 +1391,14 @@ public class FormulaParser {
                     + "(temperature/humidity/continentalness/erosion/weirdness/depth)");
         }
         for (int i = 1; i < f.args().size(); i++) {
-            requireNumber(validateNode(f.args().get(i), errors, variables, biomeMode),
+            requireNumber(validateNode(f.args().get(i), errors, variables, biomeMode, overlay),
                     "argument of climate", errors);
         }
     }
 
     /** df()/noise() 的专项校验：首参必须是带命名空间的注册名字面量（运行期再查注册表）。 */
     private static void validateRegistryCall(ExprNode.FuncCallNode f, List<String> errors,
-                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         String arity = ExprEvaluator.validateFunction(f.name(), f.args().size());
         if (arity != null) {
             // 只报个数错误：首参是注册名不是方块，不能走通用的方块存在性校验
@@ -1389,7 +1411,7 @@ public class FormulaParser {
                     + "(e.g. minecraft:overworld/ridges)");
         }
         for (int i = 1; i < f.args().size(); i++) {
-            requireNumber(validateNode(f.args().get(i), errors, variables, biomeMode),
+            requireNumber(validateNode(f.args().get(i), errors, variables, biomeMode, overlay),
                     "argument of " + f.name(), errors);
         }
     }
@@ -1481,7 +1503,7 @@ public class FormulaParser {
 
     /** rivernet 的专项校验：cs/salt 为字面量、coarse 自包含且不含 ly/y 与视图/随机函数。 */
     private static void validateRivernetCall(ExprNode.TupleCallNode call, List<String> errors,
-                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode, boolean overlay) {
         int n = call.args().size();
         if (n != 2 && n != 3) {
             errors.add("Function 'rivernet' expects 2 or 3 arguments (cs, salt) or (coarse, cs, salt), got " + n);
@@ -1495,7 +1517,7 @@ public class FormulaParser {
         }
         if (n == 3) {
             ExprNode coarse = call.args().get(0);
-            requireNumber(validateNode(coarse, errors, variables, biomeMode), "first argument of rivernet", errors);
+            requireNumber(validateNode(coarse, errors, variables, biomeMode, overlay), "first argument of rivernet", errors);
             if (referencesBoundVariables(coarse, variables, new HashSet<>())) {
                 errors.add("Function 'rivernet': the coarse expression must be self-contained "
                         + "(built-ins only; no let bindings or surface variables)");

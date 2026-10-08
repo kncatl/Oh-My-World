@@ -455,6 +455,12 @@ public final class ExprCompiler {
             case "slope" -> new ExprNode.BuiltinNode(11);
             // biome 行的 vanilla 群系值（语义校验只在 biome 行放行）
             case "vanilla" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VANILLA);
+            // 叠加模式的列量与快照谓词（语义校验只在 [terrain:vanilla] 方块层放行）
+            case "sy" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_SY);
+            case "sw" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_SW);
+            case "vsolid" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VSOLID);
+            case "vfluid" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VFLUID);
+            case "vair" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VAIR);
             // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };

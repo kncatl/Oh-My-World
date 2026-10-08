@@ -123,6 +123,49 @@ public class ExprEvaluator {
     public static final int BUILTIN_VANILLA = 12;
 
     /**
+     * 叠加模式的快照视图（M3.5）：{@code sy/sw} 列量与 {@code vis/vsolid/vfluid/vair}
+     * 快照谓词的数据来源。由叠加通道在每区块求值期间注入；没有视图时列量返回 0、
+     * 谓词返回假。
+     */
+    public interface OverlayView {
+        /** 该坐标的 H1 原版方块是否是指定方块（按方块种类比较）。 */
+        boolean vanillaIs(int x, int y, int z, BlockState target);
+
+        /** 该坐标的 H1 原版方块是否固体（{@code isSolid()}）。 */
+        boolean vanillaSolid(int x, int y, int z);
+
+        /** 该坐标的 H1 原版方块是否含流体。 */
+        boolean vanillaFluid(int x, int y, int z);
+
+        /** 该坐标的 H1 原版方块是否空气。 */
+        boolean vanillaAir(int x, int y, int z);
+
+        /** 该列原版含水面高度（sy；WORLD_SURFACE 语义）。 */
+        int sy(int x, int z);
+
+        /** 该列原版液体面高度（sw；无水时同 sy）。 */
+        int sw(int x, int z);
+    }
+
+    private static final ThreadLocal<OverlayView> OVERLAY_VIEW = new ThreadLocal<>();
+
+    /** 设置/清除叠加视图（null = 清除）；调用方自行保存旧值以便嵌套恢复。 */
+    public static void setOverlayView(OverlayView view) {
+        if (view == null) OVERLAY_VIEW.remove();
+        else OVERLAY_VIEW.set(view);
+    }
+
+    /** 当前叠加视图；可能为 null。 */
+    public static OverlayView overlayView() { return OVERLAY_VIEW.get(); }
+
+    /** BuiltinNode kinds：叠加模式的列量与谓词（M3.5）。 */
+    public static final int BUILTIN_SY = 13;
+    public static final int BUILTIN_SW = 14;
+    public static final int BUILTIN_VSOLID = 15;
+    public static final int BUILTIN_VFLUID = 16;
+    public static final int BUILTIN_VAIR = 17;
+
+    /**
      * biome 行读取原版群系分布的视图（M3.3）：{@code biome_at()} 用它查询参数表。
      * 由 {@link #setBiomeQueryView} 在 biome 行求值期间注入；没有视图时返回 null。
      */
@@ -251,7 +294,9 @@ public class ExprEvaluator {
             Map.entry("df", 4), Map.entry("noise", -1),
             Map.entry("vheight", 2),
             // 1.3.2：biome 行的原版群系查询（M3.3；只能出现在 biome 行）
-            Map.entry("biome_at", 6));
+            Map.entry("biome_at", 6),
+            // 1.3.2：叠加模式快照谓词（M3.5；只能出现在 [terrain:vanilla] 方块层）
+            Map.entry("vis", 1));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -303,6 +348,7 @@ public class ExprEvaluator {
     public static final int FN_DF = 151, FN_NOISE = 152;
     public static final int FN_VHEIGHT = 153;
     public static final int FN_BIOME_AT = 154;
+    public static final int FN_VIS = 155;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -380,6 +426,7 @@ public class ExprEvaluator {
             case "noise" -> FN_NOISE;
             case "vheight" -> FN_VHEIGHT;
             case "biome_at" -> FN_BIOME_AT;
+            case "vis" -> FN_VIS;
             default -> FN_UNKNOWN;
         };
     }
@@ -563,7 +610,31 @@ public class ExprEvaluator {
             case 9 -> surfaceValue(1);
             case 10 -> surfaceValue(2);
             case 11 -> surfaceValue(3);
+            // 12 = vanilla：数值语境不可达（校验拦截）
+            case BUILTIN_SY -> overlayColumn(BUILTIN_SY, x, z);
+            case BUILTIN_SW -> overlayColumn(BUILTIN_SW, x, z);
+            case BUILTIN_VSOLID -> overlayPredicate(BUILTIN_VSOLID, x, globalY, z) ? 1 : 0;
+            case BUILTIN_VFLUID -> overlayPredicate(BUILTIN_VFLUID, x, globalY, z) ? 1 : 0;
+            case BUILTIN_VAIR -> overlayPredicate(BUILTIN_VAIR, x, globalY, z) ? 1 : 0;
             default -> 0;
+        };
+    }
+
+    /** 叠加列量（sy/sw）；没有视图时返回 0。 */
+    private static double overlayColumn(int kind, int x, int z) {
+        OverlayView view = OVERLAY_VIEW.get();
+        if (view == null) return 0;
+        return kind == BUILTIN_SY ? view.sy(x, z) : view.sw(x, z);
+    }
+
+    /** 叠加快照谓词（vsolid/vfluid/vair）；没有视图时返回假。 */
+    private static boolean overlayPredicate(int kind, int x, int y, int z) {
+        OverlayView view = OVERLAY_VIEW.get();
+        if (view == null) return false;
+        return switch (kind) {
+            case BUILTIN_VSOLID -> view.vanillaSolid(x, y, z);
+            case BUILTIN_VFLUID -> view.vanillaFluid(x, y, z);
+            default -> view.vanillaAir(x, y, z);
         };
     }
 
@@ -636,7 +707,11 @@ public class ExprEvaluator {
             case ExprNode.TupleComponentNode t -> t.tupleDependent();
             // 编译后的形态：槽位无法在此反查来源，保守视为与 y 相关。
             // 实际调用发生在编译之前（见 FormulaParser），因此不影响优化生效。
-            case ExprNode.BuiltinNode b -> b.kind() == 2;
+            case ExprNode.BuiltinNode b -> b.kind() == 2
+                    || b.kind() == BUILTIN_VANILLA
+                    || b.kind() == BUILTIN_VSOLID
+                    || b.kind() == BUILTIN_VFLUID
+                    || b.kind() == BUILTIN_VAIR;
             case ExprNode.SlotNode s -> true;
             case ExprNode.CompiledFuncCallNode f -> true;
             case ExprNode.CompiledTupleCallNode t -> true;
@@ -905,6 +980,7 @@ public class ExprEvaluator {
             case "df" -> dfOf(args, x, z, ly, context);
             case "noise" -> noiseOf(args, x, z, ly, context);
             case "vheight" -> vheightOf(args, x, z, ly, context);
+            case "vis" -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
             case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
             case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
@@ -1044,6 +1120,7 @@ public class ExprEvaluator {
             case FN_DF -> dfOf(args, x, z, ly, context);
             case FN_NOISE -> noiseOf(args, x, z, ly, context);
             case FN_VHEIGHT -> vheightOf(args, x, z, ly, context);
+            case FN_VIS -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -1439,6 +1516,18 @@ public class ExprEvaluator {
         int argX = (int) Math.floor(evalNumber(args.get(0), x, z, ly, context));
         int argZ = (int) Math.floor(evalNumber(args.get(1), x, z, ly, context));
         return view.vheight(argX, argZ);
+    }
+
+    /**
+     * {@code vis(方块)}：当前坐标的 H1 原版方块是否是指定方块（仅叠加模式方块层）。
+     * 没有叠加视图时返回假。
+     */
+    private static boolean overlayVisOf(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        OverlayView view = OVERLAY_VIEW.get();
+        if (view == null) return false;
+        BlockState target = blockValue(args.get(0), x, z, ly, context);
+        if (target == null) return false;
+        return view.vanillaIs(x, context.globalY, z, target);
     }
 
     /**

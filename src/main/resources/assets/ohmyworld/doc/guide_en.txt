@@ -203,6 +203,13 @@ Default preset:
     The End and superflat overworlds have no parameter table (biome_at misses and
     falls through); vanilla in a block layer is an unknown variable.
 
+  -- Overlay column values and predicates ([terrain:vanilla]; M3.5) --
+  vis(block)                is the vanilla block at this position the given block?
+  vsolid / vfluid / vair    is the vanilla block here solid / fluid / air?
+  sy / sw                   vanilla water-inclusive surface y / liquid surface y
+                            (sw falls back to sy when there is no liquid)
+    * Overlay block layers only; they read the H1 snapshot of the vanilla terrain.
+
   * Biome lines can read the formula terrain (computed from the formula layers
     only -- never from already generated blocks -- so it is available during
     biome fill; cyclic layers included):
