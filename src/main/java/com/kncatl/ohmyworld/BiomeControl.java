@@ -122,6 +122,12 @@ public final class BiomeControl {
                 } else {
                     targetSource = built;
                 }
+            } else if (targetSource instanceof FormulaBiomeSources.Placeholder) {
+                // 存档里留下的是公式占位源（说明该维度保存时正被本模组接管、现在规则已被移除）：
+                // 还原成该维度的原版群系源（主世界/下界双噪声、末地末地源），
+                // 而不是把"固定平原"的占位源留在世界里。构建失败则保持占位源。
+                BiomeSource vanilla = build(level, DimensionRules.BiomeRule.VANILLA);
+                if (vanilla != null) targetSource = vanilla;
             }
 
             boolean changed = false;

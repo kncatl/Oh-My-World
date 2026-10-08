@@ -90,8 +90,11 @@ public class FormulaBiomeSource extends BiomeSource {
 
     @Override
     protected MapCodec<? extends BiomeSource> codec() {
-        // 本群系源只在运行时替换，不参与数据包序列化；unit 让误调用不崩溃。
-        return MapCodec.unit(this);
+        // 注册表里的 ohmyworld:formula 类型（见 FormulaBiomeSources）：
+        // 存档只写类型 ID、负载为空，读档得到占位源，维度加载后仍由本模组重新接管。
+        // 不能返回 MapCodec.unit(this)——噪声维度的生成器 codec 会把 biome_source 写进
+        // 世界数据，dispatch 需要"codec 实例在注册表里的注册名"，unit 实例不在注册表里。
+        return FormulaBiomeSources.CODEC;
     }
 
     //? >=26.3 {

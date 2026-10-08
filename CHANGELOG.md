@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.2.6-beta.3
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- **World save no longer crashes when a formula biome row takes over a noise dimension** (the nether, the end, or a non-superflat overworld): their generator codecs serialize the biome source (`biome_source`), and the runtime formula biome source was not in the `worldgen/biome_source` registry, so saving threw `Unregistered holder ... worldgen/biome_source` and killed the server tick (triggered by the first save on world creation/join). The formula biome source is now registered as a first-class `BIOME_SOURCE` type `ohmyworld:formula`: a save stores only the type id (empty payload), loading yields a placeholder source, and the formula takes over as usual when the dimension loads. If a dimension's formula biome rule is removed, it is restored to that dimension's vanilla biome source instead of keeping the placeholder.
+- Note: worlds interrupted by the old crash (that dimension's saved data was never written) should be re-created. World data saved with this version records `ohmyworld:formula`, so opening it afterwards requires the mod.
+
+### Notes
+- Everything else is identical to v1.2.6-beta.2.
+
 ## v1.2.6-beta.2
 
 > Beta release — please report any issue on GitHub.
