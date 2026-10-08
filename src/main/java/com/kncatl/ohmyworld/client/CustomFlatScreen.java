@@ -933,6 +933,14 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         Component caption = Component.translatable("ohmyworld.custom_screen.preview", info);
         t.text(this.font, caption, px + PREVIEW_BOX - this.font.width(caption), this.formulaY - 12, MUTED_COLOR);
 
+        // 叠加模式（[terrain:vanilla]）的预览近似提示：没有原版地形，vanilla/sy 按空气/0 近似
+        FormulaParser.ParsedDimension parsedDim = this.currentResult == null
+                ? null : this.currentResult.dimensions().get(dim);
+        if (parsedDim != null && parsedDim.overlay()) {
+            Component hint = Component.translatable("ohmyworld.custom_screen.preview_overlay");
+            t.text(this.font, hint, px, py + PREVIEW_PX + 15, MUTED_COLOR);
+        }
+
         int cells = FormulaPreview.cellsFor(this.previewSpacing);
         int cellPx = PREVIEW_PX / cells;
         int[] colors = this.previewColors;

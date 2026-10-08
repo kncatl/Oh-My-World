@@ -255,6 +255,8 @@ BIOME_AT_VALUE_FORMULA = (
 #   带 6（surf 窗口）：sy-34..sy-32（含水面基准）的固体处铺陶瓦 → 验证窗口语法；
 #   带 7（切沟 + 补铺）：z∈(40,90) 的地带切掉顶部 10 个固体方块（露石），
 #      [surface:vanilla+patch] 的 surface 行用 curis(stone) 把暴露面补成紫水晶。
+#   带 8（sdist）：无结构区域 sdist 很大 → 品红带（验证函数接线；保护域内跳过
+#      的另一半由单元测试与指令解析覆盖）。
 # 地表/群系应保持原版（stone 特征方块 = 没有被当成 flat 公式填平/填满）。
 OVERLAY_MARKER_FORMULA = (
     "{overworld=[terrain:vanilla] [surface:vanilla+patch] "
@@ -266,6 +268,7 @@ OVERLAY_MARKER_FORMULA = (
     "y=200..200: vair ? minecraft:glass : keep;"
     "y=surf(-34..-32): vsolid ? minecraft:terracotta : keep;"
     "y=surf(0..9): vsolid && cutz ? minecraft:air : keep;"
+    "y=surf(-24..-22): sdist(x, z) > 1000 ? minecraft:magenta_glazed_terracotta : keep;"
     "surface y=..: sd == 0 && curis(minecraft:stone) ? minecraft:amethyst_block : keep}"
 )
 

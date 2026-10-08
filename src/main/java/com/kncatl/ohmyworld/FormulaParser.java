@@ -45,7 +45,8 @@ public class FormulaParser {
                                   List<BiomeLayerDef> biomeLayers, List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback,
                                   DimensionRules.CarversMode carvers, boolean overlay,
-                                  DimensionRules.SurfaceMode surfaceMode) {}
+                                  DimensionRules.SurfaceMode surfaceMode,
+                                  boolean protectStructures) {}
 
     /**
      * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
@@ -132,7 +133,7 @@ public class FormulaParser {
                 dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
                         DimensionRules.StructureRule.ALL, null, false, result.biomeLayers(),
                         result.surfaceLayers(), DimensionRules.BiomeFallback.NONE,
-                        DimensionRules.CarversMode.NONE, false, DimensionRules.SurfaceMode.VANILLA));
+                        DimensionRules.CarversMode.NONE, false, DimensionRules.SurfaceMode.VANILLA, true));
             }
         }
         return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), false);
@@ -233,6 +234,8 @@ public class FormulaParser {
         boolean overlay = false;
         boolean surfaceSeen = false;
         DimensionRules.SurfaceMode surfaceMode = DimensionRules.SurfaceMode.VANILLA;
+        boolean protectSeen = false;
+        boolean protectStructures = true;
         int pos = 0;
         boolean firstDirective = true;
         while (true) {
@@ -285,6 +288,29 @@ public class FormulaParser {
                             + "] (available: vanilla, vanilla+patch, none)");
                     return;
                 }
+            } else if (directive.startsWith("overlay:")) {
+                if (protectSeen) {
+                    errors.add(name + ": duplicate overlay directive");
+                    return;
+                }
+                protectSeen = true;
+                if (!overlay) {
+                    errors.add(name + ": [" + truncate(directive)
+                            + "] can only be used in [terrain:vanilla] overlay mode");
+                    return;
+                }
+                String value = directive.substring("overlay:".length()).trim();
+                if (value.equals("protect-structures")) {
+                    protectStructures = true;
+                } else if (value.equals("protect-structures=off")) {
+                    protectStructures = false;
+                } else if (value.equals("protect-structures=on")) {
+                    protectStructures = true;
+                } else {
+                    errors.add(name + ": unknown overlay option [" + truncate(directive)
+                            + "] (available: protect-structures, protect-structures=on|off)");
+                    return;
+                }
             } else if (directive.startsWith("structure:")) {
                 if (structureSeen) {
                     errors.add(name + ": duplicate structure directive");
@@ -329,7 +355,7 @@ public class FormulaParser {
                 featuresOff = off;
             } else {
                 errors.add(name + ": unknown directive [" + truncate(directive)
-                        + "] (available: terrain, surface, structure, biome, biome-fallback, carvers, features)");
+                        + "] (available: terrain, surface, overlay, structure, biome, biome-fallback, carvers, features)");
                 return;
             }
             firstDirective = false;
@@ -371,7 +397,8 @@ public class FormulaParser {
         }
         if (!result.layers().isEmpty()) {
             dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff,
-                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers, overlay, surfaceMode));
+                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers, overlay, surfaceMode,
+                    protectStructures));
         }
     }
 
@@ -1193,6 +1220,20 @@ public class FormulaParser {
                         }
                     }
                     return ExprEvaluator.ValueType.BOOLEAN;
+                }
+                if (f.name().equals("sdist")) {
+                    // 叠加模式的结构距离（M3.5）：块层与 surface 行都可用
+                    String arity = ExprEvaluator.validateFunction("sdist", f.args().size());
+                    if (arity != null) errors.add(arity);
+                    if (!overlay || biomeMode) {
+                        errors.add("Function 'sdist' can only be used in [terrain:vanilla] overlay layers");
+                        for (ExprNode a : f.args()) validateNode(a, errors, variables, biomeMode, overlay);
+                        return ExprEvaluator.ValueType.UNKNOWN;
+                    }
+                    for (ExprNode a : f.args()) {
+                        requireNumber(validateNode(a, errors, variables, false, overlay), "argument of sdist", errors);
+                    }
+                    return ExprEvaluator.ValueType.NUMBER;
                 }
                 boolean terrainQuery = isTerrainQueryFunction(f.name());
                 if (terrainQuery && !biomeMode) {

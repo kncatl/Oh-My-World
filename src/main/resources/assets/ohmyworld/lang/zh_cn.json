@@ -47,5 +47,6 @@
   "ohmyworld.custom_screen.vanilla_overworld": "未定义 overworld：新建世界的主世界将按原版生成（已有世界不受影响）",
   "ohmyworld.dimension.overworld": "主世界",
   "ohmyworld.dimension.the_nether": "下界",
-  "ohmyworld.dimension.the_end": "末地"
+  "ohmyworld.dimension.the_end": "末地",
+  "ohmyworld.custom_screen.preview_overlay": "叠加模式预览按近似显示（原版地形按空气近似）"
 }

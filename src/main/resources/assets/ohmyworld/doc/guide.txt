@@ -191,6 +191,9 @@
    [surface:vanilla]           默认：只跑原版材料/表面通道
    [surface:vanilla+patch]     原版之后再用 surface 行补铺（curis 找暴露面）
    [surface:none]              不跑原版材料/表面，只由 surface 行铺
+   [overlay:protect-structures]        默认开：结构部件包围盒（外扩 24）内不修改
+   [overlay:protect-structures=off]    关闭保护（可用 sdist 自行淡出）
+   sdist(x, z)                 到最近结构保护盒的水平距离（域内 0；无结构时很大）
 
   ★ biome 行可以读"公式地形"（只按公式层计算、不读已生成的方块，所以群系填充
     时就能用；循环层同样支持）：

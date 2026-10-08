@@ -151,6 +151,12 @@ public class ExprEvaluator {
          * 是否是指定方块。默认实现返回假（无块级实现时）。
          */
         default boolean currentIs(int x, int y, int z, BlockState target) { return false; }
+
+        /**
+         * 到最近结构保护部件包围盒的水平距离（域内 0；没有结构时返回 1e6）。
+         * 供公式在 {@code [overlay:protect-structures=off]} 时自行淡出。
+         */
+        default double sdist(int x, int z) { return 0; }
     }
 
     private static final ThreadLocal<OverlayView> OVERLAY_VIEW = new ThreadLocal<>();
@@ -304,7 +310,9 @@ public class ExprEvaluator {
             // 1.3.2：叠加模式快照谓词（M3.5；只能出现在 [terrain:vanilla] 方块层）
             Map.entry("vis", 1),
             // 1.3.2：叠加模式 surface 行的当前方块谓词（M3.5）
-            Map.entry("curis", 1));
+            Map.entry("curis", 1),
+            // 1.3.2：叠加模式的结构距离（M3.5；块层与 surface 行）
+            Map.entry("sdist", 2));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -358,6 +366,7 @@ public class ExprEvaluator {
     public static final int FN_BIOME_AT = 154;
     public static final int FN_VIS = 155;
     public static final int FN_CURIS = 156;
+    public static final int FN_SDIST = 157;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -437,6 +446,7 @@ public class ExprEvaluator {
             case "biome_at" -> FN_BIOME_AT;
             case "vis" -> FN_VIS;
             case "curis" -> FN_CURIS;
+            case "sdist" -> FN_SDIST;
             default -> FN_UNKNOWN;
         };
     }
@@ -992,6 +1002,7 @@ public class ExprEvaluator {
             case "vheight" -> vheightOf(args, x, z, ly, context);
             case "vis" -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
             case "curis" -> overlayCurisOf(args, x, z, ly, context) ? 1 : 0;
+            case "sdist" -> overlaySdistOf(args, x, z, ly, context);
             case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
             case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
@@ -1133,6 +1144,7 @@ public class ExprEvaluator {
             case FN_VHEIGHT -> vheightOf(args, x, z, ly, context);
             case FN_VIS -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
             case FN_CURIS -> overlayCurisOf(args, x, z, ly, context) ? 1 : 0;
+            case FN_SDIST -> overlaySdistOf(args, x, z, ly, context);
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -1552,6 +1564,18 @@ public class ExprEvaluator {
         BlockState target = blockValue(args.get(0), x, z, ly, context);
         if (target == null) return false;
         return view.currentIs(x, context.globalY, z, target);
+    }
+
+    /**
+     * {@code sdist(x, z)}：到最近结构保护盒的水平距离（域内 0；无结构时很大）。
+     * 仅在叠加模式可用；没有叠加视图时返回 0。
+     */
+    private static double overlaySdistOf(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        OverlayView view = OVERLAY_VIEW.get();
+        if (view == null) return 0;
+        int argX = (int) Math.floor(evalNumber(args.get(0), x, z, ly, context));
+        int argZ = (int) Math.floor(evalNumber(args.get(1), x, z, ly, context));
+        return view.sdist(argX, argZ);
     }
 
     /**

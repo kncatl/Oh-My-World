@@ -1152,4 +1152,42 @@ class FormulaParserTest {
         assertTrue(flatCuris.errors().stream().anyMatch(e -> e.contains("overlay surface rows")),
                 flatCuris.errors().toString());
     }
+
+    /** 1.3.2 M3.5：[overlay:protect-structures] 与 sdist（位置规则）。 */
+    @Test
+    void overlayProtectStructuresAndSdist() {
+        // 合法：默认/on/off + sdist（块层与 surface 行）
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] [overlay:protect-structures] "
+                                + "y=surf(0..2): sdist(x, z) > 32 ? rand() : keep;"
+                                + "surface y=..: sdist(x, z) > 16 ? rand() : keep}")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] [overlay:protect-structures=off] y=-64..: rand()}")
+                .errors().isEmpty());
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[terrain:vanilla] [overlay:protect-structures=on] y=-64..: rand()}")
+                .errors().isEmpty());
+
+        // 未知取值 / 重复 / flat 模式不可用
+        FormulaParser.DimensionParseResult bad = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] [overlay:bad] y=-64..: rand()}");
+        assertTrue(bad.errors().stream().anyMatch(e -> e.contains("unknown overlay option")),
+                bad.errors().toString());
+        FormulaParser.DimensionParseResult dup = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] [overlay:protect-structures] [overlay:protect-structures=off] "
+                        + "y=-64..: rand()}");
+        assertTrue(dup.errors().stream().anyMatch(e -> e.contains("duplicate overlay")),
+                dup.errors().toString());
+        FormulaParser.DimensionParseResult flat = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[overlay:protect-structures] y=-64..: rand()}");
+        assertTrue(flat.errors().stream().anyMatch(e -> e.contains("overlay mode")),
+                flat.errors().toString());
+
+        // sdist 只在叠加模式可用
+        FormulaParser.DimensionParseResult flatSdist = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=y=-64..: sdist(x, z) > 0 ? rand() : rand()}");
+        assertTrue(flatSdist.errors().stream().anyMatch(e -> e.contains("sdist")),
+                flatSdist.errors().toString());
+    }
 }

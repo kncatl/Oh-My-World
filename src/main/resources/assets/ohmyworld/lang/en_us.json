@@ -47,5 +47,6 @@
   "ohmyworld.custom_screen.vanilla_overworld": "No overworld section: the new world's overworld will use vanilla generation (existing worlds are unaffected)",
   "ohmyworld.dimension.overworld": "Overworld",
   "ohmyworld.dimension.the_nether": "Nether",
-  "ohmyworld.dimension.the_end": "The End"
+  "ohmyworld.dimension.the_end": "The End",
+  "ohmyworld.custom_screen.preview_overlay": "Overlay preview is approximate (vanilla terrain treated as air)"
 }

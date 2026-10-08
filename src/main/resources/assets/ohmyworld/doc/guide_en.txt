@@ -218,6 +218,11 @@ Default preset:
   [surface:vanilla+patch]   vanilla first, then formula surface rows patch the result
                             (curis finds exposed faces)
   [surface:none]            no vanilla material/surface; formula surface rows do it all
+  [overlay:protect-structures]      default on: no writes inside structure piece boxes
+                                    (inflated by 24)
+  [overlay:protect-structures=off]  protection off (use sdist to fade out yourself)
+  sdist(x, z)               horizontal distance to the nearest structure protection box
+                            (0 inside; very large when no structures are near)
 
   * Biome lines can read the formula terrain (computed from the formula layers
     only -- never from already generated blocks -- so it is available during

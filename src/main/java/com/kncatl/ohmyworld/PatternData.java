@@ -30,6 +30,12 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
+import net.minecraft.world.level.levelgen.structure.StructurePiece;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
+import net.minecraft.world.level.levelgen.structure.pools.JigsawJunction;
+import net.minecraft.world.level.ChunkPos;
 
 import com.kncatl.ohmyworld.compat.ChunkWrites;
 import com.kncatl.ohmyworld.compat.LevelHeights;
@@ -91,7 +97,8 @@ public class PatternData {
                                   List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla,
                                   boolean usesVanillaData, boolean overlay,
-                                  DimensionRules.SurfaceMode surfaceMode) {}
+                                  DimensionRules.SurfaceMode surfaceMode,
+                                  boolean protectStructures) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -116,7 +123,8 @@ public class PatternData {
                         parsed.featuresOff(), List.copyOf(parsed.biomeLayers()),
                         List.copyOf(parsed.surfaceLayers()), parsed.biomeFallback(),
                         parsed.carvers() == DimensionRules.CarversMode.VANILLA,
-                        FormulaParser.usesVanillaData(parsed), parsed.overlay(), parsed.surfaceMode());
+                        FormulaParser.usesVanillaData(parsed), parsed.overlay(), parsed.surfaceMode(),
+                        parsed.protectStructures());
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -165,7 +173,7 @@ public class PatternData {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
                         List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false,
-                        DimensionRules.SurfaceMode.VANILLA);
+                        DimensionRules.SurfaceMode.VANILLA, true);
             }
             return defaultSnapshot;
         }
@@ -504,7 +512,8 @@ public class PatternData {
         }
 
         // 叠加视图（sy/sw 列量与 vis/vsolid/vfluid/vair 快照谓词）在此区块求值期间生效
-        SnapshotOverlayView overlayView = new SnapshotOverlayView(minY, vanilla, chunk);
+        BoundingBox protection = snapshot.protectStructures() ? protectionBox(chunk) : null;
+        SnapshotOverlayView overlayView = new SnapshotOverlayView(minY, vanilla, chunk, protection);
         ExprEvaluator.OverlayView savedOverlay = ExprEvaluator.overlayView();
         ExprEvaluator.setOverlayView(overlayView);
 
@@ -547,6 +556,8 @@ public class PatternData {
                                     ? overlayView.stateAt(worldX, y, worldZ)
                                     : result instanceof BlockState st ? st : null;
                             if (target == null) continue;
+                            // [overlay:protect-structures]（默认开）：部件包围盒内保持原版
+                            if (protection != null && protection.isInside(worldX, y, worldZ)) continue;
                             pos.set(worldX, y, worldZ);
                             BlockState current = chunk.getBlockState(pos);
                             if (target == current) continue;
@@ -569,7 +580,7 @@ public class PatternData {
             // H3：表面补铺（[surface:vanilla+patch] 接原版之后；[surface:none] 原版已取消）
             if (snapshot.surfaceMode() != DimensionRules.SurfaceMode.VANILLA) {
                 try {
-                    applyOverlaySurface(chunk, snapshot, overlayView, minY, maxY);
+                    applyOverlaySurface(chunk, snapshot, overlayView, protection, minY, maxY);
                 } finally {
                     ExprEvaluator.clearSurfaceValues();
                 }
@@ -591,7 +602,8 @@ public class PatternData {
      * 仅在 [surface:vanilla+patch]（接原版之后）或 [surface:none]（原版被取消后）执行。
      */
     private static void applyOverlaySurface(ChunkAccess chunk, PatternSnapshot snapshot,
-                                            SnapshotOverlayView overlayView, int minY, int maxY) {
+                                            SnapshotOverlayView overlayView, BoundingBox protection,
+                                            int minY, int maxY) {
         List<SurfaceLayerDef> rows = snapshot.surfaceLayers();
         if (rows.isEmpty()) return;
         int cx = chunk.getPos().getMinBlockX();
@@ -665,6 +677,8 @@ public class PatternData {
                                     line.expression(), worldX, worldZ, y - line.resolvedStart(minY), y);
                             if (result != ExprEvaluator.SURFACE_KEEP && result instanceof BlockState replacement) {
                                 if (replacement == state) continue;
+                                // [overlay:protect-structures]：部件包围盒内不补铺
+                                if (protection != null && protection.isInside(worldX, y, worldZ)) continue;
                                 boolean wasFluid = !state.getFluidState().isEmpty();
                                 ChunkWrites.setBlock(chunk, pos, replacement);
                                 h0.update(x, y, z, replacement);
@@ -691,6 +705,54 @@ public class PatternData {
             new java.util.concurrent.atomic.AtomicBoolean();
 
     /**
+     * 叠加模式的结构保护域（M3.5）：本区块 structure starts 中所有靠近区块（12 格）
+     * 的部件的包围盒并集，再外扩 24（与 26.3 的 Beardifier.affectedBox 同口径；
+     * 且不筛 terrainAdaptation——NONE 部件也纳入保护，更保守）。没有部件时返回 null。
+     */
+    private static BoundingBox protectionBox(ChunkAccess chunk) {
+        ChunkPos chunkPos = chunk.getPos();
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        boolean found = false;
+        for (StructureStart start : chunk.getAllStarts().values()) {
+            for (StructurePiece piece : start.getPieces()) {
+                if (!piece.isCloseToChunk(chunkPos, 12)) continue;
+                BoundingBox box = piece.getBoundingBox();
+                minX = Math.min(minX, box.minX());
+                minY = Math.min(minY, box.minY());
+                minZ = Math.min(minZ, box.minZ());
+                maxX = Math.max(maxX, box.maxX());
+                maxY = Math.max(maxY, box.maxY());
+                maxZ = Math.max(maxZ, box.maxZ());
+                found = true;
+                if (piece instanceof PoolElementStructurePiece pool) {
+                    for (JigsawJunction junction : pool.getJunctions()) {
+                        int jx = junction.getSourceX();
+                        int jz = junction.getSourceZ();
+                        if (jx <= chunkPos.getMinBlockX() - 12 || jz <= chunkPos.getMinBlockZ() - 12
+                                || jx >= chunkPos.getMaxBlockX() + 12 || jz >= chunkPos.getMaxBlockZ() + 12) {
+                            continue;
+                        }
+                        int jy = junction.getSourceGroundY();
+                        minX = Math.min(minX, jx);
+                        minY = Math.min(minY, jy);
+                        minZ = Math.min(minZ, jz);
+                        maxX = Math.max(maxX, jx);
+                        maxY = Math.max(maxY, jy);
+                        maxZ = Math.max(maxZ, jz);
+                    }
+                }
+            }
+        }
+        if (!found) return null;
+        return new BoundingBox(minX - 24, minY - 24, minZ - 24, maxX + 24, maxY + 24, maxZ + 24);
+    }
+
+    /**
      * 叠加视图实现（M3.5）：H1 快照（分节拷贝）上的坐标查询与 sy/sw 列量。
      * sy/sw 用单槽列备忘——叠加处理按列推进，同一列的多次查询几乎总是命中。
      */
@@ -698,16 +760,27 @@ public class PatternData {
         private final int minY;
         private final PalettedContainer<BlockState>[] vanilla;
         private final ChunkAccess chunk;
+        private final BoundingBox protection;
         private final BlockPos.MutableBlockPos currentPos = new BlockPos.MutableBlockPos();
         private int memoX = Integer.MIN_VALUE;
         private int memoZ = Integer.MIN_VALUE;
         private int memoSy;
         private int memoSw;
 
-        SnapshotOverlayView(int minY, PalettedContainer<BlockState>[] vanilla, ChunkAccess chunk) {
+        SnapshotOverlayView(int minY, PalettedContainer<BlockState>[] vanilla, ChunkAccess chunk,
+                            BoundingBox protection) {
             this.minY = minY;
             this.vanilla = vanilla;
             this.chunk = chunk;
+            this.protection = protection;
+        }
+
+        @Override
+        public double sdist(int x, int z) {
+            if (protection == null) return 1_000_000;
+            int dx = Math.max(Math.max(protection.minX() - x, x - protection.maxX()), 0);
+            int dz = Math.max(Math.max(protection.minZ() - z, z - protection.maxZ()), 0);
+            return Math.sqrt((double) dx * dx + (double) dz * dz);
         }
 
         /** 快照在该坐标的方块（越界/空分节 = 空气）。 */

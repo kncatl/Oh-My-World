@@ -460,8 +460,7 @@ public final class ExprCompiler {
             case "sw" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_SW);
             case "vsolid" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VSOLID);
             case "vfluid" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VFLUID);
-            case "vair" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VAIR);
-            // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
+            case "vair" -> new ExprNode.BuiltinNode(ExprEvaluator.BUILTIN_VAIR);            // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };
     }
