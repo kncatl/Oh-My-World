@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.2-beta.3
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **`//` line comments in formulas**: everything after `//` on a line is ignored (stripped before parsing), so formulas can be annotated freely.
+
+### Changed
+- The "Natural World Recipes" guide section is temporarily removed — those starter formulas still need rework and could mislead. A verified connected-river-network formula is archived for a future recipe pass.
+- Clearer error when a `let` is written directly after a layer colon (block layers, surface rows, biome rows): the message now explains the two valid placements (inside `{ ... }` in the layer, or a shared let on its own line) instead of the old "Expected EOF"/"missing range separator" pair.
+- Guide corrections: blur2's smoothing scale is r × step (default settings only smooth ~8 blocks, easy to mistake for "no effect"); rivernet's drainage-tree shape is documented with a hint for longer networks; waterline references updated.
+
 ## v1.3.2-beta.2
 
 > Beta release — please report any issue on GitHub.

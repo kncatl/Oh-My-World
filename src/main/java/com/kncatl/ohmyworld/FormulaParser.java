@@ -99,7 +99,7 @@ public class FormulaParser {
             return invalid("Formula exceeds the maximum input size of " + MAX_INPUT_LENGTH + " characters");
         }
 
-        String cleaned = input.replace("\r", "").replace("\n", "");
+        String cleaned = stripComments(input).replace("\r", "").replace("\n", "");
         if (cleaned.isBlank()) return invalid("Formula is empty");
         return parseLayers(cleaned);
     }
@@ -114,7 +114,7 @@ public class FormulaParser {
             return dimensionInvalid("Formula exceeds the maximum input size of " + MAX_INPUT_LENGTH + " characters");
         }
 
-        String cleaned = input.replace("\r", "").replace("\n", "");
+        String cleaned = stripComments(input).replace("\r", "").replace("\n", "");
         if (cleaned.isBlank()) return dimensionInvalid("Formula is empty");
 
         if (cleaned.trim().startsWith("{")) return parseSections(cleaned.trim());
@@ -789,6 +789,27 @@ public class FormulaParser {
 
     private static ParseResult invalid(String error) {
         return new ParseResult(List.of(), List.of(error), List.of(), List.of(), false, false);
+    }
+
+    /**
+     * 去掉 {@code //} 行内注释（到行尾为止）。必须在合并换行之前调用——
+     * 合并之后注释会把后续内容一并吃掉。公式里没有字符串字面量，
+     * 因此出现 {@code //} 即可安全视为注释。
+     */
+    private static String stripComments(String input) {
+        if (input.indexOf("//") < 0) return input;
+        StringBuilder sb = new StringBuilder(input.length());
+        int i = 0;
+        while (i < input.length()) {
+            char c = input.charAt(i);
+            if (c == '/' && i + 1 < input.length() && input.charAt(i + 1) == '/') {
+                while (i < input.length() && input.charAt(i) != '\n') i++;
+            } else {
+                sb.append(c);
+                i++;
+            }
+        }
+        return sb.toString();
     }
 
     private static String layerError(int lineIdx, String msg, String line) {

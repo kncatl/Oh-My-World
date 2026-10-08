@@ -58,6 +58,11 @@ Separate layers with semicolons ";". Two formats are supported:
   collide with a built-in function (slope, step, ... ; plain lets are unaffected);
   declaration order does not matter.
 
+[Comments]
+  // line comments are supported (everything after // on that line is ignored):
+    let base = 64 + fbm2(x, z, 600, 4, 1) * 20; // rolling land
+  Comments are stripped before parsing, so they can sit at the end of any line.
+
 [Cyclic expression]
   y=<start>..<end>: <count>*[<expr>],<count>*[<expr>],...
 
@@ -497,7 +502,8 @@ Default preset:
   waterline(x, z, level)       water surface height of the column: level plus
                                slow noise (feature ~512 blocks, ~±3 blocks,
                                follows the world seed). Use it for "lowland
-                               flooding / cave water"; see the recipes.
+                               flooding / cave water" (compare it with the
+                               terrain height).
   atan2(a, b)                  two-argument arctangent (Math.atan2(a, b))
   fract(v)                     fractional part (always in [0,1), also for negatives)
   step(edge, v)                0 when v < edge, else 1
@@ -546,7 +552,11 @@ Default preset:
     ★ blur2: each grid point's value is the average of expr over the (2r+1)² grid
       points around it (spacing = step); the query point interpolates bilinearly
       between grid points. Use it to smooth 0/1 masks or river distances into soft
-      transitions (e.g. blur2(riverMask, 2)).
+      transitions (e.g. blur2(riverMask, 3, 8) gives a ~24-block smoothing band).
+    ★ The smoothing scale is r × step blocks: detail smaller than that is averaged
+      out; when the result is thresholded (say 0.4/0.6) the transition band is of
+      the same order (r=3, step=8 ≈ 15 blocks; r=4, step=16 ≈ 60 blocks). The
+      default r=2, step=4 only smooths detail within ~8 blocks.
     ★ Macros are expanded before the self-containment check: cache/blur2/rivernet
       expressions may call macros (the expansion must still be self-contained).
     ★ The expression must be self-contained: only built-in values (x/y/z/ly/seed/
@@ -592,11 +602,17 @@ Default preset:
     ★ Returns: dist = distance to the nearest river centreline; wd = local half
       width; surf = water surface (node elevation interpolated along the segment
       minus 3); order = accumulated upstream flow.
-    ★ cs in 64..512 (integer literal); salt/w0/wk/warp must be number literals
+    ★ cs in 64..512 (integer literal; larger values give a sparser network with
+      fewer tributaries); salt/w0/wk/warp must be number literals
       (w0/wk/warp >= 0); nodes with elevation <= 62 are terminals (they flow into
       the sea). When coarse is omitted an internal field (62 ± 28 multifractal
       noise) is used. warp = meander amplitude in blocks (default 0.12×cs;
       0 gives straight polylines).
+    ★ Appearance: channels are drawn as "drainage trees" -- one tree per basin
+      (trees meet at confluences) separated by watersheds (no river between
+      them); this is the designed shape, not a defect. Density ≈ cs. For
+      longer, network-like rivers, give coarse a large-scale slope (e.g.
+      76 - sqrt(x*x+z*z)*0.015) so water runs from the highlands down to the sea.
     ★ coarse must be self-contained (built-ins only, no ly/y, no view/random
       functions).
     ★ With no river nearby: dist = 1e9 and surf = 1e9 — min(base, ...) then keeps
@@ -764,164 +780,30 @@ Default preset:
     coordinates by hand.
 
 
-6. Natural World Recipes
+6. Performance and Rules
 
-  Starter recipes for "make the world look natural" (1.2.5 primitives). Paste
-  them, then tune scales/thresholds. Noise functions use the world seed: the
-  same formula differs across seeds and is deterministic inside a world (and
-  across versions — published distributions never change).
-
-  ▸ Rolling terrain (continents + hills + peaks, the vanilla "several
-    low-frequency smooth fields" idea):
-
-    {overworld=
-      let cont = noise2(x, z, 1400, 1);
-      let hill = fbm2(x, z, 320, 4, 2);
-      let peak = smoothstep(noise2(x, z, 900, 3) * 0.7 + 0.5);
-      let h = 64 + cont * 36 + hill * 10 + peak * 30;
-      y=-64..319: y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air
-    }
-
-    h does not depend on ly, so the engine caches it per column (computed once
-    per column). Lower the scales for steeper mountains.
-
-  ▸ Interwoven caves (cheese caves + thin tunnels; harder to break through
-    near the surface, so entrances are not abrupt):
-
-    let cave = noise3(x, y * 2.2, z, 96, 7);
-    let tunnel = abs(noise3(x, y, z, 34, 8));
-    let open = lerp(0.22, 0.45, clamp((h - y) / 28, 0, 1));
-    (put the cave test at the front of the terrain layer:)
-    y=-64..319: (cave > open || tunnel < 0.006) && y < h - 3 ? minecraft:air
-             : (y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air);
-
-    Note: typical noise values stay within about ±0.5 (the theoretical range
-    is ±1); the numbers above carve a few percent near the surface and up to
-    ~20% deep down -- lower the thresholds for emptier caves.
-
-  ▸ Nether-style chaotic caverns (a large-scale noise cut with fbm detail):
-
-    let blob = fbm3(x, y * 1.6, z, 150, 3, 21);
-    y=0..127: blob > 0.20 ? minecraft:air : minecraft:netherrack;
-
-  ▸ End-style fragmented islands (radial falloff + cellular islands + fbm edges):
-
-    let r = sqrt(x * x + z * z);
-    let islands = worley2(x, z, 240, 4);
-    let edge = fbm2(x, z, 120, 3, 5) * 6;
-    let top = 90 - r * 0.10 + edge;
-    y=0..255: y <= top * smoothstep(0.55 - islands * 1.6) ? minecraft:end_stone : minecraft:air;
-
-    Known limitation: the main island is not guaranteed to be solid (cellular noise
-    and the smoothing factor can punch holes into the centre) -- the ender dragon,
-    obsidian pillars and other vanilla mechanics need one complete main island; add
-    a solid centre disc yourself (e.g. r < 220 ? minecraft:end_stone : ...) or use
-    this as an outer-islands reference only.
-
-  ▸ A sphere with a fuzzy (plush) rim -- the general pattern for local structures
-    (radial distance + probability ramp + seedhash):
-
-    {overworld=
-      y=70..130: (abs(x) > 32 || abs(z) > 32 || abs(y - 100) > 32)
-          ? minecraft:air
-          : { let dy = y - 100;
-              let r = sqrt(x * x + dy * dy + z * z);
-              let wobble = fbm3(x, y, z, 40, 3, 7) * 4;
-              let p = clamp((20 + wobble - r) / 5, 0, 1);
-              r <= 15 + wobble ? minecraft:stone
-                : (seedhash(x, y, z, 11) < p ? minecraft:mossy_cobblestone : minecraft:air) }
-    }
-
-    Same principle as the deepslate transition, with the scalar field changed from
-    "height y" to "sphere radius r": the core has p=1 (solid), the outside p=0
-    (air) and the rim interleaves block by block -- a plush edge. wobble makes the
-    sphere lumpy (drop it for a plain fuzzy ball). The bounding box test comes
-    first, so the heavy part only runs inside the box.
-
-  ▸ Spline terrain curve (map noise through a custom curve):
-
-    {overworld=
-      let n = noise2(x, z, 1400, 1);
-      let h = 64 + spline(n, -0.6, -26, -0.15, -4, 0.15, 6, 0.6, 30);
-      y=-64..: y <= h ? (y > h - 4 ? minecraft:grass_block : minecraft:stone) : minecraft:air
-    }
-
-    Tweak the point pairs for steep cliffs vs gentle plains; cspline is smoother.
-
-  ▸ Water (water level + lowland flooding + cave water):
-
-    {overworld=
-      let w = waterline(x, z, 63);
-      let h = 60 + fbm2(x, z, 380, 4, 2) * 26;
-      y=..: {
-        let cave = noise3(x, y, z, 84, 7) > 0.34;
-        (y <= h && !cave)
-          ? (y > h - 5 ? minecraft:sand : minecraft:stone)
-          : (y <= w ? minecraft:water : minecraft:air)
-      }
-    }
-
-    · Terrain below the water level becomes water (oceans/lakes); caves below
-      it store water too.
-    · waterline gives a seed-dependent, slowly varying level; you can also
-      write your own noise as the level.
-    · y=..: is the open range: the whole dimension (ly starts at the dimension
-      minimum y).
-
-  ▸ Ice cracks / edge lines (worley2edge):
-
-    y=-64..: worley2edge(x, z, 90, 3) < 0.06 ? minecraft:blue_ice : minecraft:packed_ice
-
-    worley2edge is ~0 near the cell borders; change scale/salt for another
-    crack network.
-
-  ▸ Rivers (vanilla-style: meandering channels that join seas/lakes):
-
-    {overworld=
-      let base = 63 + fbm2(x, z, 900, 4, 1) * 26;      // rolling land (below the water level = sea/lake)
-      let w = noise2(x, z, 700, 7);                     // river line = the zero contour of this noise
-      let t = 1 - smoothstep(abs(w) / 0.012);           // valley strength: 1 on the line, 0 outside
-      let h = min(base, lerp(base, 57, t * t));         // carve the bed down to 57 (never raise lowland)
-      y=..: y <= h
-        ? (y > h - 3 ? minecraft:sand : (y > h - 8 ? minecraft:gravel : minecraft:stone))
-        : (y <= 62 ? minecraft:water : minecraft:air)
-    }
-
-    Vanilla rivers come from the "valley slice" of the weirdness parameter
-    ([-0.05, 0.05]); the formula equivalent is simply **the zero contour of a
-    2D noise**. Tuning:
-      · river spacing ≈ the scale (700 = one every few hundred blocks; salt changes the layout);
-      · total valley width ≈ 3 × threshold × scale (0.012 × 700 ≈ 25 blocks; lower the threshold for narrower);
-      · the water surface is automatically narrower than the valley (gorges in highlands, wide rivers in lowlands);
-      · water 62 / bed 57 gives 5 blocks of depth; change 57 to taste;
-      · land below 62 becomes sea/lake and connects to the rivers (same as vanilla).
-    Known limitations (use the rivernet recipe above when you want a connected
-    network): a single-octave noise gives width that varies with the terrain
-    gradient (uneven, may break on steep slopes); the bed is fixed at 57 with no
-    downstream flow; two rivers crossing do not merge.
-
-  Rules and performance:
-    · Noise/cellular functions are a frozen contract: same formula + seed gives
-      the same world in every version;
-    · keep strata and large-scale noise in shared lets (ly-independent parts are
-      cached per column automatically);
-    · use seedhash/rand for per-block speckle, noise/fbm/worley for smooth shapes;
-    · always keep the "original block" branch in cave recipes — a column of air
-      would erase the terrain;
-    · put local-only heavy work inside ternary / && / || branches (the engine is
-      lazy and short-circuits) and guard it with a cheap bounding box or distance
-      test first -- positions that don't need it really won't compute it;
-    · shared lets are evaluated unconditionally per column: only "always needed"
-      heavy work belongs there; anything needed at some positions only belongs in
-      a branch (ly-independent parts inside a branch are still cached per column,
-      but only for columns that reach the branch);
-    · layer order (later overrides earlier) does not affect cost -- the layer's
-      y range and the branch structure do;
-    · the editor preview renders with the current seed: in the world-creation
-      screen it reads the seed box when the editor is opened (an empty box uses
-      the screen's current random seed, which is also used at creation); change
-      the seed and reopen the editor to re-sync. Inside a world the preview
-      matches the real seed. rand() does not depend on the seed.
+  · Noise/cellular functions are a frozen contract: the same formula and seed
+    generate the same world in every version;
+  · Put strata and large-scale noise in shared lets (the ly-independent part is
+    cached per column automatically);
+  · Use seedhash/rand for per-block random patches; use noise/fbm/worley for
+    continuous relief;
+  · When carving holes (air branches) into terrain, keep an "original block"
+    fallback at the end -- a whole-column air branch digs the terrain away;
+  · Put local heavy computation inside ternary / && / || branches (the engine
+    is lazy and short-circuiting) with a cheap bounding-box/distance guard in
+    front -- positions that do not need the value never compute it;
+  · Shared lets are evaluated unconditionally per column: only put "always
+    needed" heavy computation there; move position-specific work into branches
+    (ly-independent parts inside a branch are still cached per column, but only
+    for columns that reach that branch);
+  · Layer order (later overrides earlier) does not change cost; the layer's
+    y range and branch structure do;
+  · The editor preview renders with the "current seed": opening the editor from
+    the creation screen reads the seed box (an empty box uses the screen's
+    current random seed, which is also used at creation); change the seed and
+    reopen the editor to re-sync. Inside a world the preview matches the real
+    seed. rand() does not depend on the seed.
 
 
 7. Blocks

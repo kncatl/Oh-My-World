@@ -940,6 +940,29 @@ class FormulaParserTest {
                 terrain.errors().toString());
     }
 
+    /** 1.3.2-beta.3：// 行内注释（到行尾；合并换行前剥离）。 */
+    @Test
+    void commentsAreStripped() {
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=\n"
+                                + "  let a = 1; // 到行尾的注释\n"
+                                + "  y=0: { // 行内注释也支持\n"
+                                + "    let b = a + 1; // 又一注释\n"
+                                + "    b > 0 ? rand() : rand()\n"
+                                + "  }\n}")
+                .errors().isEmpty());
+        // 除号与除法不受影响；注释到行尾（} 需另起一行）
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=y=0: x / 2 > 0 ? rand() : rand() // 尾部注释\n}")
+                .errors().isEmpty());
+        // 参考河流公式风格（宏 + 注释）
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "let wx(px,pz) = px + noise2(px,pz,70,11)*22;\n"
+                                + "let r0 = wx(x, z); // 宏与注释并存\n"
+                                + "y=0: r0 > 0 ? rand() : rand()")
+                .errors().isEmpty());
+    }
+
     /** 1.3.2：把 let 直接写在层/行冒号后的友好提示（块层 / surface / biome）。 */
     @Test
     void misplacedLetGetsAFriendlyError() {
