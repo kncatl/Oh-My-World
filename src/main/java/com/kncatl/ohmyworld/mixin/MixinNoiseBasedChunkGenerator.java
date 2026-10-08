@@ -163,10 +163,9 @@ public class MixinNoiseBasedChunkGenerator {
     private boolean ohmyworld$fillFromPattern(ChunkAccess chunk, CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || snapshot.layers().isEmpty()) return false;
-        List<Object> layers = snapshot.layers();
 
         try {
-            PatternData.fillChunk(chunk, layers);
+            PatternData.fillChunk(chunk, snapshot);
         } catch (Exception e) {
             // 兜底：任何公式求值/填充异常都不应破坏区块生成，
             // 回退到原版生成并停用图案，避免反复报错。

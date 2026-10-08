@@ -392,8 +392,12 @@ public final class ExprCompiler {
             case "y" -> new ExprNode.BuiltinNode(4);
             case "spawnx" -> new ExprNode.BuiltinNode(5);
             case "spawnz" -> new ExprNode.BuiltinNode(6);
-            // 表面通道的 keep（语义校验只在 surface 行放行；其它位置按未知变量报错）
+            // 表面通道的 keep 与 sd/sdb/wd/slope（语义校验只在 surface 行放行）
             case "keep" -> new ExprNode.BuiltinNode(7);
+            case "sd" -> new ExprNode.BuiltinNode(8);
+            case "sdb" -> new ExprNode.BuiltinNode(9);
+            case "wd" -> new ExprNode.BuiltinNode(10);
+            case "slope" -> new ExprNode.BuiltinNode(11);
             // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };

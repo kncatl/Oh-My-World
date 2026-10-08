@@ -56,6 +56,10 @@ case "$MODE" in
         CONFIG_FLAGS="--m1-functions"
         CHECK_ARGS="--require-all"
         ;;
+    surface)
+        CONFIG_FLAGS="--surface"
+        CHECK_ARGS="--expect overworld minecraft:sea_lantern,minecraft:polished_blackstone_bricks,minecraft:ochre_froglight,minecraft:glass"
+        ;;
     biome-formula)
         CONFIG_FLAGS="--biome-formula"
         CHECK_ARGS="--biome-smoke 3"
@@ -93,7 +97,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac

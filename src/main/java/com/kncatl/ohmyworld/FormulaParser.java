@@ -27,6 +27,7 @@ public class FormulaParser {
     private static final int MAX_LAYERS = 65_536;
 
     public record ParseResult(List<Object> layers, List<String> errors, List<BiomeLayerDef> biomeLayers,
+                              List<SurfaceLayerDef> surfaceLayers,
                               boolean usesTerrainQueries, boolean usesBiomeQueries) {}
 
     /** 维度节的规范名（{@link DimensionParseResult} 与 PatternData 的键）。 */
@@ -41,7 +42,7 @@ public class FormulaParser {
      */
     public record ParsedDimension(List<Object> layers, DimensionRules.StructureRule structure,
                                   DimensionRules.BiomeRule biome, boolean featuresOff,
-                                  List<BiomeLayerDef> biomeLayers,
+                                  List<BiomeLayerDef> biomeLayers, List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback,
                                   DimensionRules.CarversMode carvers) {}
 
@@ -129,7 +130,8 @@ public class FormulaParser {
             } else {
                 dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
                         DimensionRules.StructureRule.ALL, null, false, result.biomeLayers(),
-                        DimensionRules.BiomeFallback.NONE, DimensionRules.CarversMode.NONE));
+                        result.surfaceLayers(), DimensionRules.BiomeFallback.NONE,
+                        DimensionRules.CarversMode.NONE));
             }
         }
         return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), false);
@@ -319,7 +321,7 @@ public class FormulaParser {
         }
         if (!result.layers().isEmpty()) {
             dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff,
-                    result.biomeLayers(), biomeFallback, carvers));
+                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers));
         }
     }
 
@@ -467,6 +469,7 @@ public class FormulaParser {
         List<Object> layers = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         List<BiomeLayerDef> biomeLayers = new ArrayList<>();
+        List<SurfaceLayerDef> surfaceLayers = new ArrayList<>();
         boolean usesBiomeQueries = false;
         String[] lines = smartSplit(cleaned);
 
@@ -491,7 +494,7 @@ public class FormulaParser {
                 errors.add("Shared let (segment " + (lineIdx + 1) + "): " + e.getMessage());
             }
         }
-        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), false, false);
+        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), List.of(), false, false);
         // 普通绑定的值也可以调用宏（参数化 let），同样在包装前展开
         List<ExprNode.LetBinding> shared = new ArrayList<>(plainLets.size());
         for (ExprNode.LetBinding binding : plainLets) {
@@ -502,10 +505,10 @@ public class FormulaParser {
                 errors.add("Shared let '" + String.join(", ", binding.names()) + "': " + e.getMessage());
             }
         }
-        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), false, false);
+        if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), List.of(), false, false);
 
         for (int lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-            if (layers.size() + biomeLayers.size() + errors.size() >= MAX_LAYERS) {
+            if (layers.size() + biomeLayers.size() + surfaceLayers.size() + errors.size() >= MAX_LAYERS) {
                 errors.add("Formula contains too many layers; maximum is " + MAX_LAYERS);
                 break;
             }
@@ -513,6 +516,10 @@ public class FormulaParser {
             if (line.isEmpty() || isSharedLet(line)) continue;
 
             try {
+                if (isSurfaceLine(line)) {
+                    parseSurfaceLine(line, lineIdx, shared, macros, surfaceLayers, errors);
+                    continue;
+                }
                 if (isBiomeLine(line)) {
                     parseBiomeLayer(line, lineIdx, shared, macros, biomeLayers, errors);
                     continue;
@@ -622,7 +629,7 @@ public class FormulaParser {
                     + "using biomeis (it would form a cycle)");
         }
         return new ParseResult(List.copyOf(layers), List.copyOf(errors), List.copyOf(biomeLayers),
-                usesTerrainQueries, usesBiomeQueries);
+                List.copyOf(surfaceLayers), usesTerrainQueries, usesBiomeQueries);
     }
 
     public static List<Object> parse(String input) {
@@ -632,7 +639,7 @@ public class FormulaParser {
     }
 
     private static ParseResult invalid(String error) {
-        return new ParseResult(List.of(), List.of(error), List.of(), false, false);
+        return new ParseResult(List.of(), List.of(error), List.of(), List.of(), false, false);
     }
 
     private static String layerError(int lineIdx, String msg, String line) {
@@ -767,6 +774,91 @@ public class FormulaParser {
         int yStart = startPart.isEmpty() ? Integer.MIN_VALUE : Integer.parseInt(startPart);
         int yEnd = endPart.isEmpty() ? Integer.MAX_VALUE : Integer.parseInt(endPart);
         return new int[] {yStart, yEnd};
+    }
+
+    /** 段是否是 surface 行：{@code surface} 后不跟标识符字符（空白 / '[' / ':' / 行尾都算）。 */
+    private static boolean isSurfaceLine(String line) {
+        if (!line.startsWith("surface")) return false;
+        if (line.length() == 7) return true;
+        char c = line.charAt(7);
+        return !(Character.isLetterOrDigit(c) || c == '_');
+    }
+
+    /**
+     * 解析一行表面规则：
+     * {@code surface y=a..b: 表达式}、{@code surface: 表达式}（整维简写）、
+     * 可选前缀 {@code surface[maxdepth=N]}（N ∈ 1..64，默认 8）。
+     */
+    private static void parseSurfaceLine(String line, int lineIdx, List<ExprNode.LetBinding> shared,
+                                         Map<String, ParametricLet> macros,
+                                         List<SurfaceLayerDef> surfaceLayers, List<String> errors) {
+        String rest = line.substring("surface".length()).trim();
+        int maxDepth = 8;
+        if (rest.startsWith("[")) {
+            int close = rest.indexOf(']');
+            if (close < 0) throw new IllegalArgumentException("unbalanced '[' in surface modifier");
+            String modifier = rest.substring(1, close).trim();
+            rest = rest.substring(close + 1).trim();
+            if (!modifier.startsWith("maxdepth=")) {
+                throw new IllegalArgumentException("unknown surface modifier: [" + modifier + "]");
+            }
+            String value = modifier.substring("maxdepth=".length()).trim();
+            try {
+                maxDepth = Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("surface maxdepth must be an integer, got \"" + value + "\"");
+            }
+            if (maxDepth < 1 || maxDepth > 64) {
+                throw new IllegalArgumentException("surface maxdepth must be in 1..64, got " + maxDepth);
+            }
+        }
+        boolean shorthand;
+        int yStart = Integer.MIN_VALUE;
+        int yEnd = Integer.MAX_VALUE;
+        String exprPart;
+        if (rest.startsWith(":")) {
+            shorthand = true;
+            exprPart = rest.substring(1).trim();
+        } else {
+            shorthand = false;
+            int colonIdx = findColon(rest);
+            if (colonIdx < 0) throw new IllegalArgumentException("missing range separator ':' in surface line");
+            String rangePart = rest.substring(0, colonIdx).trim();
+            exprPart = rest.substring(colonIdx + 1).trim();
+            int eqIdx = rangePart.indexOf('=');
+            if (eqIdx < 0) throw new IllegalArgumentException("missing '=' in range \"" + rangePart + "\"");
+            if (!rangePart.substring(0, eqIdx).trim().equals("y")) {
+                throw new IllegalArgumentException("only 'y' is supported as surface axis");
+            }
+            int[] range = parseYRange(rangePart.substring(eqIdx + 1).trim());
+            yStart = range[0];
+            yEnd = range[1];
+            if (yStart > yEnd) {
+                throw new IllegalArgumentException("range start " + yStart + " is greater than end " + yEnd);
+            }
+        }
+        if (exprPart.isEmpty()) throw new IllegalArgumentException("empty expression after ':'");
+
+        ExprNode expr = wrapShared(shared,
+                expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
+        // surface 行是"方块语义"：把它当方块层的变体校验（biomeis 可用、terrain 不可用）；
+        // sd/sdb/wd/slope/keep 通过校验变量表注入（只在表面行合法）。
+        Map<String, ExprEvaluator.ValueType> surfaceVars = new HashMap<>();
+        surfaceVars.put("sd", ExprEvaluator.ValueType.NUMBER);
+        surfaceVars.put("sdb", ExprEvaluator.ValueType.NUMBER);
+        surfaceVars.put("wd", ExprEvaluator.ValueType.NUMBER);
+        surfaceVars.put("slope", ExprEvaluator.ValueType.NUMBER);
+        surfaceVars.put("keep", ExprEvaluator.ValueType.BLOCK);
+        List<String> valErrors = new ArrayList<>();
+        ExprEvaluator.ValueType type = validateNode(expr, valErrors, surfaceVars, false);
+        if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
+            valErrors.add("Surface expression must return a block or keep, got " + type);
+        }
+        if (!valErrors.isEmpty()) {
+            for (String ve : valErrors) errors.add(layerError(lineIdx, ve, line));
+            return;
+        }
+        surfaceLayers.add(new SurfaceLayerDef(yStart, yEnd, shorthand, maxDepth, ExprCompiler.compile(expr)));
     }
 
     /** 解析一行群系层：{@code biome: 表达式}（整维简写）或 {@code biome y=a..b: 表达式}。 */
@@ -1055,7 +1147,8 @@ public class FormulaParser {
         ExprEvaluator.ValueType type = validateNode(expr, errors, variables, biomeMode);
         requireNumber(type, "first argument of " + name, errors);
         if (referencesBoundVariables(expr, variables, new HashSet<>())) {
-            errors.add("Function '" + name + "': the expression cannot reference let bindings");
+            errors.add("Function '" + name + "': the expression must be self-contained "
+                    + "(built-ins only; no let bindings or surface variables)");
         }
         if (containsCacheForbiddenFunctions(expr)) {
             errors.add("Function '" + name + "': the expression cannot use "

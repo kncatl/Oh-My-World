@@ -774,7 +774,7 @@ class FormulaParserTest {
         assertOnlyReturnsBlockTypeError("y=0: cache3d(x + z + y, 4, 8, 4)");
 
         FormulaParser.ParseResult bound = FormulaParser.parseWithErrors("y=0: { let a = x; cache2d(a, 4) }");
-        assertTrue(bound.errors().stream().anyMatch(e -> e.contains("cannot reference let bindings")),
+        assertTrue(bound.errors().stream().anyMatch(e -> e.contains("self-contained")),
                 bound.errors().toString());
 
         FormulaParser.ParseResult yRef = FormulaParser.parseWithErrors("y=0: cache2d(y, 4)");
@@ -798,5 +798,42 @@ class FormulaParserTest {
                 "{overworld=[biome-fallback:3d] biome: cache2d(terrain(x, z), 4)}");
         assertTrue(terrain.errors().stream().anyMatch(e -> e.contains("cannot use terrain")),
                 terrain.errors().toString());
+    }
+
+    /** 1.3.1：surface 行解析与校验。 */
+    @Test
+    void surfaceLinesParseAndValidate() {
+        FormulaParser.DimensionParseResult ok = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=surface y=-64..319: keep; y=-64..319: rand()}");
+        assertTrue(ok.errors().isEmpty(), ok.errors().toString());
+        assertEquals(1, ok.dimensions().get("overworld").surfaceLayers().size());
+
+        FormulaParser.DimensionParseResult shorthand = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=surface[maxdepth=12]: sd == 0 ? rand() : keep; y=-64..319: rand()}");
+        assertTrue(shorthand.errors().isEmpty(), shorthand.errors().toString());
+        assertEquals(12, shorthand.dimensions().get("overworld").surfaceLayers().get(0).maxDepth());
+
+        FormulaParser.DimensionParseResult typeErr = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=surface y=0..319: sd + 1; y=-64..319: rand()}");
+        assertTrue(typeErr.errors().stream().anyMatch(e -> e.contains("must return a block or keep")),
+                typeErr.errors().toString());
+
+        FormulaParser.ParseResult keepOutside = FormulaParser.parseWithErrors("y=0: keep");
+        assertTrue(keepOutside.errors().stream().anyMatch(e -> e.contains("Unknown variable")),
+                keepOutside.errors().toString());
+
+        FormulaParser.ParseResult sdOutside = FormulaParser.parseWithErrors("y=0: sd");
+        assertTrue(sdOutside.errors().stream().anyMatch(e -> e.contains("Unknown variable")),
+                sdOutside.errors().toString());
+
+        FormulaParser.DimensionParseResult terrain = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=surface y=0..319: terrain(x, z) > 0 ? rand() : keep; y=-64..319: rand()}");
+        assertTrue(terrain.errors().stream().anyMatch(e -> e.contains("can only be used in biome lines")),
+                terrain.errors().toString());
+
+        FormulaParser.DimensionParseResult badDepth = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=surface[maxdepth=0] y=0..319: keep; y=-64..319: rand()}");
+        assertTrue(badDepth.errors().stream().anyMatch(e -> e.contains("maxdepth")),
+                badDepth.errors().toString());
     }
 }

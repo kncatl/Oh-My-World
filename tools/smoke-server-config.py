@@ -69,9 +69,13 @@
   配合 --require-all（河床沙/岩石两块都在）；水体宽度再用逐列扫描复核。
 
 --m1-functions（1.3.0）：新函数冒烟——元组 let（warp2）+ 噪声变体（fbm2 重载外的
-  ridged2/fbm2e）+ 循环（sum）+ 空间助手（terrace/slope/isodist/clamp）+ seedhash
-  逐块噪声决定海晶灯 / 黑石砖；两种特征方块都要出现（--require-all），
+  ridged2/fbm2e）+ 循环（sum）+ 空间助手（terrace/slope/isodist/clamp）+ cache2d/3d
+  + seedhash 逐块噪声决定海晶灯 / 黑石砖；两种特征方块都要出现（--require-all），
   证明「解析 → 编译 → 求值」整条链路在新语法下真的跑过。
+
+--surface（1.3.1）：表面通道冒烟——台阶地形（60/64 交替，每 8 格一级）+ 低地灌水，
+  surface 行按 sd/wd/slope 分层铺 海晶灯 / 黑石砖 / 蛙明灯 / 玻璃，其余 keep。
+  配合 smoke-check-world.py 的显式 --expect（四种特征方块都要出现）。
 
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
@@ -323,6 +327,19 @@ M1_FORMULA = (
     " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks}"
 )
 
+# 1.3.1 表面通道冒烟（--surface；配合 smoke-check-world.py 的显式 --expect）：
+# 台阶地形（h=60/64 交替，每 8 格一级）+ 低地灌水；表面规则按 sd/wd/slope 分层：
+# 顶面海晶灯 / 第二层黑石砖 / 水下顶面蛙明灯 / 陡坡第三层玻璃；其余 keep。
+SURFACE_FORMULA = (
+    "{overworld="
+    "let h = 60 + (floormod(floordiv(x, 8), 2) == 0 ? 0 : 4);"
+    "y=-64..: y <= h ? minecraft:stone : (y <= 64 && h < 64 ? minecraft:water : minecraft:air);"
+    "surface y=55..70: sd == 0 ? minecraft:sea_lantern : keep;"
+    "surface y=55..70: sd == 1 ? minecraft:polished_blackstone_bricks : keep;"
+    "surface y=55..70: wd >= 1 && sd == 0 ? minecraft:ochre_froglight : keep;"
+    "surface y=55..70: slope > 2 && sd == 2 ? minecraft:glass : keep}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -360,6 +377,7 @@ def main():
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     m1_functions = "--m1-functions" in sys.argv
+    surface = "--surface" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -391,7 +409,7 @@ def main():
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
             or biome_terrain or biome_biomeis or natural or features_all or features_none \
-            or flat_carvers or flat_carvers_off or m1_functions:
+            or flat_carvers or flat_carvers_off or m1_functions or surface:
         # 群系/特性/超平坦雕刻冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -450,6 +468,8 @@ def main():
         formula = RIVER_FORMULA
     elif m1_functions:
         formula = M1_FORMULA
+    elif surface:
+        formula = SURFACE_FORMULA
     else:
         formula = FORMULA
 
@@ -460,7 +480,7 @@ def main():
                      or biome_desert or biome_vanilla or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off
-                     or features_all or features_none or m1_functions
+                     or features_all or features_none or m1_functions or surface
                      or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；

@@ -479,6 +479,28 @@ Default preset:
       cache2d must not use ly or y; cache3d must not use ly (y is allowed).
     ★ Use it to down-sample expensive fields (3D density, large-scale noise).
 
+  -- Surface channel (surface rows: dress solid terrain by depth/water/slope) --
+  surface y=<a>..<b>: <expr>       apply the rule within that height range
+  surface: <expr>                  whole-dimension shorthand
+  surface[maxdepth=N] y=..: ...    only evaluate blocks with sd <= N (1..64, default 8)
+
+    ★ Runs after the formula terrain is laid out and before it is written to the chunk
+      (before carvers and features, same as vanilla).
+    ★ The expression returns a block or keep (leave the current block); for the same y,
+      later rows override earlier ones.
+    ★ Variables (only valid in surface rows):
+        sd     consecutive solid blocks above (top face = 0)
+        sdb    consecutive solid blocks below (cave ceilings/floors)
+        wd     -1 when dry; otherwise the number of fluid blocks above (>= 1)
+        slope  max absolute height difference to the four neighbour columns (1 block apart)
+    ★ solid = not air and not fluid; neighbour tops come from the pre-surface terrain
+      (chunk-independent, no ordering effects).
+    ★ The editor preview and structure placement use the pre-surface terrain
+      (surface rows only apply during chunk generation).
+    ★ Example (sand under water + stone on steep slopes + keep the rest):
+        surface wd >= 1 && sd == 0 ? minecraft:sand : keep;
+        surface slope > 2 && sd <= 1 ? minecraft:stone : keep
+
 
 5. Expression Examples
 

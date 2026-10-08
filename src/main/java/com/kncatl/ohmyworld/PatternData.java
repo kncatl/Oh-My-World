@@ -80,6 +80,7 @@ public class PatternData {
     public record PatternSnapshot(List<Object> layers, String rawInput, long version,
                                   DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome,
                                   boolean featuresOff, List<BiomeLayerDef> biomeLayers,
+                                  List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
@@ -102,7 +103,8 @@ public class PatternData {
             if (snapshot == null) {
                 snapshot = new PatternSnapshot(List.copyOf(parsed.layers()), raw,
                         SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome(),
-                        parsed.featuresOff(), List.copyOf(parsed.biomeLayers()), parsed.biomeFallback(),
+                        parsed.featuresOff(), List.copyOf(parsed.biomeLayers()),
+                        List.copyOf(parsed.surfaceLayers()), parsed.biomeFallback(),
                         parsed.carvers() == DimensionRules.CarversMode.VANILLA);
                 shared.put(parsed, snapshot);
             }
@@ -146,7 +148,7 @@ public class PatternData {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
-                        List.of(), DimensionRules.BiomeFallback.NONE, false);
+                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false);
             }
             return defaultSnapshot;
         }
@@ -363,12 +365,13 @@ public class PatternData {
     /**
      * 填充前把 biomeis 视图设为该区块（读已填充的群系容器）。
      * 区块填充发生在 BIOMES 阶段之后，因此这里读到的群系就是最终值。
+     * 表面通道（surface 行）也在此阶段应用（地形铺完之后、雕刻与特征之前）。
      */
-    public static void fillChunk(ChunkAccess chunk, List<Object> layers) {
+    public static void fillChunk(ChunkAccess chunk, PatternSnapshot snapshot) {
         ExprEvaluator.BiomeView saved = ExprEvaluator.biomeView();
         ExprEvaluator.setBiomeView(biomeViewFor(chunk));
         try {
-            fillChunkInternal(chunk, layers);
+            fillChunkInternal(chunk, snapshot);
         } finally {
             ExprEvaluator.setBiomeView(saved);
         }
@@ -411,7 +414,8 @@ public class PatternData {
         Holder<Biome> getNoiseBiome(int qx, int qy, int qz);
     }
 
-    private static void fillChunkInternal(ChunkAccess chunk, List<Object> layers) {
+    private static void fillChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
+        List<Object> layers = snapshot.layers();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
@@ -433,6 +437,15 @@ public class PatternData {
                 prepareFormulaLayer(prepared, lo, height, cx, cz, f, minY, maxY);
             } else if (obj instanceof CyclicLayerDef c) {
                 prepareCyclicLayer(prepared, lo, height, cx, cz, c, minY, maxY);
+            }
+        }
+
+        // 表面通道：地形铺完之后、写入区块之前（与"surface → carvers → features"的原版顺序一致）
+        if (!snapshot.surfaceLayers().isEmpty()) {
+            try {
+                applySurface(prepared, lo, height, cx, cz, minY, maxY, snapshot.surfaceLayers(), layers);
+            } finally {
+                ExprEvaluator.clearSurfaceValues();
             }
         }
 
@@ -541,6 +554,114 @@ public class PatternData {
                 }
             }
         }
+    }
+
+    /**
+     * 表面通道（1.3.1）：对公式地形（prepared）应用 surface 行。
+     *
+     * <p>变量定义（冻结）：
+     * <ul>
+     *   <li>{@code sd}：本方块上方连续实心数（顶面 = 0）；</li>
+     *   <li>{@code sdb}：本方块下方连续实心数（扫到该行 maxdepth + 1 为止）；</li>
+     *   <li>{@code wd}：无水 = -1；否则本方块上方连续流体块数（≥1）；</li>
+     *   <li>{@code slope}：本列顶面高度与四邻列顶面高度的最大绝对差（格距 1）。</li>
+     * </ul>
+     * 实心 = 非空气且非流体。顶面高度取自**表面修改前**的地形：区块内用 prepared、
+     * 四周边框列重复求值公式（不读邻区块——纯函数）。只对实心块、且
+     * {@code sd <= 行 maxdepth}、y 在该行范围内的行求值；行按顺序应用，后写覆盖先写；
+     * 表达式返回方块时写入（后续行看到修改后的方块），返回 {@code keep} 时保持。
+     */
+    private static void applySurface(BlockState[] prepared, int baseY, int height, int cx, int cz,
+                                     int minY, int maxY, List<SurfaceLayerDef> surfaceLayers,
+                                     List<Object> layers) {
+        int lo = baseY;
+        int hi = baseY + height - 1;
+
+        // 1) 顶面高度图：18×18（含四周一圈边框列），表面修改前
+        int[] top = new int[18 * 18];
+        for (int gx = 0; gx < 18; gx++) {
+            for (int gz = 0; gz < 18; gz++) {
+                if (gx >= 1 && gx <= 16 && gz >= 1 && gz <= 16) {
+                    int x = gx - 1;
+                    int z = gz - 1;
+                    int found = minY - 1;
+                    for (int y = hi; y >= lo; y--) {
+                        if (isSurfaceSolid(prepared[(y - baseY) * 256 + x * 16 + z])) {
+                            found = y;
+                            break;
+                        }
+                    }
+                    top[gx * 18 + gz] = found;
+                } else {
+                    top[gx * 18 + gz] = formulaTopSolid(layers, cx + gx - 1, cz + gz - 1, minY, maxY);
+                }
+            }
+        }
+
+        // 2) 每列自上而下应用
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int gx = x + 1;
+                int gz = z + 1;
+                int here = top[gx * 18 + gz];
+                int slope = Math.max(
+                        Math.max(Math.abs(here - top[(gx - 1) * 18 + gz]),
+                                Math.abs(here - top[(gx + 1) * 18 + gz])),
+                        Math.max(Math.abs(here - top[gx * 18 + (gz - 1)]),
+                                Math.abs(here - top[gx * 18 + (gz + 1)])));
+
+                int worldX = cx + x;
+                int worldZ = cz + z;
+                int sdAbove = 0;
+                int fluidRun = 0;
+                for (int y = hi; y >= lo; y--) {
+                    int index = (y - baseY) * 256 + x * 16 + z;
+                    BlockState state = prepared[index];
+                    boolean fluid = !state.getFluidState().isEmpty();
+                    boolean solid = !state.isAir() && !fluid;
+                    double wd = fluidRun > 0 ? fluidRun : -1;
+                    if (solid) {
+                        int sd = sdAbove;
+                        for (SurfaceLayerDef line : surfaceLayers) {
+                            if (y < line.resolvedStart(minY) || y > line.resolvedEnd(maxY - 1)) continue;
+                            if (sd > line.maxDepth()) continue;
+                            int sdb = 0;
+                            int lowest = Math.max(lo, y - 1 - line.maxDepth());
+                            for (int yy = y - 1; yy >= lowest; yy--) {
+                                if (isSurfaceSolid(prepared[(yy - baseY) * 256 + x * 16 + z])) sdb++;
+                                else break;
+                            }
+                            ExprEvaluator.setSurfaceValues(sd, sdb, wd, slope);
+                            Object result = ExprEvaluator.evalToSurface(
+                                    line.expression(), worldX, worldZ, y - line.resolvedStart(minY), y);
+                            if (result != ExprEvaluator.SURFACE_KEEP && result instanceof BlockState replacement) {
+                                prepared[index] = replacement;
+                                state = replacement;
+                                fluid = !replacement.getFluidState().isEmpty();
+                            }
+                        }
+                        sdAbove++;
+                    } else {
+                        sdAbove = 0;
+                    }
+                    fluidRun = fluid ? fluidRun + 1 : 0;
+                }
+            }
+        }
+    }
+
+    /** 实心 = 非空气且非流体（表面通道用）。 */
+    private static boolean isSurfaceSolid(BlockState state) {
+        return !state.isAir() && state.getFluidState().isEmpty();
+    }
+
+    /** 边框列的顶面高度：重复求值公式（不读邻区块）。无实心 → minY - 1。 */
+    private static int formulaTopSolid(List<Object> layers, int x, int z, int minY, int maxY) {
+        int upper = Math.min(maxY - 1, maxLayerEnd(layers));
+        for (int y = upper; y >= minY; y--) {
+            if (isSurfaceSolid(blockAt(layers, x, z, y, minY))) return y;
+        }
+        return minY - 1;
     }
 
     /** 按与区块填充相同的顺序计算某个世界坐标最终得到的方块状态（minY 用于解析开区间层的 ly 基准）。 */

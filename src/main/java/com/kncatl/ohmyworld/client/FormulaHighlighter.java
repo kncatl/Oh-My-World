@@ -34,7 +34,8 @@ public final class FormulaHighlighter {
     /** 一段带颜色的文本区间，[start, end)。 */
     public record Span(int start, int end, int color) {}
 
-    private static final Set<String> VARIABLES = Set.of("x", "y", "z", "ly", "seed", "spawnx", "spawnz");
+    private static final Set<String> VARIABLES = Set.of("x", "y", "z", "ly", "seed", "spawnx", "spawnz",
+            "sd", "sdb", "wd", "slope", "keep");
     private static final Set<String> DIRECTIVE_NAMES = Set.of("structure", "biome", "features");
     private static final Set<String> DIRECTIVE_MODES = Set.of("all", "none", "only", "except", "vanilla");
     private static final Set<String> DIMENSIONS = Set.of("overworld", "nether", "the_nether", "end", "the_end");
@@ -172,6 +173,7 @@ public final class FormulaHighlighter {
             return ExprEvaluator.isFunctionName(word) ? COLOR_FUNCTION : COLOR_DEFAULT;
         }
         if (word.equals("y") || VARIABLES.contains(word) || letNames.contains(word)) return COLOR_VARIABLE;
+        if (word.equals("surface")) return COLOR_KEYWORD;
         if (DIMENSIONS.contains(word)) return COLOR_KEYWORD;
         return COLOR_DEFAULT;
     }
