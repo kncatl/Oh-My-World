@@ -101,6 +101,9 @@ public class ExprParser {
                 List<ExprNode> args = new ArrayList<>();
                 if (!check(TokenType.RPAREN)) { do { args.add(conditional()); } while (match(TokenType.COMMA)); }
                 expect(TokenType.RPAREN);
+                if (ExprEvaluator.isMultiFunction(name)) {
+                    return new ExprNode.TupleCallNode(name, List.copyOf(args));
+                }
                 return new ExprNode.FuncCallNode(name, args);
             }
             return new ExprNode.VariableNode(name);
@@ -131,6 +134,21 @@ public class ExprParser {
             if (check(TokenType.RBRACE)) break;
             if (check(TokenType.IDENTIFIER) && peek().text().equals("let")) {
                 advance();
+                if (match(TokenType.LPAREN)) {
+                    // 元组 let：let (a, b, ...) = 多返回函数(...)
+                    List<String> names = new ArrayList<>();
+                    do {
+                        if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected a variable name in tuple let at position " + (peek() != null ? peek().pos() : -1));
+                        names.add(previous().text());
+                    } while (match(TokenType.COMMA));
+                    expect(TokenType.RPAREN);
+                    if (names.size() < 2) throw new IllegalArgumentException("Tuple let requires at least two names");
+                    expect(TokenType.ASSIGN);
+                    ExprNode value = conditional();
+                    match(TokenType.SEMI);
+                    bindings.add(new ExprNode.LetBinding(List.copyOf(names), value));
+                    continue;
+                }
                 if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected variable name after 'let' at position " + (peek() != null ? peek().pos() : -1));
                 String name = previous().text();
                 expect(TokenType.ASSIGN);

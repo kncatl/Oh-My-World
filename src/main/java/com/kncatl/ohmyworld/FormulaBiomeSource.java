@@ -228,6 +228,9 @@ public class FormulaBiomeSource extends BiomeSource {
                     if (i != blockArg) collectBiomeIds(args.get(i), ids);
                 }
             }
+            case ExprNode.TupleCallNode call -> {
+                for (ExprNode arg : call.args()) collectBiomeIds(arg, ids);
+            }
             case ExprNode.BlockExprNode block -> {
                 for (ExprNode.LetBinding binding : block.bindings()) collectBiomeIds(binding.value(), ids);
                 collectBiomeIds(block.body(), ids);
@@ -241,6 +244,10 @@ public class FormulaBiomeSource extends BiomeSource {
                     if (i != blockArg) collectBiomeIds(args.get(i), ids);
                 }
             }
+            case ExprNode.CompiledTupleCallNode call -> {
+                for (ExprNode arg : call.args()) collectBiomeIds(arg, ids);
+            }
+            case ExprNode.TupleComponentNode ignored -> {}
             case ExprNode.CompiledBlockNode block -> {
                 for (ExprNode value : block.values()) collectBiomeIds(value, ids);
                 collectBiomeIds(block.body(), ids);

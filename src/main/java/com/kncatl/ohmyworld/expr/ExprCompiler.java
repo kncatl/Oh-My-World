@@ -102,21 +102,47 @@ public final class ExprCompiler {
             case ExprNode.BlockExprNode be -> {
                 Map<String, Integer> scope = new HashMap<>();
                 scopes.push(scope);
-                int count = be.bindings().size();
+                List<Integer> slotList = new ArrayList<>();
+                List<ExprNode> valueList = new ArrayList<>();
+                List<Boolean> hoistedList = new ArrayList<>();
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    // 绑定值先于绑定名可见，顺序不能颠倒
+                    Compiled compiled = compileNode(binding.value(), scopes);
+                    boolean dependent = compiled.lyDependent();
+                    if (binding.names().size() == 1) {
+                        int slot = NEXT_SLOT.getAndIncrement();
+                        valueList.add(compiled.node());
+                        slotList.add(slot);
+                        slotDependent.put(slot, dependent);
+                        // 与 ly 无关的绑定可提升：每列求值一次，逐格重算时跳过
+                        hoistedList.add(!dependent);
+                        scope.put(binding.names().get(0), slot);
+                    } else {
+                        // 元组 let：一个隐藏槽位存元组值，每个名字一个分量槽位。
+                        // 分量与元组同享 ly 相关性（一起提升或一起逐格重算）。
+                        int tupleSlot = NEXT_SLOT.getAndIncrement();
+                        valueList.add(compiled.node());
+                        slotList.add(tupleSlot);
+                        slotDependent.put(tupleSlot, dependent);
+                        hoistedList.add(!dependent);
+                        for (int i = 0; i < binding.names().size(); i++) {
+                            int slot = NEXT_SLOT.getAndIncrement();
+                            valueList.add(new ExprNode.TupleComponentNode(tupleSlot, i, dependent));
+                            slotList.add(slot);
+                            slotDependent.put(slot, dependent);
+                            hoistedList.add(!dependent);
+                            scope.put(binding.names().get(i), slot);
+                        }
+                    }
+                }
+                int count = slotList.size();
                 int[] slots = new int[count];
                 ExprNode[] values = new ExprNode[count];
                 boolean[] hoisted = new boolean[count];
                 for (int i = 0; i < count; i++) {
-                    ExprNode.LetBinding binding = be.bindings().get(i);
-                    // 绑定值先于绑定名可见，顺序不能颠倒
-                    Compiled compiled = compileNode(binding.value(), scopes);
-                    int slot = NEXT_SLOT.getAndIncrement();
-                    values[i] = compiled.node();
-                    slots[i] = slot;
-                    slotDependent.put(slot, compiled.lyDependent());
-                    // 与 ly 无关的绑定可提升：每列求值一次，逐格重算时跳过
-                    hoisted[i] = !compiled.lyDependent();
-                    scope.put(binding.name(), slot);
+                    slots[i] = slotList.get(i);
+                    values[i] = valueList.get(i);
+                    hoisted[i] = hoistedList.get(i);
                 }
                 Compiled body = compileNode(be.body(), scopes);
                 scopes.pop();
@@ -126,10 +152,27 @@ public final class ExprCompiler {
                         body.lyDependent());
             }
 
+            case ExprNode.TupleCallNode t -> {
+                List<ExprNode> args = new ArrayList<>(t.args().size());
+                boolean dependent = false;
+                for (ExprNode arg : t.args()) {
+                    Compiled compiled = compileNode(arg, scopes);
+                    args.add(compiled.node());
+                    dependent |= compiled.lyDependent();
+                }
+                int id = ExprEvaluator.tupleFunctionId(t.name());
+                ExprNode call = id == ExprEvaluator.FN_UNKNOWN
+                        ? new ExprNode.TupleCallNode(t.name(), List.copyOf(args))
+                        : new ExprNode.CompiledTupleCallNode(id, List.copyOf(args));
+                yield new Compiled(call, dependent);
+            }
+
             // 已编译的形态原样返回
             case ExprNode.BuiltinNode b -> new Compiled(b, b.kind() == 2 || b.kind() == 4);
             case ExprNode.SlotNode s -> new Compiled(s, lyDependent(s));
             case ExprNode.CompiledFuncCallNode cf -> new Compiled(cf, lyDependent(cf));
+            case ExprNode.CompiledTupleCallNode ct -> new Compiled(ct, lyDependent(ct));
+            case ExprNode.TupleComponentNode tc -> new Compiled(tc, tc.tupleDependent());
             // 已编译的块无法再反查槽位来源，保守视为与 y 相关：只放弃提升，不影响正确性
             case ExprNode.CompiledBlockNode cb -> new Compiled(cb, true);
         };
@@ -160,6 +203,19 @@ public final class ExprCompiler {
                 }
                 yield false;
             }
+            case ExprNode.TupleCallNode t -> {
+                for (ExprNode arg : t.args()) {
+                    if (lyDependent(arg)) yield true;
+                }
+                yield false;
+            }
+            case ExprNode.CompiledTupleCallNode t -> {
+                for (ExprNode arg : t.args()) {
+                    if (lyDependent(arg)) yield true;
+                }
+                yield false;
+            }
+            case ExprNode.TupleComponentNode t -> t.tupleDependent();
             // 以下形态不会出现在编译后的节点里，只为了让 switch 穷尽并保持保守
             case ExprNode.VariableNode v -> true;
             case ExprNode.BlockExprNode be -> true;

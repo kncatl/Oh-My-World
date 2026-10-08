@@ -725,4 +725,44 @@ class FormulaParserTest {
         assertTrue(topLevel.errors().stream().anyMatch(e -> e.contains("must cover the whole dimension")),
                 topLevel.errors().toString());
     }
+
+    /** 1.3.0：元组 let（多返回函数）解析与校验。 */
+    @Test
+    void tupleLetParsesAndValidates() {
+        assertOnlyReturnsBlockTypeError("y=0: { let (a, b) = warp2(x, z, 30, 5, 1); a + b }");
+        assertOnlyReturnsBlockTypeError("y=0: { let (a, b, c) = noise2g(x, z, 40, 2); a + b + c }");
+        assertOnlyReturnsBlockTypeError("y=0: { let (a, b) = grad(x * x + z); a + b }");
+
+        FormulaParser.ParseResult wrongCount = FormulaParser.parseWithErrors(
+                "y=0: { let (a, b, c) = warp2(x, z, 30, 5, 1); a + b + c }");
+        assertTrue(wrongCount.errors().stream().anyMatch(e -> e.contains("binds 3 name(s)")),
+                wrongCount.errors().toString());
+
+        FormulaParser.ParseResult notTuple = FormulaParser.parseWithErrors("y=0: { let (a, b) = max(1, 2); a }");
+        assertTrue(notTuple.errors().stream().anyMatch(e -> e.contains("multi-return function")),
+                notTuple.errors().toString());
+
+        FormulaParser.ParseResult misplaced = FormulaParser.parseWithErrors("y=0: warp2(x, z, 30, 5, 1) > 0");
+        assertTrue(misplaced.errors().stream().anyMatch(e -> e.contains("returns multiple values")),
+                misplaced.errors().toString());
+    }
+
+    /** 1.3.0：循环 / 位移 / 空间助手的公式级解析。 */
+    @Test
+    void loopAndSpatialHelpersParse() {
+        assertOnlyReturnsBlockTypeError("y=0: sum(k, 0, 4, k * x)");
+        assertOnlyReturnsBlockTypeError("y=0: { let s = sum(k, 0, 3, k); s > 0 }");
+        assertOnlyReturnsBlockTypeError("y=0: shift(x, 5, 0)");
+        assertOnlyReturnsBlockTypeError("y=0: slope(x * x)");
+        assertOnlyReturnsBlockTypeError("y=0: curv(x * x)");
+        assertOnlyReturnsBlockTypeError("y=0: isodist(x - 5)");
+
+        FormulaParser.ParseResult tooMany = FormulaParser.parseWithErrors("y=0: sum(k, 0, 100, k)");
+        assertTrue(tooMany.errors().stream().anyMatch(e -> e.contains("exceed 64")),
+                tooMany.errors().toString());
+
+        FormulaParser.ParseResult badShift = FormulaParser.parseWithErrors("y=0: shift(x, 5)");
+        assertTrue(badShift.errors().stream().anyMatch(e -> e.contains("shift")),
+                badShift.errors().toString());
+    }
 }

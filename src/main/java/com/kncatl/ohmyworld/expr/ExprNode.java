@@ -34,7 +34,20 @@ public sealed interface ExprNode {
     record ConditionalNode(ExprNode condition, ExprNode thenExpr, ExprNode elseExpr) implements ExprNode {}
     record FuncCallNode(String name, List<ExprNode> args) implements ExprNode {}
     record BlockExprNode(List<LetBinding> bindings, ExprNode body) implements ExprNode {}
-    record LetBinding(String name, ExprNode value) {}
+
+    /**
+     * let 绑定。{@code names} 通常只有一个；多个名字（如 {@code let (u, v) = warp2(...)}）
+     * 表示绑定一个多返回函数的结果，此时 {@code value} 必须是 {@link TupleCallNode}。
+     */
+    record LetBinding(List<String> names, ExprNode value) {
+        public LetBinding(String name, ExprNode value) { this(List.of(name), value); }
+    }
+
+    /**
+     * 多返回函数的未编译调用（1.3.0）。多返回函数（warp2 / warp3 / noise2g /
+     * worley2c / grad）只能出现在元组 let 的右侧；出现在其它位置会被语义校验拒绝。
+     */
+    record TupleCallNode(String name, List<ExprNode> args) implements ExprNode {}
 
     // --- 编译后的形态（由 ExprCompiler 生成）---------------------------------
     //
@@ -53,6 +66,15 @@ public sealed interface ExprNode {
      * {@code ExprEvaluator.functionId}）。运行期不再对函数名做字符串比较与哈希查找。
      */
     record CompiledFuncCallNode(int id, List<ExprNode> args) implements ExprNode {}
+
+    /** 编译后的多返回函数调用（1.3.0）。 */
+    record CompiledTupleCallNode(int id, List<ExprNode> args) implements ExprNode {}
+
+    /**
+     * 编译后的元组分量读取（1.3.0）：从元组槽位 {@code slot} 取第 {@code index} 个分量。
+     * {@code tupleDependent} 记录元组值是否与纵坐标相关（分量与其一致，决定能否提升）。
+     */
+    record TupleComponentNode(int slot, int index, boolean tupleDependent) implements ExprNode {}
 
     /**
      * 编译后的 let 块：按顺序求值 {@code values} 并写入对应 {@code slots}，再求值

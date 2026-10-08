@@ -59,6 +59,17 @@ class ExprCompilerTest {
             "seedhash(x, z, 0)",
             "seedhash(x + 0.5, z, -3)",
             "{ let h = seedhash(x, z, 1); h > 0.5 ? h : 1 - h }",
+            // 1.3.0：元组 let 与多返回函数（编译前后应完全一致）
+            "{ let (u, v) = warp2(x, z, 30, 5, 1); u * 100 + v }",
+            "{ let (a, b, c) = noise2g(x, z, 45, 2); a + b * 10 + c * 100 }",
+            "{ let (f1, f2, cell, px, pz) = worley2c(x, z, 70, 9); f1 + f2 + cell + px * 0.01 + pz * 0.01 }",
+            "{ let (dx, dy, dz) = warp3(x, ly, z, 25, 4, 3); dx - dy + dz }",
+            "{ let (u, v) = warp2(x, z, 30, 5, 1); { let (u2, v2) = warp2(u, v, 30, 5, 2); u2 + v2 } }",
+            // 1.3.0：空间助手
+            "slope(x * x + z)",
+            "{ let (gx, gz) = grad(x * x + z * z); gx * 3 + gz }",
+            "curv(x * x * z)",
+            "isodist(x - 5)",
     };
 
     private static String describe(Object value) {

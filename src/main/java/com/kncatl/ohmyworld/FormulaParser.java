@@ -495,9 +495,10 @@ public class FormulaParser {
         List<ExprNode.LetBinding> shared = new ArrayList<>(plainLets.size());
         for (ExprNode.LetBinding binding : plainLets) {
             try {
-                shared.add(new ExprNode.LetBinding(binding.name(), expandMacros(binding.value(), macros)));
+                shared.add(new ExprNode.LetBinding(binding.names(),
+                        expandLoops(expandMacros(binding.value(), macros))));
             } catch (Exception e) {
-                errors.add("Shared let '" + binding.name() + "': " + e.getMessage());
+                errors.add("Shared let '" + String.join(", ", binding.names()) + "': " + e.getMessage());
             }
         }
         if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), false, false);
@@ -581,7 +582,7 @@ public class FormulaParser {
                     layers.add(new CyclicLayerDef(yStart, yEnd, entries));
                 } else {
                     ExprNode expr = wrapShared(shared,
-                            expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros));
+                            expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
                     if (!usesBiomeQueries && usesBiomeQuery(expr)) usesBiomeQueries = true;
                     List<String> valErrors = new ArrayList<>();
                     ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), false);
@@ -694,6 +695,8 @@ public class FormulaParser {
                             || walkFunctions(conditional.elseExpr(), byName, byId);
             case ExprNode.FuncCallNode call -> byName.test(call.name())
                     || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
+            case ExprNode.TupleCallNode call -> byName.test(call.name())
+                    || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
             case ExprNode.BlockExprNode block ->
                     block.bindings().stream().anyMatch(b -> walkFunctions(b.value(), byName, byId))
                             || walkFunctions(block.body(), byName, byId);
@@ -701,6 +704,9 @@ public class FormulaParser {
             case ExprNode.SlotNode ignored -> false;
             case ExprNode.CompiledFuncCallNode call -> byId.test(call.id())
                     || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
+            case ExprNode.CompiledTupleCallNode call -> byId.test(call.id())
+                    || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
+            case ExprNode.TupleComponentNode ignored -> false;
             case ExprNode.CompiledBlockNode block ->
                     Arrays.stream(block.values()).anyMatch(v -> walkFunctions(v, byName, byId))
                             || walkFunctions(block.body(), byName, byId);
@@ -800,7 +806,8 @@ public class FormulaParser {
             }
             if (exprPart.isEmpty()) throw new IllegalArgumentException("empty expression after ':'");
 
-            ExprNode expr = wrapShared(shared, expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros));
+            ExprNode expr = wrapShared(shared,
+                    expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
             List<String> valErrors = new ArrayList<>();
             ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), true);
             if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
@@ -986,16 +993,55 @@ public class FormulaParser {
             case ExprNode.BlockExprNode be -> {
                 Map<String, ExprEvaluator.ValueType> local = new HashMap<>(variables);
                 for (ExprNode.LetBinding lb : be.bindings()) {
-                    local.put(lb.name(), validateNode(lb.value(), errors, local, biomeMode));
+                    if (lb.names().size() == 1) {
+                        local.put(lb.names().get(0), validateNode(lb.value(), errors, local, biomeMode));
+                    } else {
+                        validateTupleBinding(lb, errors, local, biomeMode);
+                        for (String name : lb.names()) local.put(name, ExprEvaluator.ValueType.NUMBER);
+                    }
                 }
                 return validateNode(be.body(), errors, local, biomeMode);
+            }
+            case ExprNode.TupleCallNode t -> {
+                errors.add("Function '" + t.name() + "' returns multiple values: it can only be used "
+                        + "as the right-hand side of 'let (a, b, ...) = ...'");
+                for (ExprNode a : t.args()) validateNode(a, errors, variables, biomeMode);
+                return ExprEvaluator.ValueType.UNKNOWN;
             }
             // 以下是编译后的形态。语义校验发生在编译之前（见本文件的处理顺序），
             // 因此这几个分支实际不会走到；这里只是为了让 switch 穷尽。
             case ExprNode.BuiltinNode b -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.SlotNode s -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.CompiledFuncCallNode cf -> { return ExprEvaluator.ValueType.UNKNOWN; }
+            case ExprNode.CompiledTupleCallNode cf -> { return ExprEvaluator.ValueType.UNKNOWN; }
+            case ExprNode.TupleComponentNode tc -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledBlockNode cb -> { return ExprEvaluator.ValueType.UNKNOWN; }
+        }
+    }
+
+    /** 元组 let：值必须是多返回函数调用，名字个数 = 返回组件数，参数全为数值。 */
+    private static void validateTupleBinding(ExprNode.LetBinding binding, List<String> errors,
+                                             Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+        ExprNode value = binding.value();
+        if (!(value instanceof ExprNode.TupleCallNode call)) {
+            errors.add("Tuple let '(...)' must be bound to a multi-return function call "
+                    + "(warp2 / warp3 / noise2g / worley2c); got a different expression");
+            validateNode(value, errors, variables, biomeMode);
+            return;
+        }
+        Integer arity = ExprEvaluator.multiReturnArity(call.name());
+        if (arity == null) {
+            errors.add("Unknown multi-return function: " + call.name());
+            return;
+        }
+        if (arity != binding.names().size()) {
+            errors.add("Tuple let binds " + binding.names().size() + " name(s) but '" + call.name()
+                    + "' returns " + arity + " value(s)");
+        }
+        String msg = ExprEvaluator.validateFunction(call.name(), call.args().size());
+        if (msg != null) errors.add(msg);
+        for (ExprNode arg : call.args()) {
+            requireNumber(validateNode(arg, errors, variables, biomeMode), "argument of " + call.name(), errors);
         }
     }
 
@@ -1068,7 +1114,8 @@ public class FormulaParser {
             String inner = exprPart.substring(start, pos).trim();
             pos++;
 
-            ExprNode expr = wrapShared(shared, expandMacros(new ExprParser(ExprLexer.tokenize(inner)).parse(), macros));
+            ExprNode expr = wrapShared(shared,
+                    expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(inner)).parse(), macros)));
             // 与整层同理：依赖判定必须在编译前、且在未编译的 AST 上完成
             boolean lyDependent = ExprEvaluator.dependsOnLy(expr);
             entries.add(new CyclicEntry(t, expr, lyDependent));
@@ -1092,9 +1139,38 @@ public class FormulaParser {
     /** 参数化共享 let：编译期宏展开（调用即内联，无运行时开销）。 */
     private record ParametricLet(String name, List<String> params, ExprNode body) {}
 
-    /** 解析 `let 名称 = 表达式` 或 `let 名称(参数, ...) = 表达式`。 */
+    /** 解析 `let 名称 = 表达式`、`let 名称(参数, ...) = 表达式` 或 `let (a, b, ...) = 表达式`。 */
     private static SharedLet parseSharedLet(String line) {
         String rest = line.substring(3).trim();
+        if (rest.startsWith("(")) {
+            // 元组 let：let (a, b, ...) = 多返回函数(...)
+            int close = rest.indexOf(')');
+            if (close < 0) throw new IllegalArgumentException("missing ')' in tuple let");
+            List<String> names = new ArrayList<>();
+            for (String part : rest.substring(1, close).split(",")) {
+                String name = part.trim();
+                if (!isIdentifier(name)) {
+                    throw new IllegalArgumentException("invalid name \"" + name + "\" in tuple let");
+                }
+                if (names.contains(name)) {
+                    throw new IllegalArgumentException("duplicate name '" + name + "' in tuple let");
+                }
+                names.add(name);
+            }
+            if (names.size() < 2) {
+                throw new IllegalArgumentException("tuple let requires at least two names");
+            }
+            String tail = rest.substring(close + 1).trim();
+            if (!tail.startsWith("=")) {
+                throw new IllegalArgumentException("expected '=' after tuple let names");
+            }
+            String valueText = tail.substring(1).trim();
+            if (valueText.isEmpty()) {
+                throw new IllegalArgumentException("expected an expression after 'let (...) ='");
+            }
+            ExprNode value = new ExprParser(ExprLexer.tokenize(valueText)).parse();
+            return new SharedLet(new ExprNode.LetBinding(List.copyOf(names), value), null);
+        }
         int i = 0;
         while (i < rest.length() && (Character.isLetterOrDigit(rest.charAt(i)) || rest.charAt(i) == '_')) i++;
         char first = rest.isEmpty() ? '\0' : rest.charAt(0);
@@ -1196,11 +1272,18 @@ public class FormulaParser {
             case ExprNode.BlockExprNode be -> {
                 List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
                 for (ExprNode.LetBinding binding : be.bindings()) {
-                    bindings.add(new ExprNode.LetBinding(binding.name(),
+                    bindings.add(new ExprNode.LetBinding(binding.names(),
                             expandMacros(binding.value(), macros, depth)));
                 }
                 yield new ExprNode.BlockExprNode(bindings, expandMacros(be.body(), macros, depth));
             }
+            case ExprNode.TupleCallNode t -> {
+                List<ExprNode> args = new ArrayList<>(t.args().size());
+                for (ExprNode arg : t.args()) args.add(expandMacros(arg, macros, depth));
+                yield new ExprNode.TupleCallNode(t.name(), args);
+            }
+            case ExprNode.CompiledTupleCallNode t -> t;
+            case ExprNode.TupleComponentNode t -> t;
             case ExprNode.BuiltinNode b -> b;
             case ExprNode.SlotNode s -> s;
             case ExprNode.CompiledFuncCallNode cf -> cf;
@@ -1213,6 +1296,132 @@ public class FormulaParser {
         Map<String, ExprNode> subs = new HashMap<>();
         for (int i = 0; i < params.size(); i++) subs.put(params.get(i), args.get(i));
         return substitute(node, subs);
+    }
+
+    // ---------------------------------------------------------------- 循环 / 位移宏（1.3.0）
+
+    /**
+     * 循环与位移宏的编译期展开（在宏展开之后、语义校验之前进行）：
+     *
+     * <ul>
+     *   <li>{@code sum(k, a, b, expr)} / {@code min(...)} / {@code max(...)}（循环形式）：
+     *       k 是循环变量名，a、b 为整数字面量；展开为逐项表达式（加法链 / 多参 min·max）。
+     *       嵌套迭代总数（各层循环次数之积）不超过 64。</li>
+     *   <li>{@code shift(expr, dx, dz)}：把 expr 中出现的 x、z 替换为 x+dx、z+dz；
+     *       dx/dz 里的 x、z 保持原样（在原点求值）。</li>
+     * </ul>
+     */
+    public static ExprNode expandLoops(ExprNode node) {
+        return expandLoops(node, 1);
+    }
+
+    private static ExprNode expandLoops(ExprNode node, int multiplier) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> n;
+            case ExprNode.VariableNode v -> v;
+            case ExprNode.BlockNode b -> b;
+            case ExprNode.BinaryNode b -> new ExprNode.BinaryNode(
+                    expandLoops(b.left(), multiplier), b.op(), expandLoops(b.right(), multiplier));
+            case ExprNode.UnaryNode u -> new ExprNode.UnaryNode(u.op(), expandLoops(u.operand(), multiplier));
+            case ExprNode.ConditionalNode c -> new ExprNode.ConditionalNode(
+                    expandLoops(c.condition(), multiplier),
+                    expandLoops(c.thenExpr(), multiplier),
+                    expandLoops(c.elseExpr(), multiplier));
+            case ExprNode.FuncCallNode f -> {
+                if (f.name().equals("sum") || isLoopForm(f)) {
+                    yield expandLoopCall(f, multiplier);
+                }
+                if (f.name().equals("shift") && f.args().size() == 3) {
+                    yield expandShift(f, multiplier);
+                }
+                List<ExprNode> args = new ArrayList<>(f.args().size());
+                for (ExprNode arg : f.args()) args.add(expandLoops(arg, multiplier));
+                yield new ExprNode.FuncCallNode(f.name(), args);
+            }
+            case ExprNode.TupleCallNode t -> {
+                List<ExprNode> args = new ArrayList<>(t.args().size());
+                for (ExprNode arg : t.args()) args.add(expandLoops(arg, multiplier));
+                yield new ExprNode.TupleCallNode(t.name(), args);
+            }
+            case ExprNode.BlockExprNode be -> {
+                List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    bindings.add(new ExprNode.LetBinding(binding.names(),
+                            expandLoops(binding.value(), multiplier)));
+                }
+                yield new ExprNode.BlockExprNode(bindings, expandLoops(be.body(), multiplier));
+            }
+            case ExprNode.BuiltinNode b -> b;
+            case ExprNode.SlotNode s -> s;
+            case ExprNode.CompiledFuncCallNode cf -> cf;
+            case ExprNode.CompiledTupleCallNode ct -> ct;
+            case ExprNode.TupleComponentNode tc -> tc;
+            case ExprNode.CompiledBlockNode cb -> cb;
+        };
+    }
+
+    /** min/max 的循环形式：4 参且首参不是内建变量名（a、b 的整数性在展开时报错说明）。 */
+    private static boolean isLoopForm(ExprNode.FuncCallNode f) {
+        if (!f.name().equals("min") && !f.name().equals("max")) return false;
+        if (f.args().size() != 4) return false;
+        if (!(f.args().get(0) instanceof ExprNode.VariableNode v)) return false;
+        return !KNOWN_VARS.contains(v.name());
+    }
+
+    private static ExprNode expandLoopCall(ExprNode.FuncCallNode f, int multiplier) {
+        if (f.args().size() != 4) {
+            throw new IllegalArgumentException(f.name() + "(k, a, b, expr) expects 4 arguments, got " + f.args().size());
+        }
+        if (!(f.args().get(0) instanceof ExprNode.VariableNode loopVar) || KNOWN_VARS.contains(loopVar.name())) {
+            throw new IllegalArgumentException(f.name() + "(k, a, b, expr): the first argument must be a loop variable name");
+        }
+        Integer a = intLiteral(f.args().get(1));
+        Integer b = intLiteral(f.args().get(2));
+        if (a == null || b == null) {
+            throw new IllegalArgumentException(f.name() + "(k, a, b, expr): a and b must be integer literals");
+        }
+        if (b < a) {
+            throw new IllegalArgumentException(f.name() + ": empty loop range " + a + ".." + b);
+        }
+        long count = (long) b - a + 1;
+        if (count > 64 || (long) multiplier * count > 64) {
+            throw new IllegalArgumentException(f.name() + ": loop iterations exceed 64 (nested total)");
+        }
+        List<ExprNode> expanded = new ArrayList<>((int) count);
+        Map<String, ExprNode> subs = new HashMap<>();
+        for (int i = a; i <= b; i++) {
+            subs.clear();
+            subs.put(loopVar.name(), new ExprNode.NumberNode(i));
+            expanded.add(expandLoops(substitute(f.args().get(3), subs), multiplier * (int) count));
+        }
+        if (f.name().equals("sum")) {
+            ExprNode total = expanded.get(0);
+            for (int i = 1; i < expanded.size(); i++) {
+                total = new ExprNode.BinaryNode(total, ExprNode.BinaryOp.ADD, expanded.get(i));
+            }
+            return total;
+        }
+        return new ExprNode.FuncCallNode(f.name(), expanded);
+    }
+
+    private static ExprNode expandShift(ExprNode.FuncCallNode f, int multiplier) {
+        ExprNode target = expandLoops(f.args().get(0), multiplier);
+        ExprNode dx = expandLoops(f.args().get(1), multiplier);
+        ExprNode dz = expandLoops(f.args().get(2), multiplier);
+        Map<String, ExprNode> subs = new HashMap<>();
+        subs.put("x", new ExprNode.BinaryNode(new ExprNode.VariableNode("x"), ExprNode.BinaryOp.ADD, dx));
+        subs.put("z", new ExprNode.BinaryNode(new ExprNode.VariableNode("z"), ExprNode.BinaryOp.ADD, dz));
+        return substitute(target, subs);
+    }
+
+    /** 整数数字字面量（含负数字面量，求值为整数值的 NumberNode 也算）。 */
+    private static Integer intLiteral(ExprNode node) {
+        if (node instanceof ExprNode.NumberNode n
+                && n.value() == Math.rint(n.value())
+                && n.value() >= Integer.MIN_VALUE && n.value() <= Integer.MAX_VALUE) {
+            return (int) n.value();
+        }
+        return null;
     }
 
     private static ExprNode substitute(ExprNode node, Map<String, ExprNode> subs) {
@@ -1236,11 +1445,18 @@ public class FormulaParser {
                 List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
                 for (ExprNode.LetBinding binding : be.bindings()) {
                     // 绑定值先于绑定名可见（与求值器一致）
-                    bindings.add(new ExprNode.LetBinding(binding.name(), substitute(binding.value(), inner)));
-                    inner.remove(binding.name());
+                    bindings.add(new ExprNode.LetBinding(binding.names(), substitute(binding.value(), inner)));
+                    for (String name : binding.names()) inner.remove(name);
                 }
                 yield new ExprNode.BlockExprNode(bindings, substitute(be.body(), inner));
             }
+            case ExprNode.TupleCallNode t -> {
+                List<ExprNode> args = new ArrayList<>(t.args().size());
+                for (ExprNode arg : t.args()) args.add(substitute(arg, subs));
+                yield new ExprNode.TupleCallNode(t.name(), args);
+            }
+            case ExprNode.CompiledTupleCallNode t -> t;
+            case ExprNode.TupleComponentNode t -> t;
             case ExprNode.BuiltinNode b -> b;
             case ExprNode.SlotNode s -> s;
             case ExprNode.CompiledFuncCallNode cf -> cf;

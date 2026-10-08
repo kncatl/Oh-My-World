@@ -28,6 +28,7 @@ Separate layers with semicolons ";". Two formats are supported:
 
   Variables declared with 'let' are scoped to the { } block.
   They shadow x/z/ly if names match, and restore on exit.
+  Tuple bindings are also supported: let (a, b) = multiFunction(...); (section 4).
 
 [shared let (optional)]
   Write `let var = <expression>;` directly in the formula content (outside any
@@ -376,6 +377,22 @@ Default preset:
     ★ The algorithms are frozen: the same formula + seed generates the same
       world in every version.
 
+  -- Noise variants (1.3.0; also frozen) --
+  fbm2(x, z, scale, octaves, salt, lacunarity, gain)   2D fractal sum with tunable
+                                                       lacunarity [1.01,4] and gain
+                                                       [0,1]; octaves are offset
+                                                       to break lattice alignment
+  fbma2(x, z, scale, salt, a0, a1, ...)                custom amplitude list (1..8);
+                                                       normalised by sum(|a|), [-1,1]
+  ridged2(x, z, scale, octaves, salt, sharp)           ridged multifractal, [0,1]
+  billow2(x, z, scale, octaves, salt, sharp)           billowy multifractal, [0,1]
+  fbm2e(x, z, scale, octaves, salt, k)                 gradient-damped fbm: detail is
+                                                       suppressed on steep slopes;
+                                                       k=0 equals fbm2, [-1,1]
+
+    ★ sharp (1..8) controls how pointy the ridges are; lacunarity/gain tune the
+      octave spacing and strength (e.g. 2.2 / 0.55 gives finer detail).
+
   -- Splines (custom curve mapping; positions ascending, clamped outside) --
   spline(v, p0, v0, p1, v1, ...)    piecewise linear: passes through every point
   cspline(v, p0, v0, p1, v1, ...)   Catmull-Rom: passes through points, smoother
@@ -387,6 +404,25 @@ Default preset:
       ascending (checked ahead of time when all positions are number literals).
       Algorithms are frozen.
 
+  -- Tuple let (multi-return functions: one call, several components) --
+  let (u, v) = warp2(x, z, scale, amp, salt)         2D domain warp: u, v are offsets
+  let (u, v, w) = warp3(x, y, z, scale, amp, salt)   3D domain warp offsets
+  let (value, gx, gz) = noise2g(x, z, scale, salt)   smooth noise + analytic gradient
+  let (f1, f2, cell, px, pz) = worley2c(x, z, scale, salt)
+                                                     F1/F2, per-cell random [0,1),
+                                                     nearest feature point (blocks)
+  let (gx, gz) = grad(expr)                          central-difference gradient
+                                                     (step 1 block)
+
+    ★ Syntax: let (name, name, ...) = multiFunction(...);  the name count must
+      equal the component count; multi-return functions may only appear on the
+      right side of a tuple let.
+    ★ Typical use (warp coordinates before sampling noise):
+        let (u, v) = warp2(x, z, 220, 40, 7);
+        let base = fbm2(x + u, z + v, 900, 4, 1);
+    ★ Components share the usual "independent of height" check: when they do not
+      use ly the whole call is evaluated once per column (like a plain let).
+
   -- Helpers --
   clamp(v, lo, hi)             clamp into [lo, hi]
   lerp(a, b, t)                linear interpolation a + (b - a) * t
@@ -396,6 +432,37 @@ Default preset:
                                slow noise (feature ~512 blocks, ~±3 blocks,
                                follows the world seed). Use it for "lowland
                                flooding / cave water"; see the recipes.
+  atan2(a, b)                  two-argument arctangent (Math.atan2(a, b))
+  fract(v)                     fractional part (always in [0,1), also for negatives)
+  step(edge, v)                0 when v < edge, else 1
+  smootherstep(t)              quintic smoothing of a 0..1 input (gentler)
+  tanh(v)                      hyperbolic tangent
+  hypot(a, b)                  sqrt(a² + b²)
+  bias(v, b) / gain(v, g)      Schlick bias / gain: shape probabilities and curves;
+                               with b = g = 0.5 they are the identity
+  saturate(v)                  clamp into [0,1]
+  select(cond, a, b)           same as the ternary expression
+  terrace(v, steps, sharp)     terraces: turn a continuous value into steps of
+                               height 1/steps (sharp 1..256 controls the edge)
+  min(a, b, c, ...)            min/max also fold directly over many arguments
+
+  -- Loop and spatial helpers --
+  sum(k, a, b, expr)           unrolled loop sum: k runs a..b (integer literals).
+                               E.g. sum(k, 0, 3, k * x) = 0*x + 1*x + 2*x + 3*x
+  min/max(k, a, b, expr)       loop form of min/max (4 args, first is a variable name)
+  shift(expr, dx, dz)          replace x and z inside expr with x+dx and z+dz
+                               (x/z inside dx/dz are evaluated at the origin)
+  slope(expr)                  sqrt(gx²+gz²): central-difference slope (1-block step)
+  curv(expr)                   Laplacian: sum of second differences (ridges/valleys)
+  isodist(expr)                |value| / |gradient|: distance estimate to the zero
+                               contour (rivers: isodist(noise - threshold) < width)
+
+    ★ Loops are expanded at compile time (<=64 iterations per loop; nested total
+      <=64); the loop variable shadows an existing binding of the same name.
+    ★ Spatial helpers use 1-block central differences; the argument expression is
+      re-evaluated at the offsets (outer let bindings keep their centre-column value).
+    ★ min/max: with 4 args and a variable name first they are the loop form;
+      otherwise they fold over the given arguments.
 
 
 5. Expression Examples
@@ -467,6 +534,19 @@ Default preset:
     }
 
     Extract repeated sub-expressions into named variables for clarity.
+
+  ▸ Tuple let — receive several return values at once (domain warping):
+
+    y=-64..319: {
+      let (u, v) = warp2(x, z, 240, 45, 7);
+      let h = 64 + fbm2(x + u, z + v, 900, 4, 1) * 26;
+      y <= h ? minecraft:stone : minecraft:air
+    }
+
+    warp2 returns two offsets; adding them to the coordinates before sampling
+    noise "creases" the coordinates, giving more natural terrain edges.
+    Multi-return functions can only be received like this:
+    let (name, name, ...) = multiFunction(...).
 
   ▸ Deepslate-style strata transition (hash noise x height ramp, like vanilla):
 

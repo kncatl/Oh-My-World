@@ -82,6 +82,29 @@ public final class FormulaHighlighter {
                 if (word.equals("let") && !inDirective) {
                     out.add(new Span(i, j, COLOR_KEYWORD));
                     int k = skipSpaces(s, j);
+                    if (k < n && s.charAt(k) == '(') {
+                        // 元组 let：let (a, b, ...) —— 括号内每个名字按变量着色
+                        int m = k;
+                        while (m < n && s.charAt(m) != ')') {
+                            char tc = s.charAt(m);
+                            if (isIdentStart(tc)) {
+                                int e = m + 1;
+                                while (e < n && isIdentPart(s.charAt(e))) e++;
+                                letNames.add(s.substring(m, e));
+                                out.add(new Span(m, e, COLOR_VARIABLE));
+                                m = e;
+                            } else {
+                                out.add(new Span(m, m + 1, COLOR_OPERATOR));
+                                m++;
+                            }
+                        }
+                        if (m < n) {
+                            out.add(new Span(m, m + 1, COLOR_OPERATOR));
+                            m++;
+                        }
+                        i = m;
+                        continue;
+                    }
                     if (k < n && isIdentStart(s.charAt(k))) {
                         int m = k + 1;
                         while (m < n && isIdentPart(s.charAt(m))) m++;
