@@ -117,6 +117,18 @@ public final class WorldLoadHandler {
 
     /** 绑定该维度的生成器（结构/特性规则随快照生效），随后套用 {@code [biome:...]} 群系源规则。 */
     private static void bindDimension(ServerLevel sl, ChunkGenerator generator) {
+        if (PatternData.hasFormulaFor(sl.dimension()) && PatternData.overlayFor(sl.dimension())
+                && !(generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator)) {
+            // [terrain:vanilla] 需要原版噪声地形（超平坦/server_mode 世界没有）：
+            // 该维度保持原版、不接管公式（第九章 §9.1）。
+            if (OVERLAY_REJECTED.add(ResourceIds.keyIdString(sl.dimension()))) {
+                LOGGER.error("ohmyworld: [terrain:vanilla] overlay mode needs a noise generator, but {} uses {};"
+                        + " formulas for this dimension are disabled (use a normal world preset)",
+                        ResourceIds.keyIdString(sl.dimension()), generator.getClass().getSimpleName());
+            }
+            PatternData.clearGenerator(generator);
+            return;
+        }
         PatternData.bindGenerator(sl.dimension(), generator);
         BiomeControl.apply(sl, generator);
         // 公式用到 climate() 时，登记该维度的原版气候视图（构建失败 → 视图为 null，climate() 返回 0）
@@ -124,6 +136,10 @@ public final class WorldLoadHandler {
             PatternData.bindVanillaView(generator, BiomeControl.vanillaViewFor(sl));
         }
     }
+
+    /** 已报告过的“[terrain:vanilla] 需要噪声生成器”维度（避免每次加载刷屏）。 */
+    private static final java.util.Set<String> OVERLAY_REJECTED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 出生区块（原版出生点搜索的起点；取法与各版本 setInitialSpawn 一致）。 */
     private static ChunkPos spawnAnchorChunk(ServerLevel level) {

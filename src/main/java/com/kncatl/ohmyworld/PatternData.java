@@ -88,7 +88,7 @@ public class PatternData {
                                   boolean featuresOff, List<BiomeLayerDef> biomeLayers,
                                   List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla,
-                                  boolean usesVanillaData) {}
+                                  boolean usesVanillaData, boolean overlay) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -113,7 +113,7 @@ public class PatternData {
                         parsed.featuresOff(), List.copyOf(parsed.biomeLayers()),
                         List.copyOf(parsed.surfaceLayers()), parsed.biomeFallback(),
                         parsed.carvers() == DimensionRules.CarversMode.VANILLA,
-                        FormulaParser.usesVanillaData(parsed));
+                        FormulaParser.usesVanillaData(parsed), parsed.overlay());
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -130,6 +130,11 @@ public class PatternData {
     public static boolean hasFormulaFor(ResourceKey<Level> dimension) {
         if (currentRawInput == null) return Level.OVERWORLD.equals(dimension);
         return DIMENSION_PATTERNS.containsKey(dimension);
+    }
+
+    /** 该维度是否处于 [terrain:vanilla] 叠加模式（绑定期用来校验生成器类型）。 */
+    public static boolean overlayFor(ResourceKey<Level> dimension) {
+        return patternFor(dimension).overlay();
     }
 
     /** 是否显式设置过公式（false = 编辑器显示默认公式、世界未编辑）。 */
@@ -156,7 +161,7 @@ public class PatternData {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
-                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false);
+                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false);
             }
             return defaultSnapshot;
         }

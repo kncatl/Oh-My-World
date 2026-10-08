@@ -1002,4 +1002,46 @@ class FormulaParserTest {
                         vanillaFlag.dimensions().get("overworld").biomeLayers()),
                 "vanilla 群系值必须被识别");
     }
+
+    /** 1.3.2 M3.5：[terrain:vanilla] 叠加模式开关（位置/取值/重复/群系行限制）。 */
+    @Test
+    void overlayDirectiveValidate() {
+        // 合法：维度内容开头；overlay 标志进入解析结果（层用 rand()，测试环境不解析方块字面量）
+        FormulaParser.DimensionParseResult ok = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] y=-64..: rand()}");
+        assertTrue(ok.errors().isEmpty(), ok.errors().toString());
+        assertTrue(ok.dimensions().get("overworld").overlay(),
+                "overlay 标志必须进入 ParsedDimension");
+
+        // 非开头 → 报错
+        FormulaParser.DimensionParseResult notFirst = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome:vanilla] [terrain:vanilla] y=-64..: rand()}");
+        assertTrue(notFirst.errors().stream().anyMatch(e -> e.contains("first directive")),
+                notFirst.errors().toString());
+
+        // 取值只支持 vanilla → 报错
+        FormulaParser.DimensionParseResult badValue = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:stone] y=-64..: rand()}");
+        assertTrue(badValue.errors().stream().anyMatch(e -> e.contains("only [terrain:vanilla]")),
+                badValue.errors().toString());
+
+        // 重复 → 报错
+        FormulaParser.DimensionParseResult dup = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] [terrain:vanilla] y=-64..: rand()}");
+        assertTrue(dup.errors().stream().anyMatch(e -> e.contains("duplicate terrain")),
+                dup.errors().toString());
+
+        // overlay 下 biome 行禁用地形查询（用无方块参数的 terrain(x, z) 触发同一限制）
+        FormulaParser.DimensionParseResult terrainBiome = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[terrain:vanilla] biome: terrain(x, z) > 64 ? minecraft:desert : minecraft:plains;"
+                        + " y=-64..: rand()}");
+        assertTrue(terrainBiome.errors().stream().anyMatch(e -> e.contains("overlay mode")),
+                terrainBiome.errors().toString());
+
+        // 非 overlay：同一 biome 行合法（现状不变）
+        FormulaParser.DimensionParseResult flatBiome = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: terrain(x, z) > 64 ? minecraft:desert : minecraft:plains;"
+                        + " y=-64..: rand()}");
+        assertTrue(flatBiome.errors().isEmpty(), flatBiome.errors().toString());
+    }
 }

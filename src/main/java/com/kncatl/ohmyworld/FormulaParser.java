@@ -44,7 +44,7 @@ public class FormulaParser {
                                   DimensionRules.BiomeRule biome, boolean featuresOff,
                                   List<BiomeLayerDef> biomeLayers, List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback,
-                                  DimensionRules.CarversMode carvers) {}
+                                  DimensionRules.CarversMode carvers, boolean overlay) {}
 
     /**
      * 按维度的解析结果：{@code dimensions} 键为规范维度名、值为该维度的
@@ -131,7 +131,7 @@ public class FormulaParser {
                 dimensions.put(DIM_OVERWORLD, new ParsedDimension(result.layers(),
                         DimensionRules.StructureRule.ALL, null, false, result.biomeLayers(),
                         result.surfaceLayers(), DimensionRules.BiomeFallback.NONE,
-                        DimensionRules.CarversMode.NONE));
+                        DimensionRules.CarversMode.NONE, false));
             }
         }
         return new DimensionParseResult(Map.copyOf(dimensions), List.copyOf(errors), false);
@@ -228,7 +228,10 @@ public class FormulaParser {
         boolean biomeFallbackSeen = false;
         boolean carversSeen = false;
         boolean featuresSeen = false;
+        boolean terrainSeen = false;
+        boolean overlay = false;
         int pos = 0;
+        boolean firstDirective = true;
         while (true) {
             while (pos < content.length() && Character.isWhitespace(content.charAt(pos))) pos++;
             if (pos >= content.length() || content.charAt(pos) != '[') break;
@@ -239,7 +242,24 @@ public class FormulaParser {
             }
             String directive = content.substring(pos + 1, close).trim();
             pos = close + 1;
-            if (directive.startsWith("structure:")) {
+            if (directive.startsWith("terrain:")) {
+                if (terrainSeen) {
+                    errors.add(name + ": duplicate terrain directive");
+                    return;
+                }
+                if (!firstDirective) {
+                    errors.add(name + ": [terrain:vanilla] must be the first directive"
+                            + " (the mode applies to the whole dimension)");
+                    return;
+                }
+                String value = directive.substring("terrain:".length()).trim();
+                if (!value.equals("vanilla")) {
+                    errors.add(name + ": only [terrain:vanilla] is supported, got [" + truncate(directive) + "]");
+                    return;
+                }
+                terrainSeen = true;
+                overlay = true;
+            } else if (directive.startsWith("structure:")) {
                 if (structureSeen) {
                     errors.add(name + ": duplicate structure directive");
                     return;
@@ -283,9 +303,10 @@ public class FormulaParser {
                 featuresOff = off;
             } else {
                 errors.add(name + ": unknown directive [" + truncate(directive)
-                        + "] (available: structure, biome, biome-fallback, carvers, features)");
+                        + "] (available: terrain, structure, biome, biome-fallback, carvers, features)");
                 return;
             }
+            firstDirective = false;
         }
 
         String layerText = content.substring(pos).trim();
@@ -293,7 +314,7 @@ public class FormulaParser {
             errors.add(name + ": dimension section is empty");
             return;
         }
-        ParseResult result = parseLayers(layerText);
+        ParseResult result = parseLayers(layerText, overlay);
         for (String error : result.errors()) errors.add(name + ": " + error);
         if (!result.errors().isEmpty()) return;
 
@@ -321,7 +342,7 @@ public class FormulaParser {
         }
         if (!result.layers().isEmpty()) {
             dimensions.put(name, new ParsedDimension(result.layers(), structure, biome, featuresOff,
-                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers));
+                    result.biomeLayers(), result.surfaceLayers(), biomeFallback, carvers, overlay));
         }
     }
 
@@ -466,6 +487,10 @@ public class FormulaParser {
 
     /** 旧入口的层解析主体（含 smartSplit 分段、共享 let 收集与逐层校验）。 */
     private static ParseResult parseLayers(String cleaned) {
+        return parseLayers(cleaned, false);
+    }
+
+    private static ParseResult parseLayers(String cleaned, boolean overlay) {
         List<Object> layers = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         List<BiomeLayerDef> biomeLayers = new ArrayList<>();
@@ -521,7 +546,7 @@ public class FormulaParser {
                     continue;
                 }
                 if (isBiomeLine(line)) {
-                    parseBiomeLayer(line, lineIdx, shared, macros, biomeLayers, errors);
+                    parseBiomeLayer(line, lineIdx, shared, macros, overlay, biomeLayers, errors);
                     continue;
                 }
                 int colonIdx = findColon(line);
@@ -865,7 +890,7 @@ public class FormulaParser {
 
     /** 解析一行群系层：{@code biome: 表达式}（整维简写）或 {@code biome y=a..b: 表达式}。 */
     private static void parseBiomeLayer(String line, int lineIdx, List<ExprNode.LetBinding> shared,
-                                        Map<String, ParametricLet> macros,
+                                        Map<String, ParametricLet> macros, boolean overlay,
                                         List<BiomeLayerDef> biomeLayers, List<String> errors) {
         try {
             String rest = line.substring("biome".length()).trim();
@@ -905,6 +930,13 @@ public class FormulaParser {
 
             ExprNode expr = wrapShared(shared,
                     expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
+            if (overlay && usesTerrainQuery(expr)) {
+                // 叠加模式下群系填充先于噪声地形：没有"公式地形"可读（第九章 §9.2）
+                errors.add(biomeError(lineIdx,
+                        "terrain queries (terrain/surfis/blockis) cannot be used in biome lines"
+                                + " in [terrain:vanilla] overlay mode", line));
+                return;
+            }
             // biome 行的 vanilla 群系值通过校验变量表注入（只在 biome 行合法；
             // 编译器统一把标识符 vanilla 编译成哨兵节点，位置靠这里把关）。
             Map<String, ExprEvaluator.ValueType> biomeVars = new HashMap<>();
