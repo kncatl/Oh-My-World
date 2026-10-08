@@ -77,6 +77,8 @@ class ExprCompilerTest {
             "{ let (u, v) = warp2(x, z, 200, 30, 6); cache2d(u + v, 8) }",
             // 1.3.1：rivernet（编译路径带节点缓存；未编译路径直通）
             "{ let (d, w, s, o) = rivernet(192, 7); d * 0.001 + w + s * 0.01 + o * 0.0001 }",
+            // 1.3.2：共享气候（无视图 → 0；编译/未编译一致）
+            "{ let t = climate(temperature, x, z) * 2 + climate(weirdness, x, 100, z); t }",
     };
 
     private static String describe(Object value) {
@@ -92,7 +94,9 @@ class ExprCompilerTest {
         // 非零种子，确保 seed/seedhash 走的是真实路径而不是恒 0。
         ExprEvaluator.setWorldSeed(-7138994955873085613L);
         for (String source : EXPRESSIONS) {
-            ExprNode raw = new ExprParser(ExprLexer.tokenize(source)).parse();
+            // 与生产一致：先做编译期重写（循环/位移宏与 climate 字段名），再比较编译前后
+            ExprNode raw = com.kncatl.ohmyworld.FormulaParser.expandLoops(
+                    new ExprParser(ExprLexer.tokenize(source)).parse());
             ExprNode compiled = ExprCompiler.compile(raw);
 
             for (int x = -3; x <= 3; x++) {

@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -172,6 +172,7 @@ case "$CHECK_MODE" in
     m1)              SMOKE_CONFIG_MODE="--m1-functions" ;;
     surface)         SMOKE_CONFIG_MODE="--surface" ;;
     rivernet)        SMOKE_CONFIG_MODE="--rivernet" ;;
+    climate)         SMOKE_CONFIG_MODE="--climate" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
 # 先清世界再写配置：marker 模式会在配置阶段预置 world/ohmyworld_marker.txt
@@ -212,6 +213,10 @@ console_commands() {
     elif [[ "$CHECK_MODE" == "rivernet" ]]; then
         # 河网冒烟：26.x 启动只完整生成出生区块半径 2；forceload 256 区块覆盖原点
         # 西南方向的河段（径向坡保证原点附近必有河），再收 75 秒生成
+        echo "execute in minecraft:overworld run forceload add -192 -192 63 63"
+        sleep 75
+    elif [[ "$CHECK_MODE" == "climate" ]]; then
+        # 共享气候冒烟：forceload 256 区块扩大温度分带采样范围（同 rivernet 的理由）
         echo "execute in minecraft:overworld run forceload add -192 -192 63 63"
         sleep 75
     elif [[ "$CHECK_MODE" == "spawn" ]]; then
@@ -348,6 +353,11 @@ case "$CHECK_MODE" in
         python3 "$TOOLS/smoke-check-world.py" \
             --expect overworld minecraft:sand,minecraft:water \
             "$SRV" || fail "河网冒烟核验失败：河道沙/水体缺失"
+        ;;
+    climate)
+        python3 "$TOOLS/smoke-check-world.py" \
+            --expect overworld minecraft:sand,minecraft:polished_blackstone_bricks \
+            "$SRV" || fail "共享气候冒烟核验失败：温度分带特征方块缺失"
         ;;
     open-ranges|water|river|m1)
         python3 "$TOOLS/smoke-check-world.py" --require-all "$SRV" \

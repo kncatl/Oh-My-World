@@ -25,6 +25,9 @@ public class FormulaLayerDef {
     public int yStart() { return yStart; }
     public int yEnd() { return yEnd; }
 
+    /** 已编译的层表达式（供遍历/统计使用）。 */
+    public ExprNode expression() { return expression; }
+
     /**
      * 运行期解析后的层起点：{@code y=..b}（开区间）取维度最低 y，
      * 此时 {@code ly = y - 维度最低 y}；显式起点则原样返回。

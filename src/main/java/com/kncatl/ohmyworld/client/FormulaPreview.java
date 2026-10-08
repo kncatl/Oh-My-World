@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import com.kncatl.ohmyworld.DimensionRules;
 import com.kncatl.ohmyworld.FormulaParser;
 import com.kncatl.ohmyworld.PatternData;
+import com.kncatl.ohmyworld.expr.ExprEvaluator;
 
 /**
  * 公式俯视预览：对每列取顶部非空气方块、按地图色着色。
@@ -36,14 +37,15 @@ public final class FormulaPreview {
 
     /** 计算指定维度、指定视野的预览；该维度不在公式里时返回 null。 */
     public static Result compute(FormulaParser.DimensionParseResult parsed, String dimension,
-                                 int centerX, int centerZ, int spacing) {
+                                 int centerX, int centerZ, int spacing,
+                                 ExprEvaluator.ClimateView climate) {
         if (dimension == null) return null;
         FormulaParser.ParsedDimension parsedDim = parsed.dimensions().get(dimension);
         if (parsedDim == null || parsedDim.layers().isEmpty()) return null;
 
         PatternData.PatternSnapshot snapshot = new PatternData.PatternSnapshot(
                 List.copyOf(parsedDim.layers()), "", 0L, DimensionRules.StructureRule.ALL, null, false,
-                List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false);
+                List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false);
         // 与各维度实际高度保持一致（超世界 -64 起、384 高；下界/末地 0 起、256 高）
         int minY = FormulaParser.DIM_OVERWORLD.equals(dimension) ? -64 : 0;
         int total = FormulaParser.DIM_OVERWORLD.equals(dimension) ? 384 : 256;
@@ -51,16 +53,22 @@ public final class FormulaPreview {
         int cells = cellsFor(step);
         int origin = -cells / 2;
 
-        int[] colors = new int[cells * cells];
-        for (int dz = 0; dz < cells; dz++) {
-            for (int dx = 0; dx < cells; dx++) {
-                int worldX = centerX + (origin + dx) * step;
-                int worldZ = centerZ + (origin + dz) * step;
-                BlockState[] column = PatternData.buildColumn(snapshot, worldX, worldZ, minY, total);
-                colors[dz * cells + dx] = topColor(column);
+        // 预览线程上的气候视图（创建界面已加载的世界生成注册表 + 种子框；可为 null）
+        ExprEvaluator.setClimateView(climate);
+        try {
+            int[] colors = new int[cells * cells];
+            for (int dz = 0; dz < cells; dz++) {
+                for (int dx = 0; dx < cells; dx++) {
+                    int worldX = centerX + (origin + dx) * step;
+                    int worldZ = centerZ + (origin + dz) * step;
+                    BlockState[] column = PatternData.buildColumn(snapshot, worldX, worldZ, minY, total);
+                    colors[dz * cells + dx] = topColor(column);
+                }
             }
+            return new Result(colors, dimension, cells);
+        } finally {
+            ExprEvaluator.setClimateView(null);
         }
-        return new Result(colors, dimension, cells);
     }
 
     private static int topColor(BlockState[] column) {

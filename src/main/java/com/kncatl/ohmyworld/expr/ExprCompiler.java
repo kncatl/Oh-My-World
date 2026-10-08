@@ -87,7 +87,17 @@ public final class ExprCompiler {
                 List<ExprNode> args = new ArrayList<>(f.args().size());
                 // rand/randexcept 经 pickIndex 隐式取用 ly，即使参数里不含 ly
                 boolean dependent = f.name().equals("rand") || f.name().equals("randexcept");
-                for (ExprNode arg : f.args()) {
+                for (int i = 0; i < f.args().size(); i++) {
+                    ExprNode arg = f.args().get(i);
+                    // climate(字段名, …)：字段名在编译期解析为序号（兜底：解析器重写之外的直接编译）
+                    if (f.name().equals("climate") && i == 0 && arg instanceof ExprNode.VariableNode v
+                            && !isBound(v.name(), scopes)) {
+                        Integer code = ExprEvaluator.climateFieldCode(v.name());
+                        if (code != null) {
+                            args.add(new ExprNode.NumberNode(code));
+                            continue;
+                        }
+                    }
                     Compiled compiled = compileNode(arg, scopes);
                     args.add(compiled.node());
                     dependent |= compiled.lyDependent();
@@ -414,6 +424,14 @@ public final class ExprCompiler {
             case ExprNode.BlockExprNode be -> true;
             case ExprNode.CompiledBlockNode cb -> true;
         };
+    }
+
+    /** 名字是否在任一作用域内已绑定（编译期辅助：climate 字段名不重写已绑定的变量）。 */
+    private static boolean isBound(String name, ArrayDeque<Map<String, Integer>> scopes) {
+        for (Map<String, Integer> scope : scopes) {
+            if (scope.containsKey(name)) return true;
+        }
+        return false;
     }
 
     private ExprNode resolve(String name, ArrayDeque<Map<String, Integer>> scopes) {

@@ -25,6 +25,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.biome.FeatureSorter;
 import net.minecraft.world.level.biome.FixedBiomeSource;
 import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
@@ -321,11 +322,15 @@ public final class BiomeControl {
 
     /** 该维度对应的原版噪声设置（Overworld/Nether/End；超平坦雕刻代理等共用）。 */
     static NoiseGeneratorSettings vanillaNoiseSettings(ServerLevel level) {
-        var key = ResourceIds.sameKey(level.dimension(), Level.NETHER) ? NoiseGeneratorSettings.NETHER
-                : ResourceIds.sameKey(level.dimension(), Level.END) ? NoiseGeneratorSettings.END
-                : NoiseGeneratorSettings.OVERWORLD;
         return level.registryAccess().lookupOrThrow(Registries.NOISE_SETTINGS)
-                .getOrThrow(key).value();
+                .getOrThrow(noiseSettingsKey(level.dimension())).value();
+    }
+
+    /** 维度对应的原版噪声设置键。 */
+    private static ResourceKey<NoiseGeneratorSettings> noiseSettingsKey(ResourceKey<Level> dimension) {
+        return ResourceIds.sameKey(dimension, Level.NETHER) ? NoiseGeneratorSettings.NETHER
+                : ResourceIds.sameKey(dimension, Level.END) ? NoiseGeneratorSettings.END
+                : NoiseGeneratorSettings.OVERWORLD;
     }
 
     /** 在给定噪声设置上构建 RandomState（版本差异收口在此）。 */
@@ -336,6 +341,117 @@ public final class BiomeControl {
         //?} else {
         return RandomState.create(settings, noiseGetter, level.getSeed());
         //?}
+    }
+
+    /**
+     * 气候视图（M3，1.3.2）：把 {@code climate()} 的字段与坐标映射到该维度的原版气候
+     * 采样器；26.3 起采样器由 {@code createClimateSampler} 构建（无缓存上下文足够，
+     * 4 格量化的每线程缓存由 {@link CachedClimateView} 负责）。
+     * 构建失败返回 null（调用方置空视图，climate() 返回 0）。
+     */
+    static ExprEvaluator.ClimateView climateViewFor(ServerLevel level) {
+        // 噪声维度优先用生成器自带的设置（自定义维度也忠实）；其余（超平坦等）按维度键回退
+        ChunkGenerator generator = level.getChunkSource().getGenerator();
+        NoiseGeneratorSettings settings = generator instanceof NoiseBasedChunkGenerator noise
+                ? noise.generatorSettings().value()
+                : noiseSettings(level.registryAccess(), level.dimension());
+        return climateView(level.registryAccess(), settings, level.getSeed(),
+                ResourceIds.keyIdString(level.dimension()));
+    }
+
+    /**
+     * 由注册表 + 维度 + 种子构建气候视图（编辑器预览等无 ServerLevel 的场景）。
+     * 预览路径用创建界面已加载的数据包注册表（{@code worldgenLoadContext()}）与种子框的值。
+     */
+    public static ExprEvaluator.ClimateView climateView(HolderLookup.Provider registries,
+                                                        ResourceKey<Level> dimension, long seed) {
+        return climateView(registries, noiseSettings(registries, dimension), seed,
+                ResourceIds.keyIdString(dimension));
+    }
+
+    /** 维度 → 该维度的原版噪声设置（注册表缺项时抛错，由调用方兜底）。 */
+    private static NoiseGeneratorSettings noiseSettings(HolderLookup.Provider registries,
+                                                        ResourceKey<Level> dimension) {
+        return registries.lookupOrThrow(Registries.NOISE_SETTINGS)
+                .getOrThrow(noiseSettingsKey(dimension)).value();
+    }
+
+    /** 由注册表 + 具体噪声设置 + 种子构建（服务端生成与客户端预览共用）。 */
+    private static ExprEvaluator.ClimateView climateView(HolderLookup.Provider registries,
+                                                         NoiseGeneratorSettings settings, long seed,
+                                                         String label) {
+        try {
+            var noiseGetter = registries.lookupOrThrow(Registries.NOISE);
+            //? >=26.3 {
+            RandomState state = RandomState.create(noiseGetter, seed, settings);
+            Climate.Sampler sampler = state.createClimateSampler(
+                    net.minecraft.world.level.levelgen.densityfunction.SamplerContext.EMPTY_UNCACHED);
+            //?} else {
+            RandomState state = RandomState.create(settings, noiseGetter, seed);
+            Climate.Sampler sampler = state.sampler();
+            //?}
+            return new CachedClimateView(sampler);
+        } catch (Exception e) {
+            LOGGER.error("ohmyworld: failed to build climate view for {}: {}",
+                    label, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 气候视图实现：按原版 4 格量化坐标做每线程直接映射缓存。
+     * 原版气候本身就是 4 格分辨率（每次采样要算 6 条路由密度函数），逐方块直调
+     * 会让区块生成慢几十倍（实测可拖过看门狗 60 秒）；缓存后同格结果复用，
+     * 与直调采样器语义完全一致（同样的量化坐标 → 同样的值）。
+     */
+    private static final class CachedClimateView implements ExprEvaluator.ClimateView {
+        /** 2048 项：单个区块的量化工作集约 4×4 柱面 × 96 层 ≈ 1536 项。 */
+        private static final int CACHE_SIZE = 2048;
+        private final Climate.Sampler sampler;
+        private final ThreadLocal<Cache> cache = ThreadLocal.withInitial(Cache::new);
+
+        CachedClimateView(Climate.Sampler sampler) {
+            this.sampler = sampler;
+        }
+
+        @Override
+        public double field(int code, int x, int y, int z) {
+            int qx = x >> 2, qy = y >> 2, qz = z >> 2;
+            Cache c = this.cache.get();
+            int slot = slot(qx, qy, qz);
+            if (c.qx[slot] != qx || c.qy[slot] != qy || c.qz[slot] != qz) {
+                Climate.TargetPoint point = this.sampler.sample(qx, qy, qz);
+                c.qx[slot] = qx;
+                c.qy[slot] = qy;
+                c.qz[slot] = qz;
+                c.values[slot * 6] = point.temperature();
+                c.values[slot * 6 + 1] = point.humidity();
+                c.values[slot * 6 + 2] = point.continentalness();
+                c.values[slot * 6 + 3] = point.erosion();
+                c.values[slot * 6 + 4] = point.weirdness();
+                c.values[slot * 6 + 5] = point.depth();
+            }
+            return c.values[slot * 6 + code] / 10000.0;
+        }
+
+        private static int slot(int qx, int qy, int qz) {
+            int h = qx * 0x9E3779B1 ^ qy * 0x85EBCA77 ^ qz * 0xC2B2AE3D;
+            h ^= h >>> 15;
+            return h & (CACHE_SIZE - 1);
+        }
+
+        private static final class Cache {
+            final int[] qx = new int[CACHE_SIZE];
+            final int[] qy = new int[CACHE_SIZE];
+            final int[] qz = new int[CACHE_SIZE];
+            final long[] values = new long[CACHE_SIZE * 6];
+
+            Cache() {
+                // 哨兵：qy 用 Integer.MIN_VALUE（(x,y,z) 的 qy 永不等于它），
+                // 避免空槽（全 0）在原点附近误命中。
+                java.util.Arrays.fill(this.qy, Integer.MIN_VALUE);
+            }
+        }
     }
 
     /** "命名空间:名称"（缺省命名空间=minecraft）→ 群系键。 */

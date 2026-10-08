@@ -72,6 +72,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                             + "{the_nether=y=0..5: minecraft:netherrack;y=6..120: seedhash(x, z, 1) < 0.5 ? minecraft:basalt : minecraft:blackstone}"));
 
     private final CreateWorldScreen parent;
+    /** 创建界面上下文（世界生成注册表 + 种子；构造后可空，用于预览的气候视图）。 */
+    private final WorldCreationContext creationContext;
+    private long previewClimateSeed = Long.MIN_VALUE;
+    private final java.util.Map<String, ExprEvaluator.ClimateView> previewClimateViews = new java.util.HashMap<>();
     private MultiLineBox.Handle formulaBox;
     private EditBox nameInput;
     private Button saveBtn;
@@ -143,6 +147,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     public CustomFlatScreen(CreateWorldScreen parent, WorldCreationContext context) {
         super(TITLE);
         this.parent = parent;
+        this.creationContext = context;
         // 预览种子：把创建界面的种子交给求值器——预览里的噪声/seedhash 与
         // 最终创建的世界一致（空种子 = 界面当前的随机种子，创建时用的就是它；
         // 改过种子后重新打开编辑器即可同步）。进入世界后 WorldLoadHandler
@@ -150,6 +155,25 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         if (context != null) {
             ExprEvaluator.setWorldSeed(context.options().seed());
         }
+    }
+
+    /** 预览用气候视图：创建界面的世界生成注册表 + 种子框的值构建（懒加载、按种子缓存）。 */
+    private ExprEvaluator.ClimateView previewClimateView(String dimension) {
+        if (this.creationContext == null) return null;
+        long seed = this.creationContext.options().seed();
+        if (seed != this.previewClimateSeed) {
+            this.previewClimateViews.clear();
+            this.previewClimateSeed = seed;
+        }
+        return this.previewClimateViews.computeIfAbsent(dimension, dim ->
+                com.kncatl.ohmyworld.BiomeControl.climateView(
+                        this.creationContext.worldgenLoadContext(), previewDimensionKey(dim), seed));
+    }
+
+    private static net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> previewDimensionKey(String dimension) {
+        return FormulaParser.DIM_NETHER.equals(dimension) ? net.minecraft.world.level.Level.NETHER
+                : FormulaParser.DIM_END.equals(dimension) ? net.minecraft.world.level.Level.END
+                : net.minecraft.world.level.Level.OVERWORLD;
     }
 
     @Override
@@ -963,10 +987,11 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         if (key.equals(this.previewComputedFor)) return;
         FormulaParser.DimensionParseResult parsed = this.currentResult;
         this.previewRunning = true;
+        ExprEvaluator.ClimateView climate = this.previewClimateView(dimension);
         Thread worker = new Thread(() -> {
             FormulaPreview.Result result = null;
             try {
-                result = FormulaPreview.compute(parsed, dimension, centerX, centerZ, spacing);
+                result = FormulaPreview.compute(parsed, dimension, centerX, centerZ, spacing, climate);
             } catch (Exception ignored) {}
             FormulaPreview.Result computed = result;
             Minecraft.getInstance().execute(() -> {

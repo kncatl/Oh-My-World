@@ -60,6 +60,40 @@ public class ExprEvaluator {
     }
 
     /**
+     * 共享气候视图（M3，1.3.2）：由服务端在生成/群系填充期间注入，把 {@code climate()}
+     * 的字段与坐标映射到原版气候采样器；编辑器预览会按创建界面的种子本地构建，
+     * 没有注册表上下文的环境（单元测试等）返回 0。
+     */
+    public interface ClimateView {
+        /** 字段码：0 temperature、1 humidity、2 continentalness、3 erosion、4 weirdness、5 depth。 */
+        double field(int code, int x, int y, int z);
+    }
+
+    private static final ThreadLocal<ClimateView> CLIMATE_VIEW = new ThreadLocal<>();
+
+    /** 设置/清除气候视图（null = 清除）；调用方自行保存旧值以便嵌套恢复。 */
+    public static void setClimateView(ClimateView view) {
+        if (view == null) CLIMATE_VIEW.remove();
+        else CLIMATE_VIEW.set(view);
+    }
+
+    /** 当前气候视图；可能为 null。 */
+    public static ClimateView climateView() { return CLIMATE_VIEW.get(); }
+
+    /** climate() 字段名 → 序号（解析器重写与编译器兜底共用；未知返回 null）。 */
+    public static Integer climateFieldCode(String name) {
+        return switch (name) {
+            case "temperature" -> 0;
+            case "humidity" -> 1;
+            case "continentalness" -> 2;
+            case "erosion" -> 3;
+            case "weirdness" -> 4;
+            case "depth" -> 5;
+            default -> null;
+        };
+    }
+
+    /**
      * 表面通道（1.3.1）：{@code surface} 行里的 {@code keep} 特殊值——
      * 表示保持当前方块不变。表达式返回它时由表面通道跳过该方块。
      */
@@ -167,7 +201,9 @@ public class ExprEvaluator {
             // 1.3.1：网格采样 + 插值（编译期转换为带缓存的节点）
             Map.entry("cache2d", -1), Map.entry("cache3d", -1),
             // 1.3.1：河网（多返回 4：距离 / 半宽 / 水面 / 流量）
-            Map.entry("rivernet", -1));
+            Map.entry("rivernet", -1),
+            // 1.3.2：共享气候（M3）
+            Map.entry("climate", -1), Map.entry("peaks", 1));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -215,6 +251,7 @@ public class ExprEvaluator {
     public static final int FN_WARP2 = 140, FN_WARP3 = 141, FN_NOISE2G = 142, FN_WORLEY2C = 143;
     public static final int FN_RIVERNET = 144;
     public static final int FN_SLOPE = 145, FN_GRAD = 146, FN_CURV = 147, FN_ISODIST = 148;
+    public static final int FN_CLIMATE = 149, FN_PEAKS = 150;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -286,6 +323,8 @@ public class ExprEvaluator {
             case "slope" -> FN_SLOPE;
             case "curv" -> FN_CURV;
             case "isodist" -> FN_ISODIST;
+            case "climate" -> FN_CLIMATE;
+            case "peaks" -> FN_PEAKS;
             default -> FN_UNKNOWN;
         };
     }
@@ -338,6 +377,12 @@ public class ExprEvaluator {
         if (name.equals("rivernet")) {
             if (argCount != 2 && argCount != 3) {
                 return "Function 'rivernet' expects 2 or 3 arguments (cs, salt) or (coarse, cs, salt), got " + argCount;
+            }
+            return null;
+        }
+        if (name.equals("climate")) {
+            if (argCount != 3 && argCount != 4) {
+                return "Function 'climate' expects 3 or 4 arguments (field, x, z) or (field, x, y, z), got " + argCount;
             }
             return null;
         }
@@ -783,6 +828,8 @@ public class ExprEvaluator {
             case "slope" -> slopeOf(args, x, z, ly, context);
             case "curv" -> curvOf(args, x, z, ly, context);
             case "isodist" -> isodistOf(args, x, z, ly, context);
+            case "climate" -> climateOf(args, x, z, ly, context);
+            case "peaks" -> peaks(evalNumber(args.get(0), x, z, ly, context));
             case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
             case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
@@ -916,6 +963,8 @@ public class ExprEvaluator {
             case FN_SLOPE -> slopeOf(args, x, z, ly, context);
             case FN_CURV -> curvOf(args, x, z, ly, context);
             case FN_ISODIST -> isodistOf(args, x, z, ly, context);
+            case FN_CLIMATE -> climateOf(args, x, z, ly, context);
+            case FN_PEAKS -> peaks(evalNumber(args.get(0), x, z, ly, context));
             // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
             case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
@@ -1244,6 +1293,34 @@ public class ExprEvaluator {
         double[] g = gradient(e, x, z, ly, context);
         double magnitude = Math.sqrt(g[0] * g[0] + g[1] * g[1]);
         return magnitude < 1e-9 ? 1e9 : Math.abs(v) / magnitude;
+    }
+
+    // ---------------------------------------------------------- 共享气候（M3，1.3.2）
+
+    /**
+     * {@code climate(字段, x, z)} / {@code climate(字段, x, y, z)}：原版气候采样值
+     * （TargetPoint 的 ×10000 量化 long ÷ 10000 → 约 [-1,1]）。字段码由编译期
+     * 重写注入（0..5，见 {@link ClimateView}）。2D 形式在 y=63 采样（海平面参考）。
+     * 没有气候视图（未注入 / 无注册表上下文）时返回 0。算法冻结。
+     */
+    private static double climateOf(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        ClimateView view = CLIMATE_VIEW.get();
+        if (view == null) return 0;
+        int code = (int) evalNumber(args.get(0), x, z, ly, context);
+        int argX = (int) Math.floor(evalNumber(args.get(1), x, z, ly, context));
+        if (args.size() == 3) {
+            int argZ = (int) Math.floor(evalNumber(args.get(2), x, z, ly, context));
+            return view.field(code, argX, 63, argZ);
+        }
+        int argY = (int) Math.floor(evalNumber(args.get(2), x, z, ly, context));
+        int argZ = (int) Math.floor(evalNumber(args.get(3), x, z, ly, context));
+        return view.field(code, argX, argY, argZ);
+    }
+
+    /** {@code peaks(w)}：原版峰谷折叠 {@code -3·(|(|w| - 2/3)| - 1/3)}（冻结）。 */
+    private static double peaks(double w) {
+        double a = Math.abs(w);
+        return -3 * (Math.abs(a - 2.0 / 3.0) - 1.0 / 3.0);
     }
 
     // ---------------------------------------------------------- 网格缓存（1.3.1）

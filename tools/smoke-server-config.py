@@ -80,6 +80,10 @@
 --rivernet（1.3.1）：河网冒烟——rivernet(192, 7) 刻河道（河床沙、水体），
   基础地形 fbm；配合显式 --expect（沙与水都要出现，证明河网真的接入生成）。
 
+--climate（1.3.2）：共享气候冒烟——用 climate(temperature, x, z) > climate(temperature, z, x)
+  的反对称比较铺沙 / 黑石砖；forceload 扩大采样范围；两种特征方块都要出现（--expect），
+  证明气候视图构建、量化取值与公式取数整条链路真的跑过。
+
 输出最后一行：SMOKE_FORMULA=1 表示当前配置就是我们写入的冒烟公式（应做特征方块核验）；
 SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
@@ -356,6 +360,18 @@ RIVERNET_FORMULA = (
     " : (d < w && y <= s ? minecraft:water : minecraft:air)}"
 )
 
+# 1.3.2 共享气候冒烟（--climate；配合显式 --expect 的两种特征方块）：
+# 反对称比较 climate(temperature, x, z) > climate(temperature, z, x)：
+# 真实视图下差分反对称、两侧符号都会出现（两种特征方块齐全）；
+# 无视图时两侧同为 0 → 全为黑石砖，核验直接失败（防止假阳性）。
+# forceload 扩大采样范围（启动只完整生成出生区块半径 2）。
+CLIMATE_FORMULA = (
+    "{overworld="
+    "let h = 60 + fbm2(x, z, 600, 4, 1) * 12;"
+    "y=-64..: y <= h ? (climate(temperature, x, z) > climate(temperature, z, x)"
+    " ? minecraft:sand : minecraft:polished_blackstone_bricks) : minecraft:air}"
+)
+
 
 def free_port():
     """向系统要一个当前空闲的端口（比按名字哈希取模可靠：多组验证并行时不会撞端口）。"""
@@ -395,6 +411,7 @@ def main():
     m1_functions = "--m1-functions" in sys.argv
     surface = "--surface" in sys.argv
     rivernet = "--rivernet" in sys.argv
+    climate = "--climate" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -426,7 +443,7 @@ def main():
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
             or biome_terrain or biome_biomeis or natural or features_all or features_none \
-            or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet:
+            or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet or climate:
         # 群系/特性/超平坦雕刻冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -489,6 +506,8 @@ def main():
         formula = SURFACE_FORMULA
     elif rivernet:
         formula = RIVERNET_FORMULA
+    elif climate:
+        formula = CLIMATE_FORMULA
     else:
         formula = FORMULA
 
@@ -499,7 +518,7 @@ def main():
                      or biome_desert or biome_vanilla or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off
-                     or features_all or features_none or m1_functions or surface or rivernet
+                     or features_all or features_none or m1_functions or surface or rivernet or climate
                      or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；

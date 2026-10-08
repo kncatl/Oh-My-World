@@ -452,6 +452,19 @@
         y=..: y <= bed ? (d < w ? minecraft:sand : minecraft:stone)
              : (d < w && y <= s ? minecraft:water : minecraft:air)
 
+   ── 共享气候（M3；生成与编辑器预览均可用）──
+   climate(字段, x, z)          原版气候值（约 [-1,1]；2D 形式在 y=63 采样）
+   climate(字段, x, y, z)       任意高度（多支持 depth）
+   peaks(w)                     原版峰谷折叠 -3·(|(|w| - 2/3)| - 1/3)
+
+     ★ 字段：temperature / humidity / continentalness / erosion / weirdness / depth
+       （字段名是关键字，不能写成变量；数值为原版量化值，步进 1e-4，
+       按原版 4 格分辨率采样：同一 4×4×4 格内取值相同）。
+     ★ 取值来自该维度的原版气候采样器（与 F3 的 NoiseRouter 行一致；
+       下界/末地用各自维度设置）；同一套参数同时驱动地形、群系与河流。
+     ★ 编辑器预览按创建界面的种子本地构建气候（与最终世界一致）；
+       没有气候视图的环境返回 0。
+
    ★ 三角函数的参数单位是弧度。如需使用角度，用 torad() 转换：
      例：sin(torad(30)) = 0.5
 

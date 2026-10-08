@@ -119,6 +119,10 @@ public final class WorldLoadHandler {
     private static void bindDimension(ServerLevel sl, ChunkGenerator generator) {
         PatternData.bindGenerator(sl.dimension(), generator);
         BiomeControl.apply(sl, generator);
+        // 公式用到 climate() 时，登记该维度的原版气候视图（构建失败 → 视图为 null，climate() 返回 0）
+        if (PatternData.usesVanillaDataFor(generator)) {
+            PatternData.bindClimate(generator, BiomeControl.climateViewFor(sl));
+        }
     }
 
     /** 出生区块（原版出生点搜索的起点；取法与各版本 setInitialSpawn 一致）。 */

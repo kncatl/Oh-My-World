@@ -165,7 +165,7 @@ public class MixinNoiseBasedChunkGenerator {
         if (snapshot == null || snapshot.layers().isEmpty()) return false;
 
         try {
-            PatternData.fillChunk(chunk, snapshot);
+            PatternData.fillChunk(chunk, snapshot, PatternData.climateFor((ChunkGenerator) (Object) this));
         } catch (Exception e) {
             // 兜底：任何公式求值/填充异常都不应破坏区块生成，
             // 回退到原版生成并停用图案，避免反复报错。

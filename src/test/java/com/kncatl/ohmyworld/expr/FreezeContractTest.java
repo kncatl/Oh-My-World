@@ -96,6 +96,11 @@ class FreezeContractTest {
     }
 
     @Test
+    void sharedClimate() {
+        check("peaks", "peaks(fbm2(x, z, 700, 3, 5))", -3274770649349985912L);
+    }
+
+    @Test
     void fbm2eWithZeroDampingEqualsFbm2() {
         ExprEvaluator.setWorldSeed(777L);
         for (int x = -13; x <= 13; x += 7) {

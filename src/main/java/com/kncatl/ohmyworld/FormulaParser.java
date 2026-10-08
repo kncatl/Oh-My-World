@@ -1009,6 +1009,10 @@ public class FormulaParser {
                     validateCacheCall(f, errors, variables, biomeMode);
                     return ExprEvaluator.ValueType.NUMBER;
                 }
+                if (f.name().equals("climate")) {
+                    validateClimateCall(f, errors, variables, biomeMode);
+                    return ExprEvaluator.ValueType.NUMBER;
+                }
                 boolean terrainQuery = isTerrainQueryFunction(f.name());
                 if (terrainQuery && !biomeMode) {
                     errors.add("Function '" + f.name() + "' can only be used in biome lines");
@@ -1279,6 +1283,63 @@ public class FormulaParser {
         for (ExprNode arg : call.args()) {
             requireNumber(validateNode(arg, errors, variables, biomeMode), "argument of " + call.name(), errors);
         }
+    }
+
+    /** climate() 的专项校验：首参必须是字段名（编译期已重写为序号），其余为数值。 */
+    private static void validateClimateCall(ExprNode.FuncCallNode f, List<String> errors,
+                                            Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+        if (f.args().size() != 3 && f.args().size() != 4) {
+            errors.add("Function 'climate' expects 3 or 4 arguments (field, x, z) or (field, x, y, z), got "
+                    + f.args().size());
+            return;
+        }
+        ExprNode field = f.args().get(0);
+        boolean fieldOk = field instanceof ExprNode.NumberNode n
+                && n.value() == Math.rint(n.value()) && n.value() >= 0 && n.value() <= 5;
+        if (!fieldOk) {
+            errors.add("Function 'climate': the first argument must be a field name "
+                    + "(temperature/humidity/continentalness/erosion/weirdness/depth)");
+        }
+        for (int i = 1; i < f.args().size(); i++) {
+            requireNumber(validateNode(f.args().get(i), errors, variables, biomeMode),
+                    "argument of climate", errors);
+        }
+    }
+
+    /** 需要原版数据的功能（M3；后续 df/noise/vheight 等一并加入）。 */
+    private static final Set<String> VANILLA_DATA_FUNCTIONS = Set.of("climate");
+
+    /** 表达式是否用到需要原版数据的功能（按名字查未编译调用、按编号查编译后调用）。 */
+    private static boolean usesVanillaData(ExprNode node) {
+        return walkFunctions(node, VANILLA_DATA_FUNCTIONS::contains,
+                id -> id == ExprEvaluator.FN_CLIMATE);
+    }
+
+    /** 某维度的解析结果是否用到需要原版数据的功能（方块层 / 循环层 / biome 行 / surface 行）。 */
+    public static boolean usesVanillaData(ParsedDimension dimension) {
+        for (Object layer : dimension.layers()) {
+            if (layer instanceof FormulaLayerDef f && usesVanillaData(f.expression())) return true;
+            if (layer instanceof CyclicLayerDef c) {
+                for (CyclicLayerDef.Entry entry : c.entries()) {
+                    if (usesVanillaData(entry.expression())) return true;
+                }
+            }
+        }
+        for (BiomeLayerDef b : dimension.biomeLayers()) {
+            if (usesVanillaData(b.expression())) return true;
+        }
+        for (SurfaceLayerDef s : dimension.surfaceLayers()) {
+            if (usesVanillaData(s.expression())) return true;
+        }
+        return false;
+    }
+
+    /** biome 行集合是否用到需要原版数据的功能（FormulaBiomeSource 的视图开关）。 */
+    public static boolean usesVanillaDataInBiomeLines(List<BiomeLayerDef> defs) {
+        for (BiomeLayerDef b : defs) {
+            if (usesVanillaData(b.expression())) return true;
+        }
+        return false;
     }
 
     /** rivernet 的专项校验：cs/salt 为字面量、coarse 自包含且不含 ly/y 与视图/随机函数。 */
@@ -1591,7 +1652,73 @@ public class FormulaParser {
      * </ul>
      */
     public static ExprNode expandLoops(ExprNode node) {
-        return expandLoops(node, 1);
+        // 展开循环/位移宏之后，把 climate(字段名, …) 的首参重写为字段序号
+        return rewriteClimateFields(expandLoops(node, 1));
+    }
+
+    /** climate() 的字段名 → 序号（与 {@code ExprEvaluator.ClimateView} 的字段码一致）。 */
+    private static Integer climateFieldCode(String name) {
+        return ExprEvaluator.climateFieldCode(name);
+    }
+
+    /** 把 {@code climate(字段名, …)} 的首参重写为字段序号（考虑 let 遮蔽；不引入新内建）。 */
+    private static ExprNode rewriteClimateFields(ExprNode node) {
+        return rewriteClimateFields(node, new HashSet<>());
+    }
+
+    private static ExprNode rewriteClimateFields(ExprNode node, Set<String> shadowed) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> n;
+            case ExprNode.BlockNode b -> b;
+            case ExprNode.VariableNode v -> v;
+            case ExprNode.BinaryNode b -> new ExprNode.BinaryNode(
+                    rewriteClimateFields(b.left(), shadowed), b.op(),
+                    rewriteClimateFields(b.right(), shadowed));
+            case ExprNode.UnaryNode u -> new ExprNode.UnaryNode(
+                    u.op(), rewriteClimateFields(u.operand(), shadowed));
+            case ExprNode.ConditionalNode c -> new ExprNode.ConditionalNode(
+                    rewriteClimateFields(c.condition(), shadowed),
+                    rewriteClimateFields(c.thenExpr(), shadowed),
+                    rewriteClimateFields(c.elseExpr(), shadowed));
+            case ExprNode.FuncCallNode f -> {
+                List<ExprNode> args = new ArrayList<>(f.args().size());
+                for (int i = 0; i < f.args().size(); i++) {
+                    ExprNode arg = f.args().get(i);
+                    if (f.name().equals("climate") && i == 0
+                            && arg instanceof ExprNode.VariableNode v && !shadowed.contains(v.name())) {
+                        Integer code = climateFieldCode(v.name());
+                        args.add(code == null ? arg : new ExprNode.NumberNode(code));
+                    } else {
+                        args.add(rewriteClimateFields(arg, shadowed));
+                    }
+                }
+                yield new ExprNode.FuncCallNode(f.name(), args);
+            }
+            case ExprNode.TupleCallNode t -> {
+                List<ExprNode> args = new ArrayList<>(t.args().size());
+                for (ExprNode arg : t.args()) args.add(rewriteClimateFields(arg, shadowed));
+                yield new ExprNode.TupleCallNode(t.name(), args);
+            }
+            case ExprNode.BlockExprNode be -> {
+                Set<String> inner = new HashSet<>(shadowed);
+                List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    bindings.add(new ExprNode.LetBinding(binding.names(),
+                            rewriteClimateFields(binding.value(), inner)));
+                    inner.addAll(binding.names());
+                }
+                yield new ExprNode.BlockExprNode(bindings, rewriteClimateFields(be.body(), inner));
+            }
+            case ExprNode.BuiltinNode b -> b;
+            case ExprNode.SlotNode s -> s;
+            case ExprNode.CompiledFuncCallNode cf -> cf;
+            case ExprNode.CompiledTupleCallNode ct -> ct;
+            case ExprNode.TupleComponentNode tc -> tc;
+            case ExprNode.CompiledCache2dNode c2 -> c2;
+            case ExprNode.CompiledCache3dNode c3 -> c3;
+            case ExprNode.CompiledRiverNetNode r -> r;
+            case ExprNode.CompiledBlockNode cb -> cb;
+        };
     }
 
     private static ExprNode expandLoops(ExprNode node, int multiplier) {

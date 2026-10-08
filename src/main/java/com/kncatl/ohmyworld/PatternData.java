@@ -60,6 +60,12 @@ public class PatternData {
     /** 绑定表是否非空；未绑定任何生成器时让 {@link #snapshotFor} 走零开销快路径。 */
     private static volatile boolean anyGeneratorBound;
 
+    /**
+     * 生成器 → 共享气候视图（M3）：只在该维度公式用到 climate() 时登记；
+     * 与生成器同生命周期（WeakHashMap）。热加载不会改变视图（RandomState 与公式无关）。
+     */
+    private static final Map<ChunkGenerator, ExprEvaluator.ClimateView> CLIMATE_VIEWS = new WeakHashMap<>();
+
     /** 一条绑定：该生成器属于哪个维度、生效哪份公式。 */
     public record GeneratorBinding(ResourceKey<Level> dimension, PatternSnapshot snapshot) {}
 
@@ -81,7 +87,8 @@ public class PatternData {
                                   DimensionRules.StructureRule structure, DimensionRules.BiomeRule biome,
                                   boolean featuresOff, List<BiomeLayerDef> biomeLayers,
                                   List<SurfaceLayerDef> surfaceLayers,
-                                  DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla) {}
+                                  DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla,
+                                  boolean usesVanillaData) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
 
@@ -105,7 +112,8 @@ public class PatternData {
                         SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome(),
                         parsed.featuresOff(), List.copyOf(parsed.biomeLayers()),
                         List.copyOf(parsed.surfaceLayers()), parsed.biomeFallback(),
-                        parsed.carvers() == DimensionRules.CarversMode.VANILLA);
+                        parsed.carvers() == DimensionRules.CarversMode.VANILLA,
+                        FormulaParser.usesVanillaData(parsed));
                 shared.put(parsed, snapshot);
             }
             table.put(dimension, snapshot);
@@ -148,7 +156,7 @@ public class PatternData {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
-                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false);
+                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false);
             }
             return defaultSnapshot;
         }
@@ -188,6 +196,28 @@ public class PatternData {
             }
             anyGeneratorBound = !GENERATOR_PATTERNS.isEmpty();
         }
+    }
+
+    /** 登记/清除某生成器的共享气候视图（null = 清除）。 */
+    public static void bindClimate(ChunkGenerator generator, ExprEvaluator.ClimateView view) {
+        if (generator == null) return;
+        synchronized (CLIMATE_VIEWS) {
+            if (view == null) CLIMATE_VIEWS.remove(generator);
+            else CLIMATE_VIEWS.put(generator, view);
+        }
+    }
+
+    /** 该生成器的气候视图；未登记 → null（climate() 返回 0）。 */
+    public static ExprEvaluator.ClimateView climateFor(ChunkGenerator generator) {
+        synchronized (CLIMATE_VIEWS) {
+            return CLIMATE_VIEWS.get(generator);
+        }
+    }
+
+    /** 该生成器的公式是否用到需要原版数据的功能（climate 等；决定是否要建视图）。 */
+    public static boolean usesVanillaDataFor(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot != null && snapshot.usesVanillaData();
     }
 
     public static PatternSnapshot snapshotFor(ChunkGenerator generator) {
@@ -260,12 +290,18 @@ public class PatternData {
             GENERATOR_PATTERNS.remove(generator);
             anyGeneratorBound = !GENERATOR_PATTERNS.isEmpty();
         }
+        synchronized (CLIMATE_VIEWS) {
+            CLIMATE_VIEWS.remove(generator);
+        }
     }
 
     public static void clearAllGenerators() {
         synchronized (GENERATOR_PATTERNS) {
             GENERATOR_PATTERNS.clear();
             anyGeneratorBound = false;
+        }
+        synchronized (CLIMATE_VIEWS) {
+            CLIMATE_VIEWS.clear();
         }
     }
 
@@ -367,13 +403,17 @@ public class PatternData {
      * 区块填充发生在 BIOMES 阶段之后，因此这里读到的群系就是最终值。
      * 表面通道（surface 行）也在此阶段应用（地形铺完之后、雕刻与特征之前）。
      */
-    public static void fillChunk(ChunkAccess chunk, PatternSnapshot snapshot) {
-        ExprEvaluator.BiomeView saved = ExprEvaluator.biomeView();
+    public static void fillChunk(ChunkAccess chunk, PatternSnapshot snapshot,
+                                 ExprEvaluator.ClimateView climate) {
+        ExprEvaluator.BiomeView savedBiome = ExprEvaluator.biomeView();
+        ExprEvaluator.ClimateView savedClimate = ExprEvaluator.climateView();
         ExprEvaluator.setBiomeView(biomeViewFor(chunk));
+        ExprEvaluator.setClimateView(climate);
         try {
             fillChunkInternal(chunk, snapshot);
         } finally {
-            ExprEvaluator.setBiomeView(saved);
+            ExprEvaluator.setBiomeView(savedBiome);
+            ExprEvaluator.setClimateView(savedClimate);
         }
     }
 

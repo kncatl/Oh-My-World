@@ -872,4 +872,40 @@ class FormulaParserTest {
         assertTrue(badArity.errors().stream().anyMatch(e -> e.contains("expects 2 or 3 arguments")),
                 badArity.errors().toString());
     }
+
+    /** 1.3.2：climate / peaks 的公式级校验。 */
+    @Test
+    void climateCallsValidate() {
+        assertOnlyReturnsBlockTypeError("y=0: climate(temperature, x, z) + peaks(0.5)");
+        assertOnlyReturnsBlockTypeError("y=0: { let t = climate(depth, x, y, z); t }");
+
+        FormulaParser.ParseResult badField = FormulaParser.parseWithErrors("y=0: climate(temperatue, x, z)");
+        assertTrue(badField.errors().stream().anyMatch(e -> e.contains("must be a field name")),
+                badField.errors().toString());
+
+        FormulaParser.ParseResult boundField = FormulaParser.parseWithErrors(
+                "y=0: { let temperature = x; climate(temperature, x, z) }");
+        assertTrue(boundField.errors().stream().anyMatch(e -> e.contains("must be a field name")),
+                boundField.errors().toString());
+
+        FormulaParser.ParseResult arity = FormulaParser.parseWithErrors("y=0: climate(temperature, x)");
+        assertTrue(arity.errors().stream().anyMatch(e -> e.contains("expects 3 or 4 arguments")),
+                arity.errors().toString());
+
+        // 编译后的调用（按编号）也必须被 usesVanillaData 识别（否则服务端不会登记气候视图）
+        FormulaParser.DimensionParseResult flag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=let t = climate(temperature, x, z); y=-64..319: t > 0 ? rand() : rand()}");
+        assertTrue(flag.errors().isEmpty(), flag.errors().toString());
+        assertTrue(FormulaParser.usesVanillaData(flag.dimensions().get("overworld")),
+                "气候使用必须被识别（编译后按编号）");
+
+        FormulaParser.DimensionParseResult biomeFlag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d]"
+                        + " biome: climate(temperature, x, z) > 0 ? minecraft:plains : minecraft:desert;"
+                        + " y=-64..319: rand()}");
+        assertTrue(biomeFlag.errors().isEmpty(), biomeFlag.errors().toString());
+        assertTrue(FormulaParser.usesVanillaDataInBiomeLines(
+                        biomeFlag.dimensions().get("overworld").biomeLayers()),
+                "biome 行的气候使用必须被识别");
+    }
 }

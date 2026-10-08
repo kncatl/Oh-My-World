@@ -35,6 +35,9 @@ public class CyclicLayerDef {
     public int yStart() { return yStart; }
     public int yEnd() { return yEnd; }
 
+    /** 循环条目（供遍历/统计使用）。 */
+    public List<Entry> entries() { return entries; }
+
     /** 运行期解析后的层起点：{@code y=..b}（开区间）取维度最低 y。 */
     public int resolvedStart(int dimensionMinY) {
         return yStart == Integer.MIN_VALUE ? dimensionMinY : yStart;

@@ -50,6 +50,8 @@ public class FormulaBiomeSource extends BiomeSource {
     private final BiomeSource fallback;
     private final boolean fallback2d;
     private final ExprEvaluator.TerrainView terrain;
+    /** 共享气候视图（biome 行用到 climate() 时构建；否则为 null）。 */
+    private final ExprEvaluator.ClimateView climate;
     private final AtomicBoolean warned = new AtomicBoolean();
 
     /**
@@ -63,6 +65,8 @@ public class FormulaBiomeSource extends BiomeSource {
         this.fallback = fallback;
         this.fallback2d = fallback2d;
         this.terrain = terrain;
+        this.climate = FormulaParser.usesVanillaDataInBiomeLines(defs)
+                ? BiomeControl.climateViewFor(level) : null;
 
         int minY = LevelHeights.minY(level);
         int maxY = LevelHeights.maxY(level) - 1;
@@ -149,14 +153,20 @@ public class FormulaBiomeSource extends BiomeSource {
     }
 
     private Holder<Biome> biomeAt(Layer layer, int x, int y, int z) {
-        Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(), y,
-                this::resolveBiomeLiteral, terrain);
-        if (result instanceof Holder<?> holder && holder.value() instanceof Biome) {
-            @SuppressWarnings("unchecked")
-            Holder<Biome> biome = (Holder<Biome>) holder;
-            return biome;
+        ExprEvaluator.ClimateView saved = ExprEvaluator.climateView();
+        ExprEvaluator.setClimateView(climate);
+        try {
+            Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(), y,
+                    this::resolveBiomeLiteral, terrain);
+            if (result instanceof Holder<?> holder && holder.value() instanceof Biome) {
+                @SuppressWarnings("unchecked")
+                Holder<Biome> biome = (Holder<Biome>) holder;
+                return biome;
+            }
+            return null;
+        } finally {
+            ExprEvaluator.setClimateView(saved);
         }
-        return null;
     }
 
     /** 群系字面量的运行期解析：构造期已解析全部 id，这里只查表（缺失是不可达的防御分支）。 */
