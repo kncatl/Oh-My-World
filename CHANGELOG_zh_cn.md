@@ -1,5 +1,21 @@
 # 更新日志
 
+## v1.3.2-beta
+
+> 测试版（beta）——发现问题欢迎在 GitHub 反馈。
+
+### 新增
+- **共享气候（模块 A）：`climate(字段, x, z)` / `climate(字段, x, y, z)` + `peaks(w)`**——直接读该维度的原版气候采样器（temperature / humidity / continentalness / erosion / weirdness / depth，按原版 ×10000 量化、步进 1e-4；2D 形式在 y=63 采样）。数值与 F3 的 NoiseRouter 行一致，地形、群系、河流可以共用同一套参数。编辑器预览会按创建界面的种子本地构建气候；按原版 4 格分辨率的每线程缓存让生成开销接近无气候时的基线。
+- **原版注册表直读：`df(注册名, x, y, z)` 与 `noise(注册名, x, y, z[, xzScale[, yScale]])`**——调用注册的原版/数据包密度函数与噪声（缺失 id 返回 0 并只记一次日志）。单点求值没有原版缓存：记得用 `cache2d`/`cache3d` 包一层。
+- **`vheight(x, z)`**——该列的原版地表高度估计（finalDensity 扫描 + 二分，列缓存）。只描述**原版噪声地形**；逐列调用可行，但大面积使用建议用格点判断缩小调用面。
+- **biome 行的原版查询：`vanilla` 与 `biome_at(t, h, c, e, d, w)`**——`vanilla` 取该 4×4×4 格的原版群系（与 `[biome:vanilla]` 逐格一致，可作条件回落）；`biome_at` 用六个浮点气候值（内部 ×10000 量化）查询原版参数表。末地与超平坦主世界没有参数表（视为未命中走回退）。
+- **叠加模式 `[terrain:vanilla]`**——公式层作为**原版噪声地形**的后处理（写在维度内容开头）。语义：未覆盖坐标保持原版；`vanilla` 是叠加前的方块快照、`keep` 是之前各层的结果；同一高度后写覆盖先写。可用：`vis(方块)` / `vsolid` / `vfluid` / `vair`（快照谓词）、`sy`/`sw`（原版含水面 / 液体面高度）、以每列 sy 为基准的层范围 `y=surf(a..b): …`、surface 行的 `curis(方块)`。表面三档 `[surface:vanilla]`（默认）/ `[surface:vanilla+patch]` / `[surface:none]`。结构保护 `[overlay:protect-structures]`（默认开；范围与原版 Beardifier 盒同口径、外扩 24），`sdist(x, z)` 供自行淡出。默认雕刻器为原版。叠加模式需要噪声生成器世界（超平坦 / server_mode 的公式会被停用）；叠加模式的 biome 行不能读公式地形。
+- 以上各模块新增对应冒烟模式（`climate`、`dfnoise`、`biome-at-value`、`biome-vanilla-value`、`overlay-marker`、`overlay-empty`）；中英指南同步补齐。
+
+### 说明
+- 全部新算法随本次发布冻结（黄金样本测试锁定）；旧公式行为不受影响。
+- 两站上传待草案全部落地后统一进行（不逐版本刷新批次）。
+
 ## v1.3.1-beta
 
 > 测试版（beta）——发现问题欢迎在 GitHub 反馈。

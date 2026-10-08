@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.2-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **Shared climate (module A): `climate(field, x, z)` / `climate(field, x, y, z)` + `peaks(w)`** — read the dimension's vanilla climate sampler (temperature / humidity / continentalness / erosion / weirdness / depth, quantized like vanilla in steps of 1e-4; the 2D form samples at y=63). Values match the F3 NoiseRouter line, so terrain, biomes and rivers can share one set of parameters. The editor preview builds the climate locally from the creation screen's seed. A per-thread cache at vanilla's 4-block resolution keeps generation cost near the baseline.
+- **Vanilla registry access: `df(id, x, y, z)` and `noise(id, x, y, z[, xzScale[, yScale]])`** — evaluate registered density functions and noises (datapack entries work; missing ids return 0 and log once). Single-point evaluation has no vanilla caching: wrap calls in `cache2d`/`cache3d`.
+- **`vheight(x, z)`** — estimate of the vanilla surface height for a column (finalDensity scan + bisection, per-column cache). It describes the *vanilla noise terrain* only; per-column calls are affordable but wide-area use should restrict itself with a lattice check.
+- **Biome-row vanilla queries: `vanilla` and `biome_at(t, h, c, e, d, w)`** — `vanilla` is the vanilla biome at the 4x4x4 cell (identical to `[biome:vanilla]` per cell, usable as a conditional fallback); `biome_at` queries the vanilla parameter table with six float climate values (quantized x10000). The End and superflat overworlds have no parameter table and miss.
+- **Overlay mode `[terrain:vanilla]`** — run formula layers as a post-processing pass over the vanilla noise terrain (first directive of a dimension section). Semantics: uncovered coordinates stay vanilla; `vanilla` is the pre-overlay block snapshot, `keep` the previous result; later layers override earlier ones. Available: `vis(block)` / `vsolid` / `vfluid` / `vair` (snapshot predicates), `sy`/`sw` (vanilla water-inclusive / liquid surface y), layer ranges `y=surf(a..b): …` anchored at each column's sy, and `curis(block)` in surface rows. Surface modes `[surface:vanilla]` (default) / `[surface:vanilla+patch]` / `[surface:none]`. Structure protection `[overlay:protect-structures]` (on by default, same footprint as the vanilla Beardifier box inflated by 24) with `sdist(x, z)` for manual fading. The default carver mode is vanilla. Overlay needs a noise-generator world (superflat/server_mode formulas are disabled there); biome rows cannot read the formula terrain in overlay mode.
+- New smoke modes for the above (`climate`, `dfnoise`, `biome-at-value`, `biome-vanilla-value`, `overlay-marker`, `overlay-empty`); guides (zh/en) document everything.
+
+### Notes
+- All new algorithms are frozen in this release (golden-sample tests lock them in); old formulas are unchanged.
+- Store uploads will happen once the whole roadmap is in place (batches are no longer refreshed per version).
+
 ## v1.3.1-beta
 
 > Beta release — please report any issue on GitHub.
