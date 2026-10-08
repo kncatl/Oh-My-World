@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.1-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **cache2d / cache3d grid caches**: bilinear/trilinear interpolation over world-aligned grids to down-sample expensive fields — seamless across chunks, each corner evaluated only once per thread (seed-aware caches), and the value is independent of caching. The expression must be self-contained (built-ins only; cache2d must not use ly/y, cache3d must not use ly; no terrain/biomeis/rand).
+- **Surface channel (surface rows)**: dress the solid terrain by depth/water/slope after it is laid out and before it is written to the chunk (before carvers and features, same order as vanilla) — `surface y=a..b: …`, `surface: …`, optional `surface[maxdepth=N]` (default 8). Variables: `sd` solid blocks above, `sdb` solid blocks below, `wd` -1 when dry else the number of fluid blocks above, `slope` max height difference to the four neighbour columns; the expression returns a block or `keep`; later rows override earlier ones for the same y. Neighbour tops come from the pre-surface terrain (chunk-independent).
+- **rivernet river network**: `let (dist, wd, surf, order) = rivernet(cs, salt)` (or `rivernet(coarse, cs, salt)`) — jittered node grid with strictly descending downstream and depth-3 flow accumulation; combine with `min(base, …)` to carve channels, beds and water. With no river nearby dist/surf are 1e9 so the normal terrain is kept.
+- Editor highlighting and both guides updated; new `surface` and `rivernet` smoke modes (rivernet force-loads 256 chunks after startup before checking).
+
+### Notes
+- All new algorithms are frozen in this release (golden-sample tests lock them in); old formulas are unchanged.
+- Store uploads will happen once the whole roadmap is in place (batches are no longer refreshed per version).
+
 ## v1.3.0-beta
 
 > Beta release — please report any issue on GitHub.
