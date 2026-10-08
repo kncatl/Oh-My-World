@@ -248,6 +248,8 @@ public class FormulaBiomeSource extends BiomeSource {
                 for (ExprNode arg : call.args()) collectBiomeIds(arg, ids);
             }
             case ExprNode.TupleComponentNode ignored -> {}
+            case ExprNode.CompiledCache2dNode cache -> collectBiomeIds(cache.expr(), ids);
+            case ExprNode.CompiledCache3dNode cache -> collectBiomeIds(cache.expr(), ids);
             case ExprNode.CompiledBlockNode block -> {
                 for (ExprNode value : block.values()) collectBiomeIds(value, ids);
                 collectBiomeIds(block.body(), ids);

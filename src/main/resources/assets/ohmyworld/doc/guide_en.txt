@@ -464,6 +464,21 @@ Default preset:
     ★ min/max: with 4 args and a variable name first they are the loop form;
       otherwise they fold over the given arguments.
 
+  -- Grid-sampled caches (cheaper 3D density terrain) --
+  cache2d(expr) / cache2d(expr, step)              world-aligned grid, bilinear
+                                                   interpolation (step 1..16, default 4)
+  cache3d(expr) / cache3d(expr, sx, sy, sz)        trilinear interpolation over a 3D
+                                                   grid (default 4, 8, 4; corners use
+                                                   the absolute y)
+
+    ★ Value = expr evaluated at the grid corners, interpolated; the grid is aligned to
+      world coordinates (seamless across chunks) and each corner is computed only once
+      (per-thread caches).
+    ★ The expression must be self-contained: only built-in values (x/y/z/ly/seed/
+      spawnx/spawnz), no let bindings, and no terrain/surfis/blockis/biomeis/rand.
+      cache2d must not use ly or y; cache3d must not use ly (y is allowed).
+    ★ Use it to down-sample expensive fields (3D density, large-scale noise).
+
 
 5. Expression Examples
 

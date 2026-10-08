@@ -70,6 +70,11 @@ class ExprCompilerTest {
             "{ let (gx, gz) = grad(x * x + z * z); gx * 3 + gz }",
             "curv(x * x * z)",
             "isodist(x - 5)",
+            // 1.3.1：cache2d / cache3d（编译路径带缓存；引用绑定的形态自动回退为直通）
+            "cache2d(noise2(x, z, 300, 5), 4)",
+            "cache2d(x * 2 + z, 8)",
+            "cache3d(noise2(x, z, 400, 3) + y * 0.1, 4, 8, 4)",
+            "{ let (u, v) = warp2(x, z, 200, 30, 6); cache2d(u + v, 8) }",
     };
 
     private static String describe(Object value) {

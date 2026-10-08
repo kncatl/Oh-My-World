@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 class FreezeContractTest {
 
-    private static long sampleHash(String source, long seed) {
+    static long sampleHash(String source, long seed) {
         ExprNode node = ExprCompiler.compile(new ExprParser(ExprLexer.tokenize(source)).parse());
         long h = 0x9E3779B97F4A7C15L ^ seed;
         for (int i = 0; i < 1024; i++) {
@@ -78,6 +78,14 @@ class FreezeContractTest {
                 8222446108824118690L);
         check("curv", "curv(noise2(x, z, 400, 21))", -2792307359770627640L);
         check("isodist", "isodist(noise2(x, z, 500, 23) - 0.2)", -4285367076829557041L);
+    }
+
+    @Test
+    void gridCaches() {
+        check("cache2d", "cache2d(noise2(x, z, 350, 9) + fbm2(x, z, 800, 3, 4), 8)",
+                6007594302591915253L);
+        check("cache3d", "cache3d(fbm3(x, y, z, 300, 3, 2) + x * 0.001, 4, 8, 4)",
+                8910270147888611996L);
     }
 
     @Test

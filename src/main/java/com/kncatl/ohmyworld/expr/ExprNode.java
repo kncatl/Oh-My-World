@@ -55,7 +55,8 @@ public sealed interface ExprNode {
     // containsKey + get。对绑定较多的公式，每格要执行数百次哈希查找，而区块
     // 生成每区块要算近十万格。编译后变量访问变成定长数组的读写。
 
-    /** 内建值：0=x，1=z，2=ly，3=seed，4=y（绝对 y），5=spawnx，6=spawnz。 */
+    /** 内建值：0=x，1=z，2=ly，3=seed，4=y（绝对 y），5=spawnx，6=spawnz，7=keep，
+     *  8=sd，9=sdb，10=wd，11=slope（后五个只在 surface 行合法）。 */
     record BuiltinNode(int kind) implements ExprNode {}
 
     /** let 绑定的槽位引用。 */
@@ -75,6 +76,57 @@ public sealed interface ExprNode {
      * {@code tupleDependent} 记录元组值是否与纵坐标相关（分量与其一致，决定能否提升）。
      */
     record TupleComponentNode(int slot, int index, boolean tupleDependent) implements ExprNode {}
+
+    /**
+     * 编译后的 cache2d（1.3.1）：世界对齐网格上的双线性插值。
+     *
+     * <p>值语义只由（网格角点、表达式、世界种子）决定——缓存只是每线程复用的
+     * 性能优化，命中与否不改变结果。表达式在校验期已保证不引用 let 绑定、
+     * ly/y 与视图类函数（见 FormulaParser）。
+     */
+    final class CompiledCache2dNode implements ExprNode {
+        private final ExprNode expr;
+        private final int step;
+        private final ThreadLocal<CellCache> cache = ThreadLocal.withInitial(CellCache::new);
+
+        public CompiledCache2dNode(ExprNode expr, int step) {
+            this.expr = expr;
+            this.step = step;
+        }
+
+        public ExprNode expr() { return expr; }
+
+        public int step() { return step; }
+
+        ThreadLocal<CellCache> cache() { return cache; }
+    }
+
+    /**
+     * 编译后的 cache3d（1.3.1）：三维网格上的三线性插值（角点 y 为绝对 y）。
+     * 语义与缓存约定同 {@link CompiledCache2dNode}。
+     */
+    final class CompiledCache3dNode implements ExprNode {
+        private final ExprNode expr;
+        private final int sx, sy, sz;
+        private final ThreadLocal<CellCache> cache = ThreadLocal.withInitial(CellCache::new);
+
+        public CompiledCache3dNode(ExprNode expr, int sx, int sy, int sz) {
+            this.expr = expr;
+            this.sx = sx;
+            this.sy = sy;
+            this.sz = sz;
+        }
+
+        public ExprNode expr() { return expr; }
+
+        public int sx() { return sx; }
+
+        public int sy() { return sy; }
+
+        public int sz() { return sz; }
+
+        ThreadLocal<CellCache> cache() { return cache; }
+    }
 
     /**
      * 编译后的 let 块：按顺序求值 {@code values} 并写入对应 {@code slots}，再求值

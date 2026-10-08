@@ -3,8 +3,10 @@ package com.kncatl.ohmyworld.expr;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -91,6 +93,9 @@ public final class ExprCompiler {
                     dependent |= compiled.lyDependent();
                 }
                 List<ExprNode> compiledArgs = List.copyOf(args);
+                // 1.3.1：cache2d/cache3d 编译为带线程本地缓存的节点（语义=角点插值）
+                Compiled cache = compileCacheNode(f.name(), f.args(), compiledArgs, dependent);
+                if (cache != null) yield cache;
                 // 函数名在编译期解析成编号：运行期不再有字符串比较、哈希查找与字符串 switch
                 int id = ExprEvaluator.functionId(f.name());
                 ExprNode call = id == ExprEvaluator.FN_UNKNOWN
@@ -168,13 +173,161 @@ public final class ExprCompiler {
             }
 
             // 已编译的形态原样返回
-            case ExprNode.BuiltinNode b -> new Compiled(b, b.kind() == 2 || b.kind() == 4);
+            case ExprNode.BuiltinNode b ->
+                    new Compiled(b, b.kind() == 2 || b.kind() == 4 || b.kind() >= 8);
             case ExprNode.SlotNode s -> new Compiled(s, lyDependent(s));
             case ExprNode.CompiledFuncCallNode cf -> new Compiled(cf, lyDependent(cf));
             case ExprNode.CompiledTupleCallNode ct -> new Compiled(ct, lyDependent(ct));
             case ExprNode.TupleComponentNode tc -> new Compiled(tc, tc.tupleDependent());
+            // cache2d 与纵坐标无关；cache3d 可能引用 y（保守视为相关，只放弃提升）
+            case ExprNode.CompiledCache2dNode c2 -> new Compiled(c2, false);
+            case ExprNode.CompiledCache3dNode c3 -> new Compiled(c3, true);
             // 已编译的块无法再反查槽位来源，保守视为与 y 相关：只放弃提升，不影响正确性
             case ExprNode.CompiledBlockNode cb -> new Compiled(cb, true);
+        };
+    }
+
+    /**
+     * 尝试把 cache2d/cache3d 调用编译为带缓存的专用节点（1.3.1）。
+     *
+     * <p>只有能证明缓存安全的形态才会转换：表达式不引用 ly（cache2d 也不允许 y）、
+     * 不含 rand，且 step 为 1..16 的整数字面量。未转换时保留普通函数调用
+     * （运行期走无缓存直通实现，语义完全相同）。
+     */
+    private static Compiled compileCacheNode(String name, List<ExprNode> rawArgs, List<ExprNode> args,
+                                             boolean dependent) {
+        if (!name.equals("cache2d") && !name.equals("cache3d")) return null;
+        if (rawArgs.isEmpty() || args.isEmpty()) return null;
+        // 表达式必须自包含：自由变量只能是内建量（不得引用 let / 元组槽位）。
+        // 缓存键只看角点坐标——若表达式引用外层绑定，跨列复用会串值。
+        if (referencesNonBuiltinVariables(rawArgs.get(0))) return null;
+        if (name.equals("cache2d")) {
+            // cache2d 的值不得随纵坐标变化：dependent 覆盖 ly / y / rand
+            if (dependent || args.size() > 2) return null;
+            int step = args.size() == 2 ? literalStep(rawArgs.get(1)) : 4;
+            if (step <= 0) return null;
+            return new Compiled(new ExprNode.CompiledCache2dNode(args.get(0), step), false);
+        }
+        if (args.size() != 1 && args.size() != 4) return null;
+        // cache3d 不允许 ly/rand（允许 y：角点求值使用各自角点的绝对 y）
+        if (usesVertical(rawArgs.get(0), false)) return null;
+        int sx = 4, sy = 8, sz = 4;
+        if (args.size() == 4) {
+            sx = literalStep(rawArgs.get(1));
+            sy = literalStep(rawArgs.get(2));
+            sz = literalStep(rawArgs.get(3));
+            if (sx <= 0 || sy <= 0 || sz <= 0) return null;
+        }
+        return new Compiled(new ExprNode.CompiledCache3dNode(args.get(0), sx, sy, sz), dependent);
+    }
+
+    /** 1..16 的整数字面量；否则 -1（仅编译期使用）。 */
+    private static int literalStep(ExprNode node) {
+        if (node instanceof ExprNode.NumberNode n
+                && n.value() == Math.rint(n.value())
+                && n.value() >= 1 && n.value() <= 16) {
+            return (int) n.value();
+        }
+        return -1;
+    }
+
+    /** 编译期允许出现在自包含表达式里的内建量（cache2d/cache3d 的自由变量白名单）。 */
+    private static final Set<String> BUILTIN_NAMES =
+            Set.of("x", "y", "z", "ly", "seed", "spawnx", "spawnz");
+
+    /** 未编译 AST 是否引用非内建的自由变量（即 let 绑定；考虑遮蔽）。 */
+    private static boolean referencesNonBuiltinVariables(ExprNode node) {
+        return referencesNonBuiltinVariables(node, new HashSet<>());
+    }
+
+    private static boolean referencesNonBuiltinVariables(ExprNode node, Set<String> shadowed) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v ->
+                    !shadowed.contains(v.name()) && !BUILTIN_NAMES.contains(v.name());
+            case ExprNode.BinaryNode b -> referencesNonBuiltinVariables(b.left(), shadowed)
+                    || referencesNonBuiltinVariables(b.right(), shadowed);
+            case ExprNode.UnaryNode u -> referencesNonBuiltinVariables(u.operand(), shadowed);
+            case ExprNode.ConditionalNode c -> referencesNonBuiltinVariables(c.condition(), shadowed)
+                    || referencesNonBuiltinVariables(c.thenExpr(), shadowed)
+                    || referencesNonBuiltinVariables(c.elseExpr(), shadowed);
+            case ExprNode.FuncCallNode f -> f.args().stream()
+                    .anyMatch(arg -> referencesNonBuiltinVariables(arg, shadowed));
+            case ExprNode.TupleCallNode t -> t.args().stream()
+                    .anyMatch(arg -> referencesNonBuiltinVariables(arg, shadowed));
+            case ExprNode.BlockExprNode be -> {
+                Set<String> inner = new HashSet<>(shadowed);
+                boolean found = false;
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    if (referencesNonBuiltinVariables(binding.value(), inner)) {
+                        found = true;
+                        break;
+                    }
+                    inner.addAll(binding.names());
+                }
+                yield found || referencesNonBuiltinVariables(be.body(), inner);
+            }
+            case ExprNode.BuiltinNode b -> false;
+            // 未编译 AST 不应含以下形态；保守视为有引用（不转换）
+            case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledFuncCallNode cf -> true;
+            case ExprNode.CompiledTupleCallNode ct -> true;
+            case ExprNode.TupleComponentNode tc -> true;
+            case ExprNode.CompiledCache2dNode c2 -> true;
+            case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledBlockNode cb -> true;
+        };
+    }
+
+    /** 未编译 AST 是否引用 ly / rand（includeY 时也包含 y）；考虑 let 遮蔽。 */
+    public static boolean usesVertical(ExprNode node, boolean includeY) {
+        return usesVertical(node, includeY, new HashSet<>());
+    }
+
+    private static boolean usesVertical(ExprNode node, boolean includeY, Set<String> shadowed) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v -> !shadowed.contains(v.name())
+                    && (v.name().equals("ly") || (includeY && v.name().equals("y")));
+            case ExprNode.BinaryNode b ->
+                    usesVertical(b.left(), includeY, shadowed) || usesVertical(b.right(), includeY, shadowed);
+            case ExprNode.UnaryNode u -> usesVertical(u.operand(), includeY, shadowed);
+            case ExprNode.ConditionalNode c ->
+                    usesVertical(c.condition(), includeY, shadowed)
+                            || usesVertical(c.thenExpr(), includeY, shadowed)
+                            || usesVertical(c.elseExpr(), includeY, shadowed);
+            case ExprNode.FuncCallNode f -> {
+                if (f.name().equals("rand") || f.name().equals("randexcept")) yield true;
+                for (ExprNode arg : f.args()) {
+                    if (usesVertical(arg, includeY, shadowed)) yield true;
+                }
+                yield false;
+            }
+            case ExprNode.TupleCallNode t -> {
+                for (ExprNode arg : t.args()) {
+                    if (usesVertical(arg, includeY, shadowed)) yield true;
+                }
+                yield false;
+            }
+            case ExprNode.BlockExprNode be -> {
+                Set<String> inner = new HashSet<>(shadowed);
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    if (usesVertical(binding.value(), includeY, inner)) yield true;
+                    inner.addAll(binding.names());
+                }
+                yield usesVertical(be.body(), includeY, inner);
+            }
+            case ExprNode.BuiltinNode b -> b.kind() == 2 || (includeY && b.kind() == 4);
+            // 未编译 AST 不应含以下形态；保守视为与纵坐标相关
+            case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledFuncCallNode cf -> true;
+            case ExprNode.CompiledTupleCallNode ct -> true;
+            case ExprNode.TupleComponentNode tc -> tc.tupleDependent();
+            case ExprNode.CompiledBlockNode cb -> true;
+            case ExprNode.CompiledCache2dNode c2 -> false;
+            case ExprNode.CompiledCache3dNode c3 -> true;
         };
     }
 
@@ -183,7 +336,7 @@ public final class ExprCompiler {
         return switch (node) {
             case ExprNode.NumberNode n -> false;
             case ExprNode.BlockNode b -> false;
-            case ExprNode.BuiltinNode b -> b.kind() == 2 || b.kind() == 4;
+            case ExprNode.BuiltinNode b -> b.kind() == 2 || b.kind() == 4 || b.kind() >= 8;
             case ExprNode.SlotNode s -> slotDependent.getOrDefault(s.slot(), true);
             case ExprNode.BinaryNode b -> lyDependent(b.left()) || lyDependent(b.right());
             case ExprNode.UnaryNode u -> lyDependent(u.operand());
@@ -216,6 +369,9 @@ public final class ExprCompiler {
                 yield false;
             }
             case ExprNode.TupleComponentNode t -> t.tupleDependent();
+            case ExprNode.CompiledCache2dNode c2 -> false;
+            // cache3d 可能引用 y；已编译后无法区分，保守视为相关（只放弃提升）
+            case ExprNode.CompiledCache3dNode c3 -> true;
             // 以下形态不会出现在编译后的节点里，只为了让 switch 穷尽并保持保守
             case ExprNode.VariableNode v -> true;
             case ExprNode.BlockExprNode be -> true;
@@ -236,6 +392,8 @@ public final class ExprCompiler {
             case "y" -> new ExprNode.BuiltinNode(4);
             case "spawnx" -> new ExprNode.BuiltinNode(5);
             case "spawnz" -> new ExprNode.BuiltinNode(6);
+            // 表面通道的 keep（语义校验只在 surface 行放行；其它位置按未知变量报错）
+            case "keep" -> new ExprNode.BuiltinNode(7);
             // 未定义的名字不会通过语义校验；运行期与旧的 builtinValue 一致地取 0
             default -> new ExprNode.BuiltinNode(-1);
         };

@@ -313,11 +313,13 @@ M1_FORMULA = (
     "let (u, v) = warp2(x, z, 300, 40, 7);"
     "let n = fbm2(x + u, z + v, 600, 4, 1);"
     "let ridge = ridged2(x + u, z + v, 500, 3, 5, 2);"
+    "let cached = cache2d(fbm2(x, z, 700, 3, 13), 8)"
+    " + cache3d(noise3(x, y, z, 150, 5), 4, 8, 4);"
     "let extra = fbm2e(x, z, 800, 3, 2, 2) * 0.25"
     " + sum(k, 0, 2, k) * 0.02 + terrace(n, 4, 6) * 0.1"
     " + slope(fbm2(x, z, 200, 2, 11)) * 5"
     " + clamp(isodist(n - 0.2), 0, 3) * 0.05;"
-    "y=-64..: (n + ridge * 0.5 + extra + (seedhash(x, z, 3) - 0.5) * 0.8) > 0.35"
+    "y=-64..: (n + ridge * 0.5 + cached * 0.2 + extra + (seedhash(x, z, 3) - 0.5) * 0.8) > 0.35"
     " ? minecraft:sea_lantern : minecraft:polished_blackstone_bricks}"
 )
 

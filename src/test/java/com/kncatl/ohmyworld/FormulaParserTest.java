@@ -765,4 +765,38 @@ class FormulaParserTest {
         assertTrue(badShift.errors().stream().anyMatch(e -> e.contains("shift")),
                 badShift.errors().toString());
     }
+
+    /** 1.3.1：cache2d / cache3d 的公式级校验。 */
+    @Test
+    void cacheCallsValidate() {
+        assertOnlyReturnsBlockTypeError("y=0: cache2d(noise2(x, z, 300, 1), 4)");
+        assertOnlyReturnsBlockTypeError("y=0: cache2d(x + z)");
+        assertOnlyReturnsBlockTypeError("y=0: cache3d(x + z + y, 4, 8, 4)");
+
+        FormulaParser.ParseResult bound = FormulaParser.parseWithErrors("y=0: { let a = x; cache2d(a, 4) }");
+        assertTrue(bound.errors().stream().anyMatch(e -> e.contains("cannot reference let bindings")),
+                bound.errors().toString());
+
+        FormulaParser.ParseResult yRef = FormulaParser.parseWithErrors("y=0: cache2d(y, 4)");
+        assertTrue(yRef.errors().stream().anyMatch(e -> e.contains("cannot reference ly or y")),
+                yRef.errors().toString());
+
+        FormulaParser.ParseResult lyRef = FormulaParser.parseWithErrors("y=0: cache3d(ly, 4, 8, 4)");
+        assertTrue(lyRef.errors().stream().anyMatch(e -> e.contains("cannot reference ly")),
+                lyRef.errors().toString());
+
+        FormulaParser.ParseResult badStep = FormulaParser.parseWithErrors("y=0: cache2d(x, 3.5)");
+        assertTrue(badStep.errors().stream().anyMatch(e -> e.contains("step arguments")),
+                badStep.errors().toString());
+
+        FormulaParser.ParseResult badArity = FormulaParser.parseWithErrors("y=0: cache3d(x, 4, 8)");
+        assertTrue(badArity.errors().stream().anyMatch(e -> e.contains("expects 1 or 4 arguments")),
+                badArity.errors().toString());
+
+        // biome 行里的 cache 不得包含地形查询（视图类函数）
+        FormulaParser.DimensionParseResult terrain = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d] biome: cache2d(terrain(x, z), 4)}");
+        assertTrue(terrain.errors().stream().anyMatch(e -> e.contains("cannot use terrain")),
+                terrain.errors().toString());
+    }
 }

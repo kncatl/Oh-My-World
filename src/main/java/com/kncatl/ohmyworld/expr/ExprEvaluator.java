@@ -59,6 +59,38 @@ public class ExprEvaluator {
         boolean isBiome(int x, int y, int z, String biomeId);
     }
 
+    /**
+     * 表面通道（1.3.1）：{@code surface} 行里的 {@code keep} 特殊值——
+     * 表示保持当前方块不变。表达式返回它时由表面通道跳过该方块。
+     */
+    public static final Object SURFACE_KEEP = new Object();
+
+    /** 表面通道的当前方块数值（sd/sdb/wd/slope）；由表面通道在求值前写入。 */
+    private static final ThreadLocal<double[]> SURFACE_VALUES = new ThreadLocal<>();
+
+    /** 设置当前方块的表面通道数值（sd, sdb, wd, slope）。 */
+    public static void setSurfaceValues(double sd, double sdb, double wd, double slope) {
+        double[] values = SURFACE_VALUES.get();
+        if (values == null) {
+            values = new double[4];
+            SURFACE_VALUES.set(values);
+        }
+        values[0] = sd;
+        values[1] = sdb;
+        values[2] = wd;
+        values[3] = slope;
+    }
+
+    /** 清除表面通道数值（区块填充结束后调用，避免线程本地残留）。 */
+    public static void clearSurfaceValues() {
+        SURFACE_VALUES.remove();
+    }
+
+    private static double surfaceValue(int index) {
+        double[] values = SURFACE_VALUES.get();
+        return values == null ? 0 : values[index];
+    }
+
     private static final ThreadLocal<BiomeView> BIOME_VIEW = new ThreadLocal<>();
 
     /** 当前 biomeis 视图；可能为 null。 */
@@ -131,7 +163,9 @@ public class ExprEvaluator {
             // 1.3.0：循环 / 空间 / 距离助手（编译期或求值器实现）
             Map.entry("sum", 4), Map.entry("shift", 3),
             Map.entry("slope", 1), Map.entry("grad", 1), Map.entry("curv", 1),
-            Map.entry("isodist", 1));
+            Map.entry("isodist", 1),
+            // 1.3.1：网格采样 + 插值（编译期转换为带缓存的节点）
+            Map.entry("cache2d", -1), Map.entry("cache3d", -1));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -285,6 +319,18 @@ public class ExprEvaluator {
             }
             return null;
         }
+        if (name.equals("cache2d")) {
+            if (argCount < 1 || argCount > 2) {
+                return "Function 'cache2d' expects 1 or 2 arguments (expression[, step]), got " + argCount;
+            }
+            return null;
+        }
+        if (name.equals("cache3d")) {
+            if (argCount != 1 && argCount != 4) {
+                return "Function 'cache3d' expects 1 or 4 arguments (expression[, sx, sy, sz]), got " + argCount;
+            }
+            return null;
+        }
         if (name.equals("spline") || name.equals("cspline")) {
             // 值 + 至少两组"位置 值"点对：参数个数必须是 ≥5 的奇数
             if (argCount < 5 || argCount % 2 == 0) {
@@ -328,12 +374,15 @@ public class ExprEvaluator {
             case ExprNode.BlockExprNode be -> evalBlockExpr(be, x, z, ly, context);
             case ExprNode.TupleCallNode t -> evalTupleCall(t.name(), t.args(), x, z, ly, context);
             // 编译后的形态：变量读取变成数组下标，不再有任何 Map 操作
-            case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly, context.globalY);
+            case ExprNode.BuiltinNode b -> b.kind() == 7 ? SURFACE_KEEP
+                    : builtinValue(b.kind(), x, z, ly, context.globalY);
             case ExprNode.SlotNode s -> context.slot(s.slot());
             case ExprNode.CompiledFuncCallNode f -> evalCompiledFunc(f, x, z, ly, context);
             case ExprNode.CompiledTupleCallNode t -> evalCompiledTupleCall(t.id(), t.args(), x, z, ly, context);
             case ExprNode.CompiledBlockNode cb -> evalCompiledBlock(cb, x, z, ly, context);
             case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
+            case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
+            case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
         };
     }
 
@@ -385,6 +434,11 @@ public class ExprEvaluator {
             case 4 -> globalY;
             case 5 -> spawnX;
             case 6 -> spawnZ;
+            // 7 = keep：数值语境不可达（校验拦截）
+            case 8 -> surfaceValue(0);
+            case 9 -> surfaceValue(1);
+            case 10 -> surfaceValue(2);
+            case 11 -> surfaceValue(3);
             default -> 0;
         };
     }
@@ -403,6 +457,7 @@ public class ExprEvaluator {
      *
      * <p>表达式里只有 {@code ly} 能引用 y；{@code rand}/{@code randexcept} 也要算作
      * 与 y 相关，因为它们经 {@code pickIndex(x, z, ly, ...)} 隐式取用了 ly。
+     * 表面通道变量（sd/sdb/wd/slope）按方块位置变化，同样算作相关。
      * {@code let} 绑定可以遮蔽 {@code ly}，因此需要沿途跟踪已绑定的名字。
      *
      * <p>判定为 false 时，同一列内所有 y 的结果必然相同，调用方可以只求值一次。
@@ -414,12 +469,18 @@ public class ExprEvaluator {
         return dependsOnLy(node, Set.of());
     }
 
+    /** 表面通道变量（只在 surface 行合法；按方块位置变化）。 */
+    private static boolean isSurfaceVariable(String name) {
+        return name.equals("sd") || name.equals("sdb") || name.equals("wd") || name.equals("slope");
+    }
+
     private static boolean dependsOnLy(ExprNode node, Set<String> shadowed) {
         return switch (node) {
             case ExprNode.NumberNode n -> false;
             case ExprNode.BlockNode b -> false;
             case ExprNode.VariableNode v ->
-                    (v.name().equals("ly") || v.name().equals("y")) && !shadowed.contains(v.name());
+                    (v.name().equals("ly") || v.name().equals("y") || isSurfaceVariable(v.name()))
+                            && !shadowed.contains(v.name());
             case ExprNode.BinaryNode b -> dependsOnLy(b.left(), shadowed) || dependsOnLy(b.right(), shadowed);
             case ExprNode.UnaryNode u -> dependsOnLy(u.operand(), shadowed);
             case ExprNode.ConditionalNode c ->
@@ -455,6 +516,8 @@ public class ExprEvaluator {
             case ExprNode.SlotNode s -> true;
             case ExprNode.CompiledFuncCallNode f -> true;
             case ExprNode.CompiledTupleCallNode t -> true;
+            case ExprNode.CompiledCache2dNode c2 -> false;
+            case ExprNode.CompiledCache3dNode c3 -> true;
             case ExprNode.CompiledBlockNode cb -> true;
         };
     }
@@ -532,6 +595,8 @@ public class ExprEvaluator {
             case ExprNode.FuncCallNode f -> evalNumberFunc(f, x, z, ly, context);
             case ExprNode.CompiledFuncCallNode f -> evalCompiledNumberFunc(f, x, z, ly, context);
             case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
+            case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
+            case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
             default -> toDouble(eval(node, x, z, ly, context));
         };
     }
@@ -705,6 +770,8 @@ public class ExprEvaluator {
             case "slope" -> slopeOf(args, x, z, ly, context);
             case "curv" -> curvOf(args, x, z, ly, context);
             case "isodist" -> isodistOf(args, x, z, ly, context);
+            case "cache2d" -> evalCache2dUncached(args, x, z, ly, context);
+            case "cache3d" -> evalCache3dUncached(args, x, z, ly, context);
             // biome 行的地形查询（只会在 biome 求值环境里被调用）
             case "terrain" -> terrainHeight(args, x, z, ly, context);
             case "surfis" -> surfaceIsAt(args, x, z, ly, context) ? 1 : 0;
@@ -1164,6 +1231,146 @@ public class ExprEvaluator {
         return magnitude < 1e-9 ? 1e9 : Math.abs(v) / magnitude;
     }
 
+    // ---------------------------------------------------------- 网格缓存（1.3.1）
+    //
+    // cache2d/cache3d = 世界对齐网格上的双线性/三线性插值。缓存只是性能优化：
+    // 命中与否不影响结果（角点是纯函数求值）。
+
+    /** 步长实参：整数值、夹在 1..16；非法时回退默认（校验会提前拦截）。 */
+    private static int stepArg(List<ExprNode> args, int index, int fallback,
+                               int x, int z, int ly, EvalContext context) {
+        if (index >= args.size()) return fallback;
+        int step = (int) evalNumber(args.get(index), x, z, ly, context);
+        return step >= 1 && step <= 16 ? step : fallback;
+    }
+
+    private static double bilinear(double c00, double c10, double c01, double c11, double u, double v) {
+        double a = c00 + u * (c10 - c00);
+        double b = c01 + u * (c11 - c01);
+        return a + v * (b - a);
+    }
+
+    /** 在指定绝对 y 处求值（cache3d 的角点求值用；保存/恢复 globalY）。 */
+    private static double evalAtY(ExprNode expr, int x, int z, int y, int ly, EvalContext context) {
+        int saved = context.globalY;
+        context.globalY = y;
+        try {
+            return evalNumber(expr, x, z, ly, context);
+        } finally {
+            context.globalY = saved;
+        }
+    }
+
+    /** 未编译路径：无缓存直通（语义与缓存版一致）。 */
+    private static double evalCache2dUncached(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        ExprNode expr = args.get(0);
+        int step = stepArg(args, 1, 4, x, z, ly, context);
+        int x0 = Math.floorDiv(x, step) * step;
+        int z0 = Math.floorDiv(z, step) * step;
+        double u = (x - x0) / (double) step;
+        double v = (z - z0) / (double) step;
+        double c00 = evalNumber(expr, x0, z0, ly, context);
+        double c10 = evalNumber(expr, x0 + step, z0, ly, context);
+        double c01 = evalNumber(expr, x0, z0 + step, ly, context);
+        double c11 = evalNumber(expr, x0 + step, z0 + step, ly, context);
+        return bilinear(c00, c10, c01, c11, u, v);
+    }
+
+    /** 未编译路径：无缓存直通（三线性，先 x、再 z、再 y）。 */
+    private static double evalCache3dUncached(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        ExprNode expr = args.get(0);
+        int sx = 4, sy = 8, sz = 4;
+        if (args.size() == 4) {
+            sx = stepArg(args, 1, 4, x, z, ly, context);
+            sy = stepArg(args, 2, 8, x, z, ly, context);
+            sz = stepArg(args, 3, 4, x, z, ly, context);
+        }
+        int x0 = Math.floorDiv(x, sx) * sx;
+        int z0 = Math.floorDiv(z, sz) * sz;
+        int yCenter = context.globalY;
+        int y0 = Math.floorDiv(yCenter, sy) * sy;
+        double u = (x - x0) / (double) sx;
+        double v = (yCenter - y0) / (double) sy;
+        double w = (z - z0) / (double) sz;
+        double c000 = evalAtY(expr, x0, z0, y0, ly, context);
+        double c100 = evalAtY(expr, x0 + sx, z0, y0, ly, context);
+        double c010 = evalAtY(expr, x0, z0, y0 + sy, ly, context);
+        double c110 = evalAtY(expr, x0 + sx, z0, y0 + sy, ly, context);
+        double c001 = evalAtY(expr, x0, z0 + sz, y0, ly, context);
+        double c101 = evalAtY(expr, x0 + sx, z0 + sz, y0, ly, context);
+        double c011 = evalAtY(expr, x0, z0 + sz, y0 + sy, ly, context);
+        double c111 = evalAtY(expr, x0 + sx, z0 + sz, y0 + sy, ly, context);
+        double e0 = bilinear(c000, c100, c001, c101, u, w);
+        double e1 = bilinear(c010, c110, c011, c111, u, w);
+        return e0 + v * (e1 - e0);
+    }
+
+    /** 编译路径：cache2d（线程本地角点缓存 + 双线性）。 */
+    private static double evalCache2dCompiled(ExprNode.CompiledCache2dNode node, int x, int z, int ly,
+                                              EvalContext context) {
+        int step = node.step();
+        int x0 = Math.floorDiv(x, step) * step;
+        int z0 = Math.floorDiv(z, step) * step;
+        double u = (x - x0) / (double) step;
+        double v = (z - z0) / (double) step;
+        LongDoubleMap map = node.cache().get().map();
+        double c00 = cachedCorner2d(map, node.expr(), x0, z0, ly, context);
+        double c10 = cachedCorner2d(map, node.expr(), x0 + step, z0, ly, context);
+        double c01 = cachedCorner2d(map, node.expr(), x0, z0 + step, ly, context);
+        double c11 = cachedCorner2d(map, node.expr(), x0 + step, z0 + step, ly, context);
+        return bilinear(c00, c10, c01, c11, u, v);
+    }
+
+    private static double cachedCorner2d(LongDoubleMap map, ExprNode expr, int cx, int cz, int ly,
+                                         EvalContext context) {
+        long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+        int index = map.find(key);
+        if (index >= 0) return map.valueAt(index);
+        double value = evalNumber(expr, cx, cz, ly, context);
+        map.put(key, value);
+        return value;
+    }
+
+    /** 编译路径：cache3d（线程本地角点缓存 + 三线性，先 x、再 z、再 y）。 */
+    private static double evalCache3dCompiled(ExprNode.CompiledCache3dNode node, int x, int z, int ly,
+                                              EvalContext context) {
+        int sx = node.sx(), sy = node.sy(), sz = node.sz();
+        int x0 = Math.floorDiv(x, sx) * sx;
+        int z0 = Math.floorDiv(z, sz) * sz;
+        int yCenter = context.globalY;
+        int y0 = Math.floorDiv(yCenter, sy) * sy;
+        double u = (x - x0) / (double) sx;
+        double v = (yCenter - y0) / (double) sy;
+        double w = (z - z0) / (double) sz;
+        LongDoubleMap map = node.cache().get().map();
+        double c000 = cachedCorner3d(map, node.expr(), x0, y0, z0, ly, context);
+        double c100 = cachedCorner3d(map, node.expr(), x0 + sx, y0, z0, ly, context);
+        double c010 = cachedCorner3d(map, node.expr(), x0, y0 + sy, z0, ly, context);
+        double c110 = cachedCorner3d(map, node.expr(), x0 + sx, y0 + sy, z0, ly, context);
+        double c001 = cachedCorner3d(map, node.expr(), x0, y0, z0 + sz, ly, context);
+        double c101 = cachedCorner3d(map, node.expr(), x0 + sx, y0, z0 + sz, ly, context);
+        double c011 = cachedCorner3d(map, node.expr(), x0, y0 + sy, z0 + sz, ly, context);
+        double c111 = cachedCorner3d(map, node.expr(), x0 + sx, y0 + sy, z0 + sz, ly, context);
+        double e0 = bilinear(c000, c100, c001, c101, u, w);
+        double e1 = bilinear(c010, c110, c011, c111, u, w);
+        return e0 + v * (e1 - e0);
+    }
+
+    private static double cachedCorner3d(LongDoubleMap map, ExprNode expr, int cx, int cy, int cz, int ly,
+                                         EvalContext context) {
+        // 打包仅在世界边界内安全（x/z < 2^25、y ∈ [-1024, 3071]）；越界则不缓存
+        boolean cacheable = cx > -(1 << 25) && cx < (1 << 25)
+                && cz > -(1 << 25) && cz < (1 << 25)
+                && cy >= -1024 && cy <= 3071;
+        if (!cacheable) return evalAtY(expr, cx, cz, cy, ly, context);
+        long key = (((long) cx & 0x3FFFFFFL) << 38) | (((long) cz & 0x3FFFFFFL) << 12) | (cy + 1024);
+        int index = map.find(key);
+        if (index >= 0) return map.valueAt(index);
+        double value = evalAtY(expr, cx, cz, cy, ly, context);
+        map.put(key, value);
+        return value;
+    }
+
     // ---------------------------------------------------------- 样条映射（1.2.6）
 
     /**
@@ -1322,6 +1529,16 @@ public class ExprEvaluator {
             if (savedResolver != null) BIOME_RESOLVER.set(savedResolver);
             if (savedTerrain != null) TERRAIN_VIEW.set(savedTerrain);
         }
+    }
+
+    /**
+     * 表面行求值入口：返回 {@code BlockState} 或 {@link #SURFACE_KEEP}；
+     * 其它结果（异常以外）回退为空气。
+     */
+    public static Object evalToSurface(ExprNode node, int x, int z, int ly, int globalY) {
+        Object result = evalAt(node, x, z, ly, globalY);
+        if (result == SURFACE_KEEP) return SURFACE_KEEP;
+        return result instanceof BlockState bs ? bs : BlockResolver.resolve("minecraft:air");
     }
 
     /**

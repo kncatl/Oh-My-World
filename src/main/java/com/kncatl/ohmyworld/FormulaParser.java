@@ -3,6 +3,7 @@ package com.kncatl.ohmyworld;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -707,6 +708,8 @@ public class FormulaParser {
             case ExprNode.CompiledTupleCallNode call -> byId.test(call.id())
                     || call.args().stream().anyMatch(arg -> walkFunctions(arg, byName, byId));
             case ExprNode.TupleComponentNode ignored -> false;
+            case ExprNode.CompiledCache2dNode cache -> walkFunctions(cache.expr(), byName, byId);
+            case ExprNode.CompiledCache3dNode cache -> walkFunctions(cache.expr(), byName, byId);
             case ExprNode.CompiledBlockNode block ->
                     Arrays.stream(block.values()).anyMatch(v -> walkFunctions(v, byName, byId))
                             || walkFunctions(block.body(), byName, byId);
@@ -908,6 +911,10 @@ public class FormulaParser {
                 return thenType == ExprEvaluator.ValueType.UNKNOWN ? elseType : thenType;
             }
             case ExprNode.FuncCallNode f -> {
+                if (f.name().equals("cache2d") || f.name().equals("cache3d")) {
+                    validateCacheCall(f, errors, variables, biomeMode);
+                    return ExprEvaluator.ValueType.NUMBER;
+                }
                 boolean terrainQuery = isTerrainQueryFunction(f.name());
                 if (terrainQuery && !biomeMode) {
                     errors.add("Function '" + f.name() + "' can only be used in biome lines");
@@ -1015,8 +1022,135 @@ public class FormulaParser {
             case ExprNode.CompiledFuncCallNode cf -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.CompiledTupleCallNode cf -> { return ExprEvaluator.ValueType.UNKNOWN; }
             case ExprNode.TupleComponentNode tc -> { return ExprEvaluator.ValueType.NUMBER; }
+            case ExprNode.CompiledCache2dNode c -> { return ExprEvaluator.ValueType.NUMBER; }
+            case ExprNode.CompiledCache3dNode c -> { return ExprEvaluator.ValueType.NUMBER; }
             case ExprNode.CompiledBlockNode cb -> { return ExprEvaluator.ValueType.UNKNOWN; }
         }
+    }
+
+    /** cache2d / cache3d 的专项校验：表达式自包含、不引用 ly（cache2d 也不引用 y）、不含视图/随机函数。 */
+    private static void validateCacheCall(ExprNode.FuncCallNode f, List<String> errors,
+                                          Map<String, ExprEvaluator.ValueType> variables, boolean biomeMode) {
+        String name = f.name();
+        int argCount = f.args().size();
+        if (name.equals("cache2d")) {
+            if (argCount < 1 || argCount > 2) {
+                errors.add("Function 'cache2d' expects 1 or 2 arguments (expression[, step]), got " + argCount);
+                return;
+            }
+        } else if (argCount != 1 && argCount != 4) {
+            errors.add("Function 'cache3d' expects 1 or 4 arguments (expression[, sx, sy, sz]), got " + argCount);
+            return;
+        }
+        for (int i = 1; i < argCount; i++) {
+            ExprNode arg = f.args().get(i);
+            if (!(arg instanceof ExprNode.NumberNode n)
+                    || n.value() != Math.rint(n.value())
+                    || n.value() < 1 || n.value() > 16) {
+                errors.add("Function '" + name + "': step arguments must be integer literals in 1..16");
+                break;
+            }
+        }
+        ExprNode expr = f.args().get(0);
+        ExprEvaluator.ValueType type = validateNode(expr, errors, variables, biomeMode);
+        requireNumber(type, "first argument of " + name, errors);
+        if (referencesBoundVariables(expr, variables, new HashSet<>())) {
+            errors.add("Function '" + name + "': the expression cannot reference let bindings");
+        }
+        if (containsCacheForbiddenFunctions(expr)) {
+            errors.add("Function '" + name + "': the expression cannot use "
+                    + "terrain/surfis/blockis/biomeis/rand/randexcept");
+        }
+        boolean forbidY = name.equals("cache2d");
+        if (ExprCompiler.usesVertical(expr, forbidY)) {
+            errors.add("Function '" + name + "': the expression cannot reference "
+                    + (forbidY ? "ly or y" : "ly"));
+        }
+    }
+
+    /** 表达式是否引用外层 let 绑定（自包含检查；内层 let 遮蔽不计）。 */
+    private static boolean referencesBoundVariables(ExprNode node,
+                                                    Map<String, ExprEvaluator.ValueType> variables,
+                                                    Set<String> shadowed) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v -> !shadowed.contains(v.name()) && variables.containsKey(v.name());
+            case ExprNode.BinaryNode b -> referencesBoundVariables(b.left(), variables, shadowed)
+                    || referencesBoundVariables(b.right(), variables, shadowed);
+            case ExprNode.UnaryNode u -> referencesBoundVariables(u.operand(), variables, shadowed);
+            case ExprNode.ConditionalNode c -> referencesBoundVariables(c.condition(), variables, shadowed)
+                    || referencesBoundVariables(c.thenExpr(), variables, shadowed)
+                    || referencesBoundVariables(c.elseExpr(), variables, shadowed);
+            case ExprNode.FuncCallNode f -> f.args().stream()
+                    .anyMatch(arg -> referencesBoundVariables(arg, variables, shadowed));
+            case ExprNode.TupleCallNode t -> t.args().stream()
+                    .anyMatch(arg -> referencesBoundVariables(arg, variables, shadowed));
+            case ExprNode.BlockExprNode be -> {
+                Set<String> inner = new HashSet<>(shadowed);
+                boolean found = false;
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    if (referencesBoundVariables(binding.value(), variables, inner)) {
+                        found = true;
+                        break;
+                    }
+                    inner.addAll(binding.names());
+                }
+                yield found || referencesBoundVariables(be.body(), variables, inner);
+            }
+            case ExprNode.BuiltinNode b -> false;
+            // 以下形态不会出现在校验前的 AST 里；保守视为引用
+            case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledFuncCallNode cf -> true;
+            case ExprNode.CompiledTupleCallNode ct -> true;
+            case ExprNode.TupleComponentNode tc -> true;
+            case ExprNode.CompiledCache2dNode c2 -> true;
+            case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledBlockNode cb -> true;
+        };
+    }
+
+    /** 表达式是否含 cache 禁列函数（视图 / 随机）。 */
+    private static boolean containsCacheForbiddenFunctions(ExprNode node) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v -> false;
+            case ExprNode.BinaryNode b -> containsCacheForbiddenFunctions(b.left())
+                    || containsCacheForbiddenFunctions(b.right());
+            case ExprNode.UnaryNode u -> containsCacheForbiddenFunctions(u.operand());
+            case ExprNode.ConditionalNode c -> containsCacheForbiddenFunctions(c.condition())
+                    || containsCacheForbiddenFunctions(c.thenExpr())
+                    || containsCacheForbiddenFunctions(c.elseExpr());
+            case ExprNode.FuncCallNode f -> {
+                if (isTerrainQueryFunction(f.name()) || f.name().equals("biomeis")
+                        || f.name().equals("rand") || f.name().equals("randexcept")) {
+                    yield true;
+                }
+                yield f.args().stream().anyMatch(FormulaParser::containsCacheForbiddenFunctions);
+            }
+            case ExprNode.TupleCallNode t -> t.args().stream()
+                    .anyMatch(FormulaParser::containsCacheForbiddenFunctions);
+            case ExprNode.BlockExprNode be -> {
+                boolean found = false;
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    if (containsCacheForbiddenFunctions(binding.value())) {
+                        found = true;
+                        break;
+                    }
+                }
+                yield found || containsCacheForbiddenFunctions(be.body());
+            }
+            case ExprNode.BuiltinNode b -> false;
+            // 校验前的 AST 不含编译形态；保守视为含（宁拒绝不误用）
+            case ExprNode.SlotNode s -> true;
+            case ExprNode.CompiledFuncCallNode cf -> true;
+            case ExprNode.CompiledTupleCallNode ct -> true;
+            case ExprNode.TupleComponentNode tc -> true;
+            case ExprNode.CompiledCache2dNode c2 -> true;
+            case ExprNode.CompiledCache3dNode c3 -> true;
+            case ExprNode.CompiledBlockNode cb -> true;
+        };
     }
 
     /** 元组 let：值必须是多返回函数调用，名字个数 = 返回组件数，参数全为数值。 */
@@ -1284,6 +1418,8 @@ public class FormulaParser {
             }
             case ExprNode.CompiledTupleCallNode t -> t;
             case ExprNode.TupleComponentNode t -> t;
+            case ExprNode.CompiledCache2dNode c -> c;
+            case ExprNode.CompiledCache3dNode c -> c;
             case ExprNode.BuiltinNode b -> b;
             case ExprNode.SlotNode s -> s;
             case ExprNode.CompiledFuncCallNode cf -> cf;
@@ -1356,6 +1492,8 @@ public class FormulaParser {
             case ExprNode.CompiledFuncCallNode cf -> cf;
             case ExprNode.CompiledTupleCallNode ct -> ct;
             case ExprNode.TupleComponentNode tc -> tc;
+            case ExprNode.CompiledCache2dNode c2 -> c2;
+            case ExprNode.CompiledCache3dNode c3 -> c3;
             case ExprNode.CompiledBlockNode cb -> cb;
         };
     }
@@ -1457,6 +1595,8 @@ public class FormulaParser {
             }
             case ExprNode.CompiledTupleCallNode t -> t;
             case ExprNode.TupleComponentNode t -> t;
+            case ExprNode.CompiledCache2dNode c -> c;
+            case ExprNode.CompiledCache3dNode c -> c;
             case ExprNode.BuiltinNode b -> b;
             case ExprNode.SlotNode s -> s;
             case ExprNode.CompiledFuncCallNode cf -> cf;
