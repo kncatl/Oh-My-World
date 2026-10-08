@@ -251,10 +251,17 @@ public final class BiomeControl {
                 fallbackSource = build(level, DimensionRules.BiomeRule.VANILLA);
                 if (fallbackSource == null) return null;
             }
+            // biome 行的 vanilla / biome_at 需要该维度的原版分布源（与 [biome:vanilla]
+            // 同源）；它和"未覆盖格回退"是两件事——回退可以是 none，查询源仍要建。
+            BiomeSource vanillaSource = fallbackSource;
+            if (vanillaSource == null && FormulaParser.usesVanillaBiomeInBiomeLines(biomeLayers)) {
+                vanillaSource = build(level, DimensionRules.BiomeRule.VANILLA);
+                if (vanillaSource == null) return null;
+            }
             ExprEvaluator.TerrainView terrain = new SnapshotTerrainView(snapshot,
                     LevelHeights.minY(level), LevelHeights.maxY(level));
             return new FormulaBiomeSource(level, biomeLayers, fallbackSource,
-                    fallbackMode == DimensionRules.BiomeFallback.TWO_D, terrain);
+                    fallbackMode == DimensionRules.BiomeFallback.TWO_D, terrain, vanillaSource);
         } catch (Exception e) {
             LOGGER.error("ohmyworld: failed to build formula biome source for {}: {}",
                     ResourceIds.keyIdString(level.dimension()), e.toString());

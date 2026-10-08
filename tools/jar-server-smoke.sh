@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|biome-vanilla-value|biome-at-value) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|biome-vanilla-value|biome-at-value）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -158,6 +158,8 @@ case "$CHECK_MODE" in
     structure-only)  SMOKE_CONFIG_MODE="--structure-only" ;;
     biome-desert)    SMOKE_CONFIG_MODE="--biome-desert" ;;
     biome-vanilla)   SMOKE_CONFIG_MODE="--biome-vanilla" ;;
+    biome-vanilla-value) SMOKE_CONFIG_MODE="--biome-vanilla-value" ;;
+    biome-at-value)  SMOKE_CONFIG_MODE="--biome-at-value" ;;
     biome-structures) SMOKE_CONFIG_MODE="--biome-structures" ;;
     features-all)    SMOKE_CONFIG_MODE="--features-all" ;;
     features-none)   SMOKE_CONFIG_MODE="--features-none" ;;
@@ -201,6 +203,10 @@ console_commands() {
             sleep 12
             echo "execute in minecraft:overworld run forceload add 512 -7168 767 -6913"
             sleep 12
+        elif [[ "$CHECK_MODE" == "biome-vanilla-value" || "$CHECK_MODE" == "biome-at-value" ]]; then
+            # M3.3：下界 multinoise 参数表查询——加载下界一小片即可
+            echo "execute in minecraft:the_nether run forceload add -192 -192 63 63"
+            sleep 20
         else
             sleep 20
         fi
@@ -328,6 +334,20 @@ case "$CHECK_MODE" in
     biome-vanilla)
         python3 "$TOOLS/smoke-check-world.py" --biome-smoke 2 "$SRV" \
             || fail "群系冒烟（vanilla）核验失败：群系多样性不足"
+        ;;
+    biome-vanilla-value)
+        if grep -q "formula biome uncovered" "$LOG"; then
+            fail "biome 行 vanilla 群系值解析失败（日志出现 formula biome uncovered）"
+        fi
+        python3 "$TOOLS/smoke-check-world.py" --biome-smoke 9 "$SRV" \
+            || fail "biome 行 vanilla 群系值核验失败：下界没有出现原版群系"
+        ;;
+    biome-at-value)
+        if grep -q "formula biome uncovered" "$LOG"; then
+            fail "biome_at 参数表查询解析失败（日志出现 formula biome uncovered）"
+        fi
+        python3 "$TOOLS/smoke-check-world.py" --biome-smoke 9 "$SRV" \
+            || fail "biome_at 参数表查询核验失败：下界没有出现原版群系"
         ;;
     biome-structures)
         python3 "$TOOLS/smoke-check-world.py" --structure-smoke 3 "$SRV" \

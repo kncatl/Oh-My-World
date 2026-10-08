@@ -905,8 +905,12 @@ public class FormulaParser {
 
             ExprNode expr = wrapShared(shared,
                     expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
+            // biome 行的 vanilla 群系值通过校验变量表注入（只在 biome 行合法；
+            // 编译器统一把标识符 vanilla 编译成哨兵节点，位置靠这里把关）。
+            Map<String, ExprEvaluator.ValueType> biomeVars = new HashMap<>();
+            biomeVars.put("vanilla", ExprEvaluator.ValueType.BLOCK);
             List<String> valErrors = new ArrayList<>();
-            ExprEvaluator.ValueType type = validateNode(expr, valErrors, new HashMap<>(), true);
+            ExprEvaluator.ValueType type = validateNode(expr, valErrors, biomeVars, true);
             if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
                 valErrors.add("Biome layer expression must return a biome, got " + type);
             }
@@ -1016,6 +1020,20 @@ public class FormulaParser {
                 if (f.name().equals("df") || f.name().equals("noise")) {
                     validateRegistryCall(f, errors, variables, biomeMode);
                     return ExprEvaluator.ValueType.NUMBER;
+                }
+                if (f.name().equals("biome_at")) {
+                    // 原版群系参数表查询（M3.3）：位置规则同 terrain 族——只在 biome 行可用
+                    String arity = ExprEvaluator.validateFunction("biome_at", f.args().size());
+                    if (arity != null) errors.add(arity);
+                    if (!biomeMode) {
+                        errors.add("Function 'biome_at' can only be used in biome lines");
+                        for (ExprNode a : f.args()) validateNode(a, errors, variables, false);
+                        return ExprEvaluator.ValueType.UNKNOWN;
+                    }
+                    for (ExprNode a : f.args()) {
+                        requireNumber(validateNode(a, errors, variables, true), "argument of biome_at", errors);
+                    }
+                    return ExprEvaluator.ValueType.BLOCK;
                 }
                 boolean terrainQuery = isTerrainQueryFunction(f.name());
                 if (terrainQuery && !biomeMode) {
@@ -1365,6 +1383,52 @@ public class FormulaParser {
     public static boolean usesVanillaDataInBiomeLines(List<BiomeLayerDef> defs) {
         for (BiomeLayerDef b : defs) {
             if (usesVanillaData(b.expression())) return true;
+        }
+        return false;
+    }
+
+    /** 需要原版群系分布的功能（M3.3：biome_at / vanilla 群系值）。 */
+    private static final Set<String> VANILLA_BIOME_FUNCTIONS = Set.of("biome_at");
+
+    /** 表达式是否用到原版群系分布（按名字/编号查 biome_at；vanilla 标识符编译为哨兵节点）。 */
+    private static boolean usesVanillaBiome(ExprNode node) {
+        return walkFunctions(node, VANILLA_BIOME_FUNCTIONS::contains, id -> id == ExprEvaluator.FN_BIOME_AT)
+                || walkVanillaBuiltin(node);
+    }
+
+    /** 编译后树里是否含 vanilla 群系值哨兵节点（builtin kind 12）。 */
+    private static boolean walkVanillaBuiltin(ExprNode node) {
+        return switch (node) {
+            case ExprNode.NumberNode ignored -> false;
+            case ExprNode.VariableNode ignored -> false;
+            case ExprNode.BlockNode ignored -> false;
+            case ExprNode.BinaryNode b -> walkVanillaBuiltin(b.left()) || walkVanillaBuiltin(b.right());
+            case ExprNode.UnaryNode u -> walkVanillaBuiltin(u.operand());
+            case ExprNode.ConditionalNode c -> walkVanillaBuiltin(c.condition())
+                    || walkVanillaBuiltin(c.thenExpr()) || walkVanillaBuiltin(c.elseExpr());
+            case ExprNode.FuncCallNode f -> f.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);
+            case ExprNode.TupleCallNode t -> t.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);
+            case ExprNode.BlockExprNode be -> be.bindings().stream()
+                    .anyMatch(binding -> walkVanillaBuiltin(binding.value()))
+                    || walkVanillaBuiltin(be.body());
+            case ExprNode.BuiltinNode b -> b.kind() == ExprEvaluator.BUILTIN_VANILLA_BIOME;
+            case ExprNode.SlotNode ignored -> false;
+            case ExprNode.CompiledFuncCallNode f -> f.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);
+            case ExprNode.CompiledTupleCallNode t -> t.args().stream().anyMatch(FormulaParser::walkVanillaBuiltin);
+            case ExprNode.TupleComponentNode ignored -> false;
+            case ExprNode.CompiledCache2dNode cache -> walkVanillaBuiltin(cache.expr());
+            case ExprNode.CompiledCache3dNode cache -> walkVanillaBuiltin(cache.expr());
+            case ExprNode.CompiledRiverNetNode river ->
+                    river.coarseExpr() != null && walkVanillaBuiltin(river.coarseExpr());
+            case ExprNode.CompiledBlockNode cb -> Arrays.stream(cb.values())
+                    .anyMatch(FormulaParser::walkVanillaBuiltin) || walkVanillaBuiltin(cb.body());
+        };
+    }
+
+    /** biome 行集合是否用到原版群系分布（FormulaBiomeSource 的 biome_at 查询视图开关）。 */
+    public static boolean usesVanillaBiomeInBiomeLines(List<BiomeLayerDef> defs) {
+        for (BiomeLayerDef b : defs) {
+            if (usesVanillaBiome(b.expression())) return true;
         }
         return false;
     }

@@ -10,16 +10,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 import com.kncatl.ohmyworld.compat.LevelHeights;
+import com.kncatl.ohmyworld.compat.ResourceIds;
 import com.kncatl.ohmyworld.expr.ExprEvaluator;
 import com.kncatl.ohmyworld.expr.ExprNode;
 import com.mojang.logging.LogUtils;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.Holder;
+import net.minecraft.core.HolderGetter;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
+import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
 //? >=26.3 {
 import net.minecraft.world.level.biome.BiomeResolver;
 //?}
@@ -45,13 +48,35 @@ public class FormulaBiomeSource extends BiomeSource {
     /** 运行期展开后的层：简写层已换成维度真实高度，ly 基准是层起点。 */
     private record Layer(int yStart, int yEnd, int lyOffset, ExprNode expression) {}
 
+    /** 回退源查询（quart 坐标；内部已包含 2d 的 referenceQuartY 处理）。 */
+    private interface FallbackQuery {
+        Holder<Biome> at(int qx, int qy, int qz);
+    }
+
+    /** 原版分布查询（quart 坐标，**不含** 2d 参考高度）：biome 行的 vanilla 群系值用。 */
+    private interface VanillaQuery {
+        Holder<Biome> at(int qx, int qy, int qz);
+    }
+
     private final List<Layer> layers;
     private final Map<String, Holder<Biome>> biomes;
     private final BiomeSource fallback;
     private final boolean fallback2d;
     private final ExprEvaluator.TerrainView terrain;
+    /**
+     * 该维度的原版分布源（与 [biome:vanilla] 同源）：biome 行的 vanilla 群系值与
+     * biome_at 查询用。与 {@link #fallback} 不同——回退可以是 none（null），
+     * 但只要 biome 行用到 vanilla/biome_at，这里就必须有源。
+     */
+    private final BiomeSource vanillaSource;
     /** 共享气候视图（biome 行用到 climate() 时构建；否则为 null）。 */
     private final ExprEvaluator.VanillaView climate;
+    /** biome_at 的参数表查询视图（biome 行用到时构建；否则 null）。 */
+    private final ExprEvaluator.BiomeQueryView biomeQuery;
+    /** biome_at 返回 id 的动态解析缓存（字面量表之外的全部注册群系）。 */
+    private final java.util.concurrent.ConcurrentMap<String, Holder<Biome>> dynamicBiomes =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final HolderGetter<Biome> biomeRegistry;
     private final AtomicBoolean warned = new AtomicBoolean();
 
     /**
@@ -61,12 +86,16 @@ public class FormulaBiomeSource extends BiomeSource {
      * @throws RuntimeException 表达式引用了注册表里不存在的群系（由调用方记日志并保持原状）
      */
     public FormulaBiomeSource(ServerLevel level, List<BiomeLayerDef> defs, BiomeSource fallback,
-                              boolean fallback2d, ExprEvaluator.TerrainView terrain) {
+                              boolean fallback2d, ExprEvaluator.TerrainView terrain,
+                              BiomeSource vanillaSource) {
         this.fallback = fallback;
         this.fallback2d = fallback2d;
         this.terrain = terrain;
+        this.vanillaSource = vanillaSource;
         this.climate = FormulaParser.usesVanillaDataInBiomeLines(defs)
                 ? BiomeControl.vanillaViewFor(level) : null;
+        this.biomeQuery = vanillaSource != null && FormulaParser.usesVanillaBiomeInBiomeLines(defs)
+                ? this::biomeAtQuery : null;
 
         int minY = LevelHeights.minY(level);
         int maxY = LevelHeights.maxY(level) - 1;
@@ -80,6 +109,7 @@ public class FormulaBiomeSource extends BiomeSource {
 
         Map<String, Holder<Biome>> resolved = new HashMap<>();
         var biomeLookup = level.registryAccess().lookupOrThrow(Registries.BIOME);
+        this.biomeRegistry = biomeLookup;
         for (String id : collectBiomeIds(defs)) {
             resolved.put(id, biomeLookup.getOrThrow(BiomeControl.biomeKey(id)));
         }
@@ -89,7 +119,11 @@ public class FormulaBiomeSource extends BiomeSource {
     @Override
     protected Stream<Holder<Biome>> collectPossibleBiomes() {
         Stream<Holder<Biome>> own = biomes.values().stream();
-        return fallback == null ? own : Stream.concat(own, fallback.possibleBiomes().stream());
+        if (fallback != null) own = Stream.concat(own, fallback.possibleBiomes().stream());
+        if (vanillaSource != null && vanillaSource != fallback) {
+            own = Stream.concat(own, vanillaSource.possibleBiomes().stream()).distinct();
+        }
+        return own;
     }
 
     @Override
@@ -105,8 +139,11 @@ public class FormulaBiomeSource extends BiomeSource {
     @Override
     public BiomeResolver createResolver(Climate.Sampler sampler) {
         BiomeResolver fallbackResolver = fallback == null ? null : fallback.createResolver(sampler);
+        FallbackQuery fallbackQuery = (qx, qy, qz) -> fallbackAt(qx, qy, qz, fallbackResolver);
+        BiomeResolver vanillaResolver = vanillaSource == null ? null : vanillaSource.createResolver(sampler);
+        VanillaQuery vanillaQuery = vanillaResolver == null ? null : vanillaResolver::getNoiseBiome;
         return (qx, qy, qz) -> {
-            Holder<Biome> own = layerBiome(qx, qy, qz);
+            Holder<Biome> own = layerBiome(qx, qy, qz, fallbackQuery, vanillaQuery);
             if (own != null) return own;
             return fallbackAt(qx, qy, qz, fallbackResolver);
         };
@@ -120,7 +157,10 @@ public class FormulaBiomeSource extends BiomeSource {
     //?} else {
     @Override
     public Holder<Biome> getNoiseBiome(int qx, int qy, int qz, Climate.Sampler sampler) {
-        Holder<Biome> own = layerBiome(qx, qy, qz);
+        FallbackQuery fallbackQuery = (fx, fy, fz) -> fallbackAt(fx, fy, fz, sampler);
+        VanillaQuery vanillaQuery = vanillaSource == null ? null
+                : (fx, fy, fz) -> vanillaSource.getNoiseBiome(fx, fy, fz, sampler);
+        Holder<Biome> own = layerBiome(qx, qy, qz, fallbackQuery, vanillaQuery);
         if (own != null) return own;
         return fallbackAt(qx, qy, qz, sampler);
     }
@@ -139,25 +179,36 @@ public class FormulaBiomeSource extends BiomeSource {
     }
 
     /** 找到覆盖该格（4×4×4 单元起点）的最后一个 biome 行并求值；无命中返回 null。 */
-    private Holder<Biome> layerBiome(int qx, int qy, int qz) {
+    private Holder<Biome> layerBiome(int qx, int qy, int qz, FallbackQuery fallbackQuery,
+                                     VanillaQuery vanillaQuery) {
         int x = qx << 2;
         int y = qy << 2;
         int z = qz << 2;
         for (int i = layers.size() - 1; i >= 0; i--) {
             Layer layer = layers.get(i);
             if (y >= layer.yStart() && y <= layer.yEnd()) {
-                return biomeAt(layer, x, y, z);
+                return biomeAt(layer, x, y, z, fallbackQuery, vanillaQuery);
             }
         }
         return null;
     }
 
-    private Holder<Biome> biomeAt(Layer layer, int x, int y, int z) {
-        ExprEvaluator.VanillaView saved = ExprEvaluator.vanillaView();
+    private Holder<Biome> biomeAt(Layer layer, int x, int y, int z, FallbackQuery fallbackQuery,
+                                  VanillaQuery vanillaQuery) {
+        ExprEvaluator.VanillaView savedClimate = ExprEvaluator.vanillaView();
+        ExprEvaluator.BiomeQueryView savedQuery = ExprEvaluator.biomeQueryView();
         ExprEvaluator.setVanillaView(climate);
+        ExprEvaluator.setBiomeQueryView(biomeQuery);
         try {
             Object result = ExprEvaluator.evalToBiome(layer.expression(), x, z, y - layer.lyOffset(), y,
                     this::resolveBiomeLiteral, terrain);
+            if (result == ExprEvaluator.VANILLA_BIOME) {
+                // vanilla 群系值：取该维度原版分布源在该 4×4×4 格的群系
+                // （与 [biome:vanilla] 一致；不走 2d 回退的参考高度）
+                return vanillaQuery == null
+                        ? missingFallback(x >> 2, y >> 2, z >> 2)
+                        : vanillaQuery.at(x >> 2, y >> 2, z >> 2);
+            }
             if (result instanceof Holder<?> holder && holder.value() instanceof Biome) {
                 @SuppressWarnings("unchecked")
                 Holder<Biome> biome = (Holder<Biome>) holder;
@@ -165,13 +216,38 @@ public class FormulaBiomeSource extends BiomeSource {
             }
             return null;
         } finally {
-            ExprEvaluator.setVanillaView(saved);
+            ExprEvaluator.setVanillaView(savedClimate);
+            ExprEvaluator.setBiomeQueryView(savedQuery);
         }
+    }
+
+    /**
+     * biome_at 的参数表查询：只有 multinoise 回退源有参数表（末地等返回 null）。
+     * 群系 id 与字面量同格式，交给 {@link #resolveBiomeLiteral} 解析。
+     * 量化用四舍五入（climate() 的原样回流可精确往返；原版采样本身即 ×10000 量化值）。
+     */
+    private String biomeAtQuery(double temperature, double humidity, double continentalness,
+                               double erosion, double depth, double weirdness) {
+        if (!(vanillaSource instanceof MultiNoiseBiomeSource multiNoise)) return null;
+        Climate.TargetPoint point = new Climate.TargetPoint(
+                Math.round(temperature * 10000.0),
+                Math.round(humidity * 10000.0),
+                Math.round(continentalness * 10000.0),
+                Math.round(erosion * 10000.0),
+                Math.round(depth * 10000.0),
+                Math.round(weirdness * 10000.0));
+        return multiNoise.getNoiseBiome(point).unwrapKey()
+                .map(ResourceIds::keyIdString).orElse(null);
     }
 
     /** 群系字面量的运行期解析：构造期已解析全部 id，这里只查表（缺失是不可达的防御分支）。 */
     private Object resolveBiomeLiteral(String id) {
         Holder<Biome> holder = biomes.get(id);
+        if (holder == null && biomeQuery != null) {
+            // biome_at 的运行期结果可能不在字面量表里：按注册名动态解析并缓存
+            holder = dynamicBiomes.computeIfAbsent(id,
+                    key -> biomeRegistry.get(BiomeControl.biomeKey(key)).orElse(null));
+        }
         if (holder != null) return holder;
         if (warned.compareAndSet(false, true)) {
             LOGGER.warn("ohmyworld: unknown biome \"{}\" at generation time; using a known biome instead", id);

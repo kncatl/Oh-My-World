@@ -111,6 +111,37 @@ public class ExprEvaluator {
      */
     public static final Object SURFACE_KEEP = new Object();
 
+    /**
+     * biome 行（M3.3）的 {@code vanilla} 群系值：求值返回该哨兵，由公式群系源
+     * 替换为该 4×4×4 格在回退源里的群系（与 {@code [biome:vanilla]} 逐格一致）。
+     * 只在 biome 行合法（解析期用变量表放行，照 {@code keep} 的成例）。
+     */
+    public static final Object VANILLA_BIOME = new Object();
+
+    /** BuiltinNode kind：{@code vanilla} 群系值（7=keep、8..11=表面通道量）。 */
+    public static final int BUILTIN_VANILLA_BIOME = 12;
+
+    /**
+     * biome 行读取原版群系分布的视图（M3.3）：{@code biome_at()} 用它查询参数表。
+     * 由 {@link #setBiomeQueryView} 在 biome 行求值期间注入；没有视图时返回 null。
+     */
+    public interface BiomeQueryView {
+        /** 参数表查询（浮点参数；量化由实现负责）；没有参数表（如末地）返回 null。 */
+        String biomeAt(double temperature, double humidity, double continentalness,
+                       double erosion, double depth, double weirdness);
+    }
+
+    private static final ThreadLocal<BiomeQueryView> BIOME_QUERY_VIEW = new ThreadLocal<>();
+
+    /** 设置/清除群系查询视图（null = 清除）；调用方自行保存旧值以便嵌套恢复。 */
+    public static void setBiomeQueryView(BiomeQueryView view) {
+        if (view == null) BIOME_QUERY_VIEW.remove();
+        else BIOME_QUERY_VIEW.set(view);
+    }
+
+    /** 当前群系查询视图；可能为 null。 */
+    public static BiomeQueryView biomeQueryView() { return BIOME_QUERY_VIEW.get(); }
+
     /** 表面通道的当前方块数值（sd/sdb/wd/slope）；由表面通道在求值前写入。 */
     private static final ThreadLocal<double[]> SURFACE_VALUES = new ThreadLocal<>();
 
@@ -217,7 +248,9 @@ public class ExprEvaluator {
             // 1.3.2：共享气候 / 原版数据（M3）
             Map.entry("climate", -1), Map.entry("peaks", 1),
             Map.entry("df", 4), Map.entry("noise", -1),
-            Map.entry("vheight", 2));
+            Map.entry("vheight", 2),
+            // 1.3.2：biome 行的原版群系查询（M3.3；只能出现在 biome 行）
+            Map.entry("biome_at", 6));
 
     /** 多返回函数名 → 返回组件数（1.3.0）。这些名字不能出现在普通表达式位置。 */
     private static final Map<String, Integer> MULTI_RETURN_ARITY = Map.of(
@@ -268,6 +301,7 @@ public class ExprEvaluator {
     public static final int FN_CLIMATE = 149, FN_PEAKS = 150;
     public static final int FN_DF = 151, FN_NOISE = 152;
     public static final int FN_VHEIGHT = 153;
+    public static final int FN_BIOME_AT = 154;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
@@ -344,6 +378,7 @@ public class ExprEvaluator {
             case "df" -> FN_DF;
             case "noise" -> FN_NOISE;
             case "vheight" -> FN_VHEIGHT;
+            case "biome_at" -> FN_BIOME_AT;
             default -> FN_UNKNOWN;
         };
     }
@@ -461,6 +496,7 @@ public class ExprEvaluator {
             case ExprNode.TupleCallNode t -> evalTupleCall(t.name(), t.args(), x, z, ly, context);
             // 编译后的形态：变量读取变成数组下标，不再有任何 Map 操作
             case ExprNode.BuiltinNode b -> b.kind() == 7 ? SURFACE_KEEP
+                    : b.kind() == BUILTIN_VANILLA_BIOME ? VANILLA_BIOME
                     : builtinValue(b.kind(), x, z, ly, context.globalY);
             case ExprNode.SlotNode s -> context.slot(s.slot());
             case ExprNode.CompiledFuncCallNode f -> evalCompiledFunc(f, x, z, ly, context);
@@ -741,10 +777,14 @@ public class ExprEvaluator {
     }
 
     private static boolean isNumericFunction(String name) {
-        return !name.equals("rand") && !name.equals("randexcept") && FUNCTION_ARITY.containsKey(name);
+        return !name.equals("rand") && !name.equals("randexcept")
+                && !name.equals("biome_at")
+                && FUNCTION_ARITY.containsKey(name);
     }
 
     private static Object evalFunc(ExprNode.FuncCallNode f, int x, int z, int ly, EvalContext context) {
+        // biome_at 返回群系（不透明值），走对象路径
+        if (f.name().equals("biome_at")) return biomeAtOf(f.args(), x, z, ly, context);
         // 数值函数统一走原语实现，仅在此处装箱一次
         if (isNumericFunction(f.name())) return evalNumberFunc(f, x, z, ly, context);
         List<ExprNode> args = f.args();
@@ -884,6 +924,7 @@ public class ExprEvaluator {
      */
     private static Object evalCompiledFunc(ExprNode.CompiledFuncCallNode f, int x, int z, int ly,
                                            EvalContext context) {
+        if (f.id() == FN_BIOME_AT) return biomeAtOf(f.args(), x, z, ly, context);
         if (f.id() == FN_RAND) return evalRand(f.args(), x, z, ly, context);
         if (f.id() == FN_RANDEXCEPT) return evalRandExcept(f.args(), x, z, ly, context);
         return evalCompiledNumberFunc(f, x, z, ly, context);
@@ -1397,6 +1438,25 @@ public class ExprEvaluator {
         int argX = (int) Math.floor(evalNumber(args.get(0), x, z, ly, context));
         int argZ = (int) Math.floor(evalNumber(args.get(1), x, z, ly, context));
         return view.vheight(argX, argZ);
+    }
+
+    /**
+     * {@code biome_at(t, h, c, e, d, w)}：按原版群系参数表查询（仅 biome 行可用）。
+     * 返回值经当前群系解析器解析（与字面量同路径）；没有视图/参数表时返回 null
+     * （该格视为未命中，由调用方走回退或下一层）。
+     */
+    private static Object biomeAtOf(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        BiomeQueryView view = BIOME_QUERY_VIEW.get();
+        Function<String, Object> resolver = BIOME_RESOLVER.get();
+        if (view == null || resolver == null) return null;
+        String id = view.biomeAt(
+                evalNumber(args.get(0), x, z, ly, context),
+                evalNumber(args.get(1), x, z, ly, context),
+                evalNumber(args.get(2), x, z, ly, context),
+                evalNumber(args.get(3), x, z, ly, context),
+                evalNumber(args.get(4), x, z, ly, context),
+                evalNumber(args.get(5), x, z, ly, context));
+        return id == null ? null : resolver.apply(id);
     }
 
     /** {@code peaks(w)}：原版峰谷折叠 {@code -3·(|(|w| - 2/3)| - 1/3)}（冻结）。 */

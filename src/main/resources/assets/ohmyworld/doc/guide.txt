@@ -168,6 +168,17 @@
     全部函数，共享 let 通用）；同一高度上后写的行覆盖先写的行。群系是 4×4×4
     一格（以格子起点坐标判定）。
 
+  ★ biome 行还能直接读原版群系分布（M3；不读公式地形、不会成环）：
+      vanilla                     该格的原版群系（与 [biome:vanilla] 逐格一致）
+      biome_at(t, h, c, e, d, w)  查原版群系参数表：六参为浮点气候值
+                                  （temperature/humidity/continentalness/
+                                  erosion/depth/weirdness，内部按原版 ×10000 量化）
+    例（温度高处回落原版，否则沙漠）：
+      biome: climate(temperature, x, z) > 0.3 ? vanilla : minecraft:desert
+      biome: biome_at(0.3, 0.5, 0.2, 0.0, 0.1, 0.4)
+    末地与超平坦主世界没有参数表（biome_at 视为未命中走回退）；
+    vanilla 写进方块层会报未知变量。
+
   ★ biome 行可以读"公式地形"（只按公式层计算、不读已生成的方块，所以群系填充
     时就能用；循环层同样支持）：
       terrain(x, z)              该列表面方块的 y（含水面；全空列 = 世界最低 y - 1）

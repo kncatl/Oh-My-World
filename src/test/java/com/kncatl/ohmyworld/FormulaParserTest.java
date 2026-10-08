@@ -961,4 +961,45 @@ class FormulaParserTest {
         assertTrue(FormulaParser.usesVanillaData(vheightFlag.dimensions().get("overworld")),
                 "vheight 使用必须被识别（编译后按编号）");
     }
+
+    /** 1.3.2：biome_at / vanilla 群系值的位置规则（只在 biome 行合法）。 */
+    @Test
+    void biomeQueryCallsValidate() {
+        // 合法：vanilla 群系值与 biome_at 只在 biome 行出现
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[biome-fallback:3d]"
+                                + " biome: vanilla;"
+                                + " y=-64..319: rand()}").errors().isEmpty());
+        assertTrue(FormulaParser.parseDimensionsWithErrors(
+                        "{overworld=[biome-fallback:3d]"
+                                + " biome: biome_at(0.1, 0.2, 0.3, 0.4, 0.5, 0.6);"
+                                + " y=-64..319: rand()}").errors().isEmpty());
+
+        // 方块层不可用：vanilla 报未知变量、biome_at 报位置错误
+        FormulaParser.DimensionParseResult vanillaBlock = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: vanilla; y=-64..319: vanilla}");
+        assertTrue(vanillaBlock.errors().stream().anyMatch(e -> e.contains("vanilla")),
+                vanillaBlock.errors().toString());
+        FormulaParser.DimensionParseResult biomeAtBlock = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=biome: vanilla;"
+                        + " y=-64..319: biome_at(0, 0, 0, 0, 0, 0) > 0 ? rand() : rand()}");
+        assertTrue(biomeAtBlock.errors().stream().anyMatch(e -> e.contains("only be used in biome lines")),
+                biomeAtBlock.errors().toString());
+
+        // 视图/查询识别：biome_at 与 vanilla 都要让公式群系源建查询视图
+        FormulaParser.DimensionParseResult biomeAtFlag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d]"
+                        + " biome: biome_at(0.1, 0.2, 0.3, 0.4, 0.5, 0.6);"
+                        + " y=-64..319: rand()}");
+        assertTrue(biomeAtFlag.errors().isEmpty(), biomeAtFlag.errors().toString());
+        assertTrue(FormulaParser.usesVanillaBiomeInBiomeLines(
+                        biomeAtFlag.dimensions().get("overworld").biomeLayers()),
+                "biome_at 使用必须被识别");
+        FormulaParser.DimensionParseResult vanillaFlag = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[biome-fallback:3d]"
+                        + " biome: vanilla; y=-64..319: rand()}");
+        assertTrue(FormulaParser.usesVanillaBiomeInBiomeLines(
+                        vanillaFlag.dimensions().get("overworld").biomeLayers()),
+                "vanilla 群系值必须被识别");
+    }
 }

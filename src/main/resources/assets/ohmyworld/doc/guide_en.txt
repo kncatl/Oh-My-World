@@ -188,6 +188,21 @@ Default preset:
     On the same height, later lines override earlier ones. Biomes are stored per
     4x4x4 cell (sampled at the cell's origin coordinates).
 
+  * Biome lines can also read the vanilla biome distribution directly (M3; it
+    never reads formula terrain, so there is no cycle):
+      vanilla                   the cell's vanilla biome (identical to
+                                [biome:vanilla] per cell)
+      biome_at(t, h, c, e, d, w)
+                                query the vanilla parameter table; the six float
+                                parameters are climate values (temperature/
+                                humidity/continentalness/erosion/depth/weirdness,
+                                quantized x10000 like vanilla)
+    Examples:
+      biome: climate(temperature, x, z) > 0.3 ? vanilla : minecraft:desert
+      biome: biome_at(0.3, 0.5, 0.2, 0.0, 0.1, 0.4)
+    The End and superflat overworlds have no parameter table (biome_at misses and
+    falls through); vanilla in a block layer is an unknown variable.
+
   * Biome lines can read the formula terrain (computed from the formula layers
     only -- never from already generated blocks -- so it is available during
     biome fill; cyclic layers included):

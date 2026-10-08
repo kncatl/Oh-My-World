@@ -222,6 +222,25 @@ BIOME_VANILLA_FORMULA = (
     "y=-64: minecraft:bedrock;y=-63..0: minecraft:stone;y=1..64: minecraft:air}"
 )
 
+# M3.3：biome 行 vanilla 群系值——放到下界的噪声生成器（flat 主世界没有 multinoise
+# 参数表，vanilla 也会退化成固定群系）；整维 biome: vanilla 覆盖，日志里出现
+# "formula biome uncovered" 即解析失败（否则整维覆盖不可能漏格）。
+BIOME_VANILLA_VALUE_FORMULA = (
+    "{overworld=y=0: minecraft:stone;y=1..64: minecraft:air}"
+    "{the_nether=biome: x < -100000 ? minecraft:nether_wastes : vanilla; "
+    "y=0: minecraft:bedrock;y=1..127: minecraft:netherrack;y=128..255: minecraft:air}"
+)
+
+# M3.3：biome_at 参数表查询——下界 multinoise 参数表 + 扫温参数（x*0.002）；
+# 同样整维覆盖，uncovered 警告即失败；--biome-smoke 9 要求下界出现原版群系。
+# 永假分支里的基线字面量是必要的：查询失败时 missingFallback 需要一个安全群系
+# （否则 biome 字面量表为空会抛异常）。
+BIOME_AT_VALUE_FORMULA = (
+    "{overworld=y=0: minecraft:stone;y=1..64: minecraft:air}"
+    "{the_nether=biome: x < -100000 ? minecraft:nether_wastes : biome_at(x * 0.002, 0.0, 0.0, 0.0, 0.0, 0.0); "
+    "y=0: minecraft:bedrock;y=1..127: minecraft:netherrack;y=128..255: minecraft:air}"
+)
+
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的
 # 群系源（平原）"过滤过结构组，沙漠神殿本不在候选里——本模组换群系后会重建结构组
 # 状态；若重建失败，这里将扫不到 desert_pyramid。配合 --structure-smoke 3。
@@ -423,6 +442,8 @@ def main():
     structure_only = "--structure-only" in sys.argv
     biome_desert = "--biome-desert" in sys.argv
     biome_vanilla = "--biome-vanilla" in sys.argv
+    biome_vanilla_value = "--biome-vanilla-value" in sys.argv
+    biome_at_value = "--biome-at-value" in sys.argv
     biome_structures = "--biome-structures" in sys.argv
     biome_formula = "--biome-formula" in sys.argv
     biome_formula_fallback = "--biome-formula-fallback" in sys.argv
@@ -469,7 +490,8 @@ def main():
         # - 打开结构开关（默认冒烟是关结构，避免干扰方块核验）。
         props["level-type"] = "ohmyworld\\:flat_plus"
         props["generate-structures"] = "true"
-    elif biome_desert or biome_vanilla or biome_structures or biome_formula or biome_formula_fallback \
+    elif biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value \
+            or biome_structures or biome_formula or biome_formula_fallback \
             or biome_terrain or biome_biomeis or natural or features_all or features_none \
             or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet or climate \
             or dfnoise:
@@ -495,6 +517,10 @@ def main():
         formula = BIOME_DESERT_FORMULA
     elif biome_vanilla:
         formula = BIOME_VANILLA_FORMULA
+    elif biome_vanilla_value:
+        formula = BIOME_VANILLA_VALUE_FORMULA
+    elif biome_at_value:
+        formula = BIOME_AT_VALUE_FORMULA
     elif biome_structures:
         formula = BIOME_STRUCTURES_FORMULA
     elif biome_formula:
@@ -546,7 +572,8 @@ def main():
     wrote_formula = (force or seed_formula or spawn_formula or open_ranges or water or river
                      or dimension_formula or dimension_alias
                      or marker_formula or structure_none or structure_only
-                     or biome_desert or biome_vanilla or biome_structures
+                     or biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value
+                     or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
                      or carvers or carvers_off or flat_carvers or flat_carvers_off
                      or features_all or features_none or m1_functions or surface or rivernet or climate

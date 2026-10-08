@@ -145,9 +145,20 @@ BIOME_SMOKE_RULES = {
             ],
         },
     },
+    "9": {  # biome 行 vanilla / biome_at（下界 multinoise 参数表，M3.3）：
+        # 整维覆盖模式下，出现任意原版下界群系即说明查询成功
+        # （失败会走 missingFallback 回落到公式里的基线方块/群系，且脚本另有
+        #  "formula biome uncovered" 日志断言）。
+        "expect": {},
+        "expect_any_min": {
+            "the_nether": [
+                (1, ("minecraft:nether_wastes", "minecraft:soulsand_valley",
+                     "minecraft:crimson_forest", "minecraft:warped_forest",
+                     "minecraft:basalt_deltas")),
+            ],
+        },
+    },
 }
-
-# 公式群系冒烟（配合 smoke-server-config.py --biome-formula / --biome-formula-fallback）：
 # 3 = 两段全覆盖：低段深暗之域 + 高段沙漠都应出现（两行都生效），且不能出现原版平原；
 # 4 = 3d 回退：低段深暗之域（公式行）+ 至少 2 种候选原版群系（回退行；候选表同模式 2）。
 BIOME_SMOKE_RULES["3"] = {

@@ -80,6 +80,16 @@ case "$MODE" in
         CONFIG_FLAGS="--biome-formula"
         CHECK_ARGS="--biome-smoke 3"
         ;;
+    biome-vanilla-value)
+        CONFIG_FLAGS="--biome-vanilla-value"
+        CHECK_ARGS="--biome-smoke 9"
+        CONSOLE_FORCELOAD="execute in minecraft:the_nether run forceload add -192 -192 63 63"
+        ;;
+    biome-at-value)
+        CONFIG_FLAGS="--biome-at-value"
+        CHECK_ARGS="--biome-smoke 9"
+        CONSOLE_FORCELOAD="execute in minecraft:the_nether run forceload add -192 -192 63 63"
+        ;;
     biome-formula-fallback)
         CONFIG_FLAGS="--biome-formula-fallback"
         CHECK_ARGS="--biome-smoke 4"
@@ -113,7 +123,7 @@ case "$MODE" in
         CHECK_ARGS="--biome-smoke 8"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
         exit 2
         ;;
 esac
@@ -202,6 +212,14 @@ CHUNKS=$(find "$RUN_DIR/world" -path '*/region/*.mca' 2>/dev/null | wc -l | tr -
 if [ "$SMOKE_FORMULA" = "1" ]; then
     python3 "$ROOT/tools/smoke-check-world.py" $CHECK_ARGS "$RUN_DIR" \
         || fail "世界核验未通过（公式或群系没有按预期生效）"
+fi
+
+# M3.3 两个群系查询模式：整维覆盖下任何 "formula biome uncovered" 都说明
+# vanilla / biome_at 没有解析成功（否则整维覆盖不可能漏格）。
+if [ "$MODE" = "biome-vanilla-value" ] || [ "$MODE" = "biome-at-value" ]; then
+    if grep -q "formula biome uncovered" "$LOG"; then
+        fail "群系查询解析失败（日志出现 formula biome uncovered）"
+    fi
 fi
 
 echo "[smoke] OK: $NODE 出生点生成成功（region 文件 $CHUNKS 个）"
