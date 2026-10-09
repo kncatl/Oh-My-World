@@ -80,4 +80,55 @@ class ClimateExprTest {
             }
         });
     }
+
+    /**
+     * QUART（4×4×4 格）按格缓存：只经气候等 4×4×4 量化源依赖 y 的绑定在同一格内
+     * 只求值一次，换格后重新求值；结果与逐格重算一致。
+     */
+    @Test
+    void cellBindingsAreCachedPerQuartCell() {
+        int[] calls = {0};
+        // 与 BiomeControl 的实现一致：采样按 x>>2 / y>>2 / z>>2 量化
+        withView((code, x, y, z) -> {
+            calls[0]++;
+            return (x >> 2) * 3 + (y >> 2) * 5 + (z >> 2) * 7;
+        }, () -> {
+            ExprNode compiled = ExprCompiler.compile(new ExprParser(ExprLexer.tokenize(
+                    "{ let t = climate(temperature, x, y, z); t > 0 ? t : t + 1 }")).parse());
+            // 同一 4×4×4 格内遍历 8 个点：绑定只求值一次
+            for (int x = 4; x < 6; x++) {
+                for (int z = 4; z < 6; z++) {
+                    for (int y = 8; y < 10; y++) {
+                        ExprEvaluator.evalAt(compiled, x, z, y, y);
+                    }
+                }
+            }
+            assertEquals(1, calls[0], "同一 4×4×4 格内 climate 绑定应只求值一次");
+            // 换到下一个格：重新求值
+            ExprEvaluator.evalAt(compiled, 8, 8, 16, 16);
+            assertEquals(2, calls[0], "换格后应重新求值");
+        });
+    }
+
+    /**
+     * 变换过的坐标实参不得按格缓存：{@code climate(t, x + 3, y, z)} 的采样点
+     * 在 4×4×4 格内可能跨格变化，编译后的求值必须与逐次直算一致
+     * （分类收紧的回归；若误判为格内不变，单元测试会当场抓到）。
+     */
+    @Test
+    void transformedCoordinatesAreNotCachedPerCell() {
+        withView((code, x, y, z) -> (x >> 2) + (y >> 2) * 31 + (z >> 2) * 101, () -> {
+            ExprNode raw = new ExprParser(ExprLexer.tokenize(
+                    "{ let t = climate(temperature, x + 3, y, z); t }")).parse();
+            ExprNode compiled = ExprCompiler.compile(raw);
+            for (int x = 0; x < 8; x++) {
+                for (int y = 8; y < 12; y++) {
+                    double expected = ((Number) ExprEvaluator.evalAt(raw, x, 5, y, y)).doubleValue();
+                    double actual = ((Number) ExprEvaluator.evalAt(compiled, x, 5, y, y)).doubleValue();
+                    assertEquals(expected, actual, 1e-12,
+                            "x=" + x + " y=" + y + " 处结果不一致");
+                }
+            }
+        });
+    }
 }

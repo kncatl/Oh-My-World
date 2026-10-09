@@ -58,16 +58,23 @@ public final class FlatCarvers {
 
     /**
      * &lt;26.3 入口：在公式地形上按原版逻辑雕刻（仅当调用方已确认
-     * {@code [carvers:vanilla]}）。失败只记一次日志、不影响区块生成。
+     * {@code [carvers:vanilla]} 或 {@code [carvers:vanilla-ew]}）。
+     * 失败只记一次日志、不影响区块生成。
      */
     public static void carve(ChunkGenerator flat, WorldGenRegion region, long seed,
                              BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunk) {
         //? <26.3 {
+        boolean ew = PatternData.carversEwFor(flat);
         try {
             Cached cached = cachedFor(flat, region.getLevel());
             NoiseBasedChunkGenerator delegate = new NoiseBasedChunkGenerator(
                     flat.getBiomeSource(), cached.dry());
-            applyCarvers(delegate, region, seed, cached.randomState(), biomeManager, structureManager, chunk);
+            if (ew) CarverWaterGuard.begin(chunk);
+            try {
+                applyCarvers(delegate, region, seed, cached.randomState(), biomeManager, structureManager, chunk);
+            } finally {
+                if (ew) CarverWaterGuard.end();
+            }
         } catch (Exception e) {
             warn(region, e);
         }
@@ -82,6 +89,7 @@ public final class FlatCarvers {
      */
     public static void carveModern(ChunkGenerator flat, WorldGenRegion region, Blender blender,
                                    BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunk) {
+        boolean ew = PatternData.carversEwFor(flat);
         try {
             Cached cached = cachedFor(flat, region.getLevel());
             NoiseGeneratorSettings dry = cached.dry().value();
@@ -90,10 +98,13 @@ public final class FlatCarvers {
             NoiseBasedChunkGeneratorInvoker invoker = (NoiseBasedChunkGeneratorInvoker) (Object) delegate;
             NoiseSettings noiseSettings = dry.noiseSettings()
                     .clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
+            if (ew) CarverWaterGuard.begin(chunk);
             try (NoiseChunk noiseChunk = invoker.ohmyworld$createNoiseChunk(
                     chunk, structureManager, blender, cached.randomState(), noiseSettings)) {
                 invoker.ohmyworld$generateCarvers(chunk, blender, noiseChunk, cached.randomState(),
                         biomeManager, region, dry.materialRule().value());
+            } finally {
+                if (ew) CarverWaterGuard.end();
             }
         } catch (Exception e) {
             warn(region, e);

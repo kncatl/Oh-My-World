@@ -2,6 +2,7 @@ package com.kncatl.ohmyworld.expr;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -30,22 +31,71 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class ExprCompiler {
 
-    /**
-     * 全局唯一的槽位分配器。
+    /** 全局唯一的槽位分配器。
      *
-     * <p>槽位必须跨表达式唯一：与 y 无关的绑定会被提升到「每列求值一次」，其值在
-     * 同一列的多次逐格求值之间保持有效。若不同表达式各自从 0 开始分配槽位，另一个
-     * 表达式的求值就会覆盖这些值，而预备标记仍会显示「已预备」——结果静默出错。
+     * <p>槽位必须跨表达式唯一：惰性绑定（与 y 无关 / 只在 4×4×4 格内变化）的值会
+     * 在同一列的多次逐格求值之间保持有效。若不同表达式各自从 0 开始分配槽位，
+     * 另一个表达式的求值就会覆盖这些值，而缓存戳仍会显示「有效」——结果静默出错。
      * 槽位随编译次数单调增长，但公式只在加载/切换时编译，量级很小；每个槽位在线程
      * 上下文里只占一个引用。
      */
     private static final AtomicInteger NEXT_SLOT = new AtomicInteger();
 
-    /** 全局唯一的节点 id，供求值上下文记录「本节点在本列是否已预备」。嵌套块互不共用。 */
+    /** 全局唯一的节点 id（诊断用；嵌套块互不共用）。 */
     private static final AtomicInteger NEXT_NODE_ID = new AtomicInteger();
+
+    /** 惰性作用域：同一列（x,z）内复用。 */
+    public static final int LAZY_COLUMN = 0;
+    /** 惰性作用域：同一 4×4×4 格（x>>2,y>>2,z>>2）内复用（QUART 依赖类）。 */
+    public static final int LAZY_CELL = 1;
+
+    /**
+     * 惰性绑定的提供者（槽位 → 值的表达式）。编译期一次性登记；运行期读取槽位时
+     * 若发现提供者且缓存戳过期，就现场求值并写入槽位（见 {@code EvalContext}）。
+     * 数组按槽位增长，写入只在编译期（加锁），读取是均摊 O(1) 的易失读。
+     */
+    private static volatile Object[] LAZY_PROVIDERS = new Object[0];
+    private static volatile int[] LAZY_SCOPES = new int[0];
+    private static volatile int[] LAZY_OWNERS = new int[0];
+
+    private static void registerLazy(int slot, int scope, int owner, ExprNode value) {
+        synchronized (ExprCompiler.class) {
+            int need = slot + 1;
+            if (need > LAZY_PROVIDERS.length) {
+                int grown = Math.max(need, Math.max(16, LAZY_PROVIDERS.length * 2));
+                LAZY_PROVIDERS = Arrays.copyOf(LAZY_PROVIDERS, grown);
+                LAZY_SCOPES = Arrays.copyOf(LAZY_SCOPES, grown);
+                LAZY_OWNERS = Arrays.copyOf(LAZY_OWNERS, grown);
+            }
+            LAZY_PROVIDERS[slot] = value;
+            LAZY_SCOPES[slot] = scope;
+            LAZY_OWNERS[slot] = owner;
+        }
+    }
+
+    /** 槽位的惰性提供者；{@code null} = 非惰性（直接读槽位值）。 */
+    public static ExprNode lazyProvider(int slot) {
+        Object[] providers = LAZY_PROVIDERS;
+        return slot < providers.length ? (ExprNode) providers[slot] : null;
+    }
+
+    /** 槽位的惰性作用域（{@link #LAZY_COLUMN} / {@link #LAZY_CELL}）。 */
+    public static int lazyScope(int slot) {
+        int[] scopes = LAZY_SCOPES;
+        return slot < scopes.length ? scopes[slot] : LAZY_COLUMN;
+    }
+
+    /** 槽位所属的 CompiledBlockNode id（惰性值按该块的进入坐标求值与失效判定）。 */
+    public static int lazyOwner(int slot) {
+        int[] owners = LAZY_OWNERS;
+        return slot < owners.length ? owners[slot] : -1;
+    }
 
     /** 编译期记录「某槽位是否与 ly 相关」；仅编译期间使用。 */
     private final Map<Integer, Boolean> slotDependent = new HashMap<>();
+
+    /** 编译期记录「某槽位是否在 4×4×4 格内变化」（QUART 分类）；仅编译期间使用。 */
+    private final Map<Integer, Boolean> slotCellVarying = new HashMap<>();
 
     /** 编译入口。传入已编译的节点会被原样返回（幂等）。 */
     public static ExprNode compile(ExprNode node) {
@@ -120,34 +170,50 @@ public final class ExprCompiler {
             case ExprNode.BlockExprNode be -> {
                 Map<String, Integer> scope = new HashMap<>();
                 scopes.push(scope);
+                int blockId = NEXT_NODE_ID.getAndIncrement();
                 List<Integer> slotList = new ArrayList<>();
                 List<ExprNode> valueList = new ArrayList<>();
                 List<Boolean> hoistedList = new ArrayList<>();
+                List<Integer> lazyScopeList = new ArrayList<>();
                 for (ExprNode.LetBinding binding : be.bindings()) {
                     // 绑定值先于绑定名可见，顺序不能颠倒
                     Compiled compiled = compileNode(binding.value(), scopes);
                     boolean dependent = compiled.lyDependent();
+                    boolean cellVarying = cellVarying(compiled.node());
+                    // 惰性粒度：与 y 无关 → 每列；只经 4×4×4 量化源依赖 y → 每格；
+                    // 其余逐格求值（-1）。惰性值只在被读取时求值（见 EvalContext）。
+                    int lazyScope = !dependent ? LAZY_COLUMN
+                            : (!cellVarying ? LAZY_CELL : -1);
                     if (binding.names().size() == 1) {
                         int slot = NEXT_SLOT.getAndIncrement();
                         valueList.add(compiled.node());
                         slotList.add(slot);
                         slotDependent.put(slot, dependent);
-                        // 与 ly 无关的绑定可提升：每列求值一次，逐格重算时跳过
+                        slotCellVarying.put(slot, cellVarying);
+                        if (lazyScope >= 0) registerLazy(slot, lazyScope, blockId, compiled.node());
+                        lazyScopeList.add(lazyScope);
                         hoistedList.add(!dependent);
                         scope.put(binding.names().get(0), slot);
                     } else {
                         // 元组 let：一个隐藏槽位存元组值，每个名字一个分量槽位。
-                        // 分量与元组同享 ly 相关性（一起提升或一起逐格重算）。
+                        // 分量与元组同享 ly / 格级相关性（价值相同、一起惰性化）。
                         int tupleSlot = NEXT_SLOT.getAndIncrement();
                         valueList.add(compiled.node());
                         slotList.add(tupleSlot);
                         slotDependent.put(tupleSlot, dependent);
+                        slotCellVarying.put(tupleSlot, cellVarying);
+                        if (lazyScope >= 0) registerLazy(tupleSlot, lazyScope, blockId, compiled.node());
+                        lazyScopeList.add(lazyScope);
                         hoistedList.add(!dependent);
                         for (int i = 0; i < binding.names().size(); i++) {
                             int slot = NEXT_SLOT.getAndIncrement();
-                            valueList.add(new ExprNode.TupleComponentNode(tupleSlot, i, dependent));
+                            ExprNode component = new ExprNode.TupleComponentNode(tupleSlot, i, dependent);
+                            valueList.add(component);
                             slotList.add(slot);
                             slotDependent.put(slot, dependent);
+                            slotCellVarying.put(slot, cellVarying);
+                            if (lazyScope >= 0) registerLazy(slot, lazyScope, blockId, component);
+                            lazyScopeList.add(lazyScope);
                             hoistedList.add(!dependent);
                             scope.put(binding.names().get(i), slot);
                         }
@@ -157,16 +223,17 @@ public final class ExprCompiler {
                 int[] slots = new int[count];
                 ExprNode[] values = new ExprNode[count];
                 boolean[] hoisted = new boolean[count];
+                int[] lazyScopes = new int[count];
                 for (int i = 0; i < count; i++) {
                     slots[i] = slotList.get(i);
                     values[i] = valueList.get(i);
                     hoisted[i] = hoistedList.get(i);
+                    lazyScopes[i] = lazyScopeList.get(i);
                 }
                 Compiled body = compileNode(be.body(), scopes);
                 scopes.pop();
                 yield new Compiled(
-                        new ExprNode.CompiledBlockNode(
-                                NEXT_NODE_ID.getAndIncrement(), slots, hoisted, values, body.node()),
+                        new ExprNode.CompiledBlockNode(blockId, slots, hoisted, lazyScopes, values, body.node()),
                         body.lyDependent());
             }
 
@@ -490,6 +557,120 @@ public final class ExprCompiler {
             if (scope.containsKey(name)) return true;
         }
         return false;
+    }
+
+    // ---------------------------------------------------------------- QUART 分类
+
+    /**
+     * 判定编译后的节点是否可能在**同一个 4×4×4 格内**变化（QUART 依赖类）。
+     *
+     * <p>用于把「只经 4×4×4 量化源（{@code climate}、{@code biomeis}、
+     * {@code biome_at}，以及它们的纯函数组合）依赖 y」的绑定按格缓存：整个 4×4×4
+     * 格只求值一次，而不是每格重算。分类必须保守——判为「格内不变」的值必须真的
+     * 不变，否则会静默出错；判为「变化」只损失优化。
+     */
+    private boolean cellVarying(ExprNode node) {
+        return switch (node) {
+            case ExprNode.NumberNode n -> false;
+            case ExprNode.BlockNode b -> false;
+            case ExprNode.VariableNode v -> true; // 未经编译的可变名：保守
+            case ExprNode.BuiltinNode b -> switch (b.kind()) {
+                // seed / spawnx / spawnz / keep 与坐标无关；
+                // x/z/ly/y/sd/sdb/wd/slope/sy/sw/vsolid/vfluid/vair/vanilla（叠加方块语义）逐格变化
+                case 3, 5, 6, 7 -> false;
+                default -> true;
+            };
+            case ExprNode.SlotNode s -> slotCellVarying.getOrDefault(s.slot(), true);
+            case ExprNode.BinaryNode b -> cellVarying(b.left()) || cellVarying(b.right());
+            case ExprNode.UnaryNode u -> cellVarying(u.operand());
+            case ExprNode.ConditionalNode c -> cellVarying(c.condition())
+                    || cellVarying(c.thenExpr()) || cellVarying(c.elseExpr());
+            case ExprNode.FuncCallNode f -> funcCellVarying(f.name(), f.args());
+            case ExprNode.CompiledFuncCallNode f -> idCellVarying(f.id(), f.args());
+            // 多返回函数（warp2 等）都是参数的纯函数：参数格内不变则结果格内不变
+            case ExprNode.TupleCallNode t -> anyCellVarying(t.args());
+            case ExprNode.CompiledTupleCallNode t -> anyCellVarying(t.args());
+            case ExprNode.BlockExprNode be -> true; // 未经编译的块：保守
+            case ExprNode.CompiledBlockNode cb -> cellVarying(cb.body());
+            case ExprNode.TupleComponentNode t -> slotCellVarying.getOrDefault(t.slot(), true);
+            // 网格缓存/插值、河网：值随格内坐标变化
+            case ExprNode.CompiledCache2dNode c -> true;
+            case ExprNode.CompiledBlur2Node c -> true;
+            case ExprNode.CompiledCache3dNode c -> true;
+            case ExprNode.CompiledRiverNetNode r -> true;
+        };
+    }
+
+    /** 参数里是否有任一在 4×4×4 格内变化的值。 */
+    private boolean anyCellVarying(List<ExprNode> args) {
+        for (ExprNode arg : args) {
+            if (cellVarying(arg)) return true;
+        }
+        return false;
+    }
+
+    /** 未编译函数名的 QUART 分类（编译前信息有限，只认已知的纯函数）。 */
+    private boolean funcCellVarying(String name, List<ExprNode> args) {
+        if (name.equals("climate")) return !climateCellInvariant(args);
+        if (name.equals("biomeis")) return !biomeIsCellInvariant(args);
+        if (name.equals("biome_at")) return anyCellVarying(args);
+        if (name.equals("rand") || name.equals("randexcept")) return true;
+        if (name.equals("peaks")) return anyCellVarying(args);
+        // 纯数值/噪声函数：值只由参数决定
+        if (ExprEvaluator.isPureNumericFunction(name)) return anyCellVarying(args);
+        return true;
+    }
+
+    /** 编译后函数编号的 QUART 分类。 */
+    private boolean idCellVarying(int id, List<ExprNode> args) {
+        if (id == ExprEvaluator.FN_CLIMATE) return !climateCellInvariant(args);
+        if (id == ExprEvaluator.FN_BIOMEIS) return !biomeIsCellInvariant(args);
+        if (id == ExprEvaluator.FN_BIOME_AT) return anyCellVarying(args);
+        if (id == ExprEvaluator.FN_RAND || id == ExprEvaluator.FN_RANDEXCEPT) return true;
+        if (id == ExprEvaluator.FN_PEAKS) return anyCellVarying(args);
+        if (ExprEvaluator.isPureNumericFunctionId(id)) return anyCellVarying(args);
+        return true;
+    }
+
+    /**
+     * 帧内量化不变的坐标标量：数值常量，或内建的世界标量（x / z / y / seed /
+     * spawnx / spawnz）。同一 4×4×4 格内这些值要么恒定，要么量化后恒定——
+     * 只有它们才能让"按格量化"的查询在格内保持不变。变换过的坐标
+     * （如 {@code x + 3}、{@code x * 4}）可能跨格，必须按逐方块处理。
+     */
+    private static boolean quartInvariantScalar(ExprNode arg) {
+        if (arg instanceof ExprNode.NumberNode) return true;
+        if (arg instanceof ExprNode.BuiltinNode b) {
+            return switch (b.kind()) {
+                case 0, 1, 3, 4, 5, 6 -> true; // x, z, seed, y, spawnx, spawnz
+                default -> false;
+            };
+        }
+        return false;
+    }
+
+    /**
+     * {@code climate(字段, x, z)} / {@code climate(字段, x, y, z)}：采样按 4×4×4
+     * 量化——字段码为常量、坐标实参帧内量化不变时，值在格内恒定。
+     */
+    private static boolean climateCellInvariant(List<ExprNode> args) {
+        if (args.isEmpty() || !(args.get(0) instanceof ExprNode.NumberNode)) return false;
+        for (int i = 1; i < args.size(); i++) {
+            if (!quartInvariantScalar(args.get(i))) return false;
+        }
+        return true;
+    }
+
+    /**
+     * {@code biomeis(x, z, y, 群系)}：采样点按 4×4×4 量化——三个坐标实参帧内
+     * 量化不变、且群系实参格内不变时，结果在格内恒定。
+     */
+    private boolean biomeIsCellInvariant(List<ExprNode> args) {
+        return args.size() == 4
+                && quartInvariantScalar(args.get(0))
+                && quartInvariantScalar(args.get(1))
+                && quartInvariantScalar(args.get(2))
+                && !cellVarying(args.get(3));
     }
 
     private ExprNode resolve(String name, ArrayDeque<Map<String, Integer>> scopes) {

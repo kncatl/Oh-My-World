@@ -212,13 +212,14 @@ FEATURES_SMOKE_RULES = {
 
 def parse_args(argv):
     """返回 (server, require_all, dimension_smoke, structure_smoke, biome_smoke,
-    features_smoke, expects, forbids)；出错返回 None。"""
+    features_smoke, expects, forbids, carvers_ew_smoke)；出错返回 None。"""
     server = None
     require_all = False
     dimension_smoke = None
     structure_smoke = None
     biome_smoke = None
     features_smoke = None
+    carvers_ew_smoke = False
     expects = {}
     forbids = {}
     i = 0
@@ -239,6 +240,9 @@ def parse_args(argv):
         elif arg == "--features-smoke" and i + 1 < len(argv):
             features_smoke = argv[i + 1]
             i += 2
+        elif arg == "--carvers-ew-smoke":
+            carvers_ew_smoke = True
+            i += 1
         elif arg in ("--expect", "--forbid") and i + 2 < len(argv):
             target = expects if arg == "--expect" else forbids
             target.setdefault(argv[i + 1], []).extend(argv[i + 2].split(","))
@@ -253,7 +257,7 @@ def parse_args(argv):
             print("[smoke-check] FAIL: 多余的位置参数")
             return None
     return (server, require_all, dimension_smoke, structure_smoke, biome_smoke,
-            features_smoke, expects, forbids)
+            features_smoke, expects, forbids, carvers_ew_smoke)
 
 
 def chunk_status(raw):
@@ -362,16 +366,93 @@ def run_checks(world, expects, forbids, any_rules=None, filled_only=False):
     return ok
 
 
+def check_carvers_ew(world, dimension="overworld"):
+    """[carvers:vanilla-ew] 核验：水方块本身不被雕刻；水下固体照常雕刻。
+
+    约定冒烟公式（tools/smoke-server-config.py 的 CARVERS_EW_FORMULA）：
+    x<0 全实心到 y=40（无水侧）；x>=0 水面 y=41..62（水域）。
+    这样：东半 y=41..62 雕刻后必须**全是水**（出现任何其他方块 = 水被雕刻）；
+    两侧 y<=40 的固体都允许被雕刻，且都必须真的出现雕刻空腔。
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "omw_dump_biomes", str(Path(__file__).resolve().parent / "dump-biomes.py"))
+    db = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(db)
+
+    dirs = [world / rel for rel in DIMENSION_PATHS[dimension] if (world / rel).is_dir()]
+    if not dirs:
+        return False, f"{dimension}: 没有 region 目录"
+
+    water_lost = 0   # 水域内出现的非水方块（水被雕刻的直接证据）
+    dry_carved = 0   # 无水侧（x<0）水下的雕刻空腔
+    wet_carved = 0   # 水域下方（x>=0）固体的雕刻空腔（应照常出现）
+    chunks = 0
+    for directory in dirs:
+        for cx, cz, chunk in db.load_chunks(str(directory)):
+            db.prepare_blocks(chunk)
+            sections = [s for s in chunk.get("sections", []) if s.get("_blocks")]
+            if not sections:
+                continue
+            has_terrain = any(
+                db.palette_name(s["block_states"]["palette"][v]) not in db.AIR_NAMES
+                for s in sections for v in s["_blocks"])
+            if not has_terrain:
+                continue
+            chunks += 1
+            by_bottom = {s["Y"] * 16: s for s in sections}
+
+            def block(lx, y, lz):
+                section = by_bottom.get(y & ~15)
+                if section is None:
+                    return "minecraft:air"
+                return db.block_at(section, lx, y, lz)
+
+            for lx in range(16):
+                for lz in range(16):
+                    world_x = cx * 16 + lx
+                    for y in range(-60, 41):
+                        name = block(lx, y, lz)
+                        if name != "minecraft:stone":
+                            if world_x < 0:
+                                dry_carved += 1
+                            else:
+                                wet_carved += 1
+                    # 水域本身（仅 x>=0）：y=41..62 必须全是水（气泡/空腔=水被雕刻）
+                    if world_x >= 0:
+                        for y in range(41, 63):
+                            if block(lx, y, lz) != "minecraft:water":
+                                water_lost += 1
+    if chunks == 0:
+        return False, f"{dimension}: 没有已生成地形的区块"
+    if water_lost != 0:
+        return False, (f"{dimension}: 水域内出现 {water_lost} 个非水方块"
+                       "（水被雕刻——[carvers:vanilla-ew] 未跳过水方块）")
+    if dry_carved < 2000:
+        return False, (f"{dimension}: 无水侧（x<0）y<=40 雕刻改动仅 {dry_carved} 格"
+                       "（雕刻器似乎完全没有运行）")
+    if wet_carved < 2000:
+        return False, (f"{dimension}: 水域下方（x>=0）y<=40 雕刻改动仅 {wet_carved} 格"
+                       "（水下固体被误保护——应照常雕刻）")
+    return True, (f"{dimension}: {chunks} 个区块 OK——水域零改动；"
+                  f"水下固体与陆地照常雕刻（{wet_carved} / {dry_carved} 格改动）")
+
+
 def main():
     parsed = parse_args(sys.argv[1:])
     if parsed is None:
         return 2
     (server, require_all, dimension_smoke, structure_smoke, biome_smoke,
-     features_smoke, expects, forbids) = parsed
+     features_smoke, expects, forbids, carvers_ew_smoke) = parsed
     if server is None:
         print(__doc__)
         return 2
     world = Path(server) / "world"
+
+    if carvers_ew_smoke:
+        ok, message = check_carvers_ew(world)
+        print("[smoke-check] " + ("OK: " if ok else "FAIL: ") + message)
+        return 0 if ok else 1
 
     if dimension_smoke or structure_smoke or biome_smoke or features_smoke:
         if dimension_smoke:

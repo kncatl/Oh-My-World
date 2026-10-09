@@ -373,6 +373,34 @@ public class ExprEvaluator {
     public static final int FN_UNKNOWN = -1;
 
     /**
+     * 是否是"纯数值函数"：值完全由实参决定（不隐式读取坐标/世界状态，不用 rand）。
+     * 供 QUART 分类使用：实参在 4×4×4 格内不变时，结果也格内不变。
+     */
+    public static boolean isPureNumericFunction(String name) {
+        return switch (name) {
+            case "floordiv", "floormod", "abs", "max", "min", "floor", "ceil", "round",
+                 "sign", "sqrt", "pow", "exp", "log", "log10", "sin", "cos", "tan",
+                 "asin", "acos", "atan", "todeg", "torad",
+                 "seedhash",
+                 "clamp", "lerp", "smoothstep", "map",
+                 "noise2", "noise3", "fbm2", "fbm3", "worley2", "worley3",
+                 "spline", "cspline", "waterline", "worley2f2", "worley2edge",
+                 "atan2", "fract", "step", "smootherstep", "tanh", "hypot",
+                 "bias", "gain", "saturate", "select", "terrace",
+                 "fbma2", "ridged2", "billow2", "fbm2e" -> true;
+            default -> false;
+        };
+    }
+
+    /** {@link #isPureNumericFunction(String)} 的编译后编号版本。 */
+    public static boolean isPureNumericFunctionId(int id) {
+        return (id >= 0 && id <= 21)                       // 基础数学
+                || id == FN_SEEDHASH
+                || (id >= FN_CLAMP && id <= FN_FBM2E)      // 107..136：clamp..fbm2e
+                || id == FN_PEAKS;
+    }
+
+    /**
      * 编译期把函数名解析成编号；未知函数返回 {@link #FN_UNKNOWN}。
      * 每个调用点只在编译期解析一次，因此这里用字符串 switch 即可。
      */
@@ -574,11 +602,11 @@ public class ExprEvaluator {
             case ExprNode.BuiltinNode b -> b.kind() == 7 ? SURFACE_KEEP
                     : b.kind() == BUILTIN_VANILLA ? VANILLA
                     : builtinValue(b.kind(), x, z, ly, context.globalY);
-            case ExprNode.SlotNode s -> context.slot(s.slot());
+            case ExprNode.SlotNode s -> context.slotLazy(s.slot(), x, z, ly);
             case ExprNode.CompiledFuncCallNode f -> evalCompiledFunc(f, x, z, ly, context);
             case ExprNode.CompiledTupleCallNode t -> evalCompiledTupleCall(t.id(), t.args(), x, z, ly, context);
             case ExprNode.CompiledBlockNode cb -> evalCompiledBlock(cb, x, z, ly, context);
-            case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
+            case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index(), x, z, ly);
             case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
             case ExprNode.CompiledBlur2Node c -> evalBlur2Compiled(c, x, z, ly, context);
             case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
@@ -588,41 +616,22 @@ public class ExprEvaluator {
 
     private static Object evalCompiledBlock(ExprNode.CompiledBlockNode block, int x, int z, int ly,
                                             EvalContext context) {
-        // 与 y 无关的绑定每列只需算一次：本节点在本列尚未预备时先补齐，
-        // 之后逐格求值只剩与 y 相关的绑定与 body。
-        if (!context.isPrepared(block.id(), x, z)) {
-            prepareHoisted(block, x, z, ly, context);
-        }
+        // 惰性绑定（与 y 无关 → 每列；只经 4×4×4 量化源 → 每格）不在这里求值：
+        // 它们的值在**首次被读取**时现场计算并缓存（见 EvalContext#slotLazy），
+        // 没被用到的绑定、以及没被走到的分支里的绑定完全不会求值。
+        // 非惰性绑定逐格求值，顺序与 let 书写顺序一致。
+        // 帧记录块进入时的坐标：惰性值按该坐标计算与失效判定（cache2d 等函数会在
+        // 别的坐标上重新求值参数，不能拿读取点坐标当绑定的求值环境）。
+        // 帧不随退出移除：读取只发生在块的动态范围内，下次进入就地更新即可。
         int[] slots = block.slots();
         ExprNode[] values = block.values();
-        boolean[] hoisted = block.hoisted();
+        int[] lazyScopes = block.lazyScope();
+        context.enterBlock(block.id(), x, z, ly);
         for (int i = 0; i < values.length; i++) {
-            if (hoisted[i]) continue; // 已由 prepareHoisted 填入槽位
+            if (lazyScopes[i] >= 0) continue; // 惰性绑定：读取时再算
             context.setSlot(slots[i], eval(values[i], x, z, ly, context));
         }
         return eval(block.body(), x, z, ly, context);
-    }
-
-    /**
-     * 按绑定顺序求值一个块里与 y 无关的绑定并写入槽位，然后标记本列已预备。
-     *
-     * <p>绑定值只会引用更早的绑定，而与 y 无关的值只能引用同样与 y 无关的槽位
-     * （否则它自己就会与 y 相关），因此按顺序求值即可，无需拓扑排序。
-     *
-     * <p>正确性依赖两点：一是本节点的槽位只有本节点会读写；二是预备标记按
-     * (节点 id, x, z) 记录，且槽位跨表达式全局唯一（见 {@code ExprCompiler}），
-     * 别的表达式不会覆盖已预备的值。
-     */
-    private static void prepareHoisted(ExprNode.CompiledBlockNode block, int x, int z, int ly,
-                                       EvalContext context) {
-        int[] slots = block.slots();
-        ExprNode[] values = block.values();
-        boolean[] hoisted = block.hoisted();
-        for (int i = 0; i < values.length; i++) {
-            if (!hoisted[i]) continue;
-            context.setSlot(slots[i], eval(values[i], x, z, ly, context));
-        }
-        context.markPrepared(block.id(), x, z);
     }
 
     private static double builtinValue(int kind, int x, int z, int ly, int globalY) {
@@ -816,7 +825,7 @@ public class ExprEvaluator {
         return switch (node) {
             case ExprNode.NumberNode n -> n.value();
             case ExprNode.BuiltinNode b -> builtinValue(b.kind(), x, z, ly, context.globalY);
-            case ExprNode.SlotNode s -> toDouble(context.slot(s.slot()));
+            case ExprNode.SlotNode s -> toDouble(context.slotLazy(s.slot(), x, z, ly));
             case ExprNode.BinaryNode b -> evalNumberBinary(b, x, z, ly, context);
             case ExprNode.UnaryNode u -> u.op() == ExprNode.UnaryOp.NEG
                     ? -evalNumber(u.operand(), x, z, ly, context)
@@ -826,7 +835,7 @@ public class ExprEvaluator {
                     : evalNumber(c.elseExpr(), x, z, ly, context);
             case ExprNode.FuncCallNode f -> evalNumberFunc(f, x, z, ly, context);
             case ExprNode.CompiledFuncCallNode f -> evalCompiledNumberFunc(f, x, z, ly, context);
-            case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index());
+            case ExprNode.TupleComponentNode t -> context.tupleComponent(t.slot(), t.index(), x, z, ly);
             case ExprNode.CompiledCache2dNode c -> evalCache2dCompiled(c, x, z, ly, context);
             case ExprNode.CompiledBlur2Node c -> evalBlur2Compiled(c, x, z, ly, context);
             case ExprNode.CompiledCache3dNode c -> evalCache3dCompiled(c, x, z, ly, context);
@@ -2208,31 +2217,30 @@ public class ExprEvaluator {
         /** 编译后形式的 let 绑定槽位；按需增长，跨次求值复用。 */
         private Object[] slots = new Object[16];
 
-        // 编译块在本列是否已预备。列以 (x, z) 标识，块以节点 id 区分；
-        // reset() 刻意不清空——提升的绑定正是要跨同一列的多次逐格求值复用。
-        private boolean[] prepared = new boolean[8];
-        private int[] preparedX = new int[8];
-        private int[] preparedZ = new int[8];
+        // 惰性槽位的缓存戳：列（x,z）或 4×4×4 格（x>>2,y>>2,z>>2）。
+        // 戳记录的是**所属块进入时的坐标**（帧坐标），而不是读取点坐标——
+        // cache2d 等函数会在另外的坐标上重新求值参数，读取点坐标并不代表绑定
+        // 的求值环境。reset() 刻意不清空：惰性值正是要跨同一列/同一格的多次
+        // 逐格求值复用；块帧在进入/退出时显式维护。
+        private boolean[] slotFresh = new boolean[16];
+        private int[] freshX = new int[16];
+        private int[] freshY = new int[16];
+        private int[] freshZ = new int[16];
+
+        /** 正在进行中的 CompiledBlockNode 帧（块 id → 进入时的坐标与 y）。 */
+        private final Map<Integer, Frame> frames = new HashMap<>();
+
+        /** 块进入时的求值环境快照（可变对象复用，避免逐格分配）。 */
+        private static final class Frame {
+            int x;
+            int z;
+            int ly;
+            int globalY;
+        }
 
         void reset() {
             bindings.clear();
             scopes.clear();
-        }
-
-        boolean isPrepared(int id, int x, int z) {
-            return id < prepared.length && prepared[id] && preparedX[id] == x && preparedZ[id] == z;
-        }
-
-        void markPrepared(int id, int x, int z) {
-            if (id >= prepared.length) {
-                int grown = Math.max(id + 1, prepared.length * 2);
-                prepared = Arrays.copyOf(prepared, grown);
-                preparedX = Arrays.copyOf(preparedX, grown);
-                preparedZ = Arrays.copyOf(preparedZ, grown);
-            }
-            prepared[id] = true;
-            preparedX[id] = x;
-            preparedZ[id] = z;
         }
 
         void setSlot(int slot, Object value) {
@@ -2248,11 +2256,96 @@ public class ExprEvaluator {
             return slots[slot];
         }
 
-        /** 元组槽位的第 index 个分量；缺失（未求值 / 越界）时回退 0。 */
-        double tupleComponent(int slot, int index) {
+        /**
+         * 读取槽位；若该槽位是惰性绑定（编译期登记的提供者）且缓存戳已过期，
+         * 现场求值提供者、写入槽位并打上新戳。非惰性槽位直接读值。
+         *
+         * <p>求值与打戳都用**所属块帧**的坐标（见 {@link #frameOf}）——cache2d 等
+         * 函数会在别的坐标上重新求值参数，读取点坐标不代表绑定的求值环境。
+         */
+        Object slotLazy(int slot, int x, int z, int ly) {
+            ExprNode provider = ExprCompiler.lazyProvider(slot);
+            if (provider == null) return slots[slot];
+            ensureLazy(slot, provider, ExprCompiler.lazyScope(slot),
+                    ExprCompiler.lazyOwner(slot), x, z, ly);
+            return slots[slot];
+        }
+
+        /** 取槽位所属块的进入帧；所属块不在（不应发生）时退回读取点坐标。 */
+        private Frame frameOf(int owner, int x, int z, int ly) {
+            Frame frame = frames.get(owner);
+            if (frame != null) return frame;
+            Frame fallback = new Frame();
+            fallback.x = x;
+            fallback.z = z;
+            fallback.ly = ly;
+            fallback.globalY = globalY;
+            return fallback;
+        }
+
+        /** 确保惰性槽位的值在当前列/格内已经算好（按所属块帧的坐标计算）。 */
+        private void ensureLazy(int slot, ExprNode provider, int scope, int owner,
+                                int x, int z, int ly) {
+            Frame frame = frameOf(owner, x, z, ly);
+            if (isFresh(slot, scope, frame)) return;
+            int savedY = globalY;
+            globalY = frame.globalY;
+            try {
+                setSlot(slot, eval(provider, frame.x, frame.z, frame.ly, this));
+            } finally {
+                globalY = savedY;
+            }
+            markFresh(slot, scope, frame);
+        }
+
+        /** 元组槽位的第 index 个分量；惰性元组先确保其值已算好；缺失时回退 0。 */
+        double tupleComponent(int slot, int index, int x, int z, int ly) {
+            ExprNode provider = ExprCompiler.lazyProvider(slot);
+            if (provider != null) {
+                ensureLazy(slot, provider, ExprCompiler.lazyScope(slot),
+                        ExprCompiler.lazyOwner(slot), x, z, ly);
+            }
             Object value = slots[slot];
             if (value instanceof double[] values && index < values.length) return values[index];
             return 0;
+        }
+
+        /** 缓存戳是否仍对帧所在列（LAZY_COLUMN）或 4×4×4 格（LAZY_CELL）有效。 */
+        private boolean isFresh(int slot, int scope, Frame frame) {
+            if (slot >= slotFresh.length || !slotFresh[slot]) return false;
+            if (scope == ExprCompiler.LAZY_COLUMN) {
+                return freshX[slot] == frame.x && freshZ[slot] == frame.z;
+            }
+            return (freshX[slot] >> 2) == (frame.x >> 2)
+                    && (freshY[slot] >> 2) == (frame.globalY >> 2)
+                    && (freshZ[slot] >> 2) == (frame.z >> 2);
+        }
+
+        private void markFresh(int slot, int scope, Frame frame) {
+            if (slot >= slotFresh.length) {
+                int grown = Math.max(slot + 1, slotFresh.length * 2);
+                slotFresh = Arrays.copyOf(slotFresh, grown);
+                freshX = Arrays.copyOf(freshX, grown);
+                freshY = Arrays.copyOf(freshY, grown);
+                freshZ = Arrays.copyOf(freshZ, grown);
+            }
+            slotFresh[slot] = true;
+            freshX[slot] = frame.x;
+            freshY[slot] = frame.globalY;
+            freshZ[slot] = frame.z;
+        }
+
+        /**
+         * 进入一个 CompiledBlockNode：登记（或就地更新）帧。帧对象持久保留、
+         * 每次进入只改字段——惰性值按帧坐标求值与失效判定；读取只发生在块的
+         * 动态范围内，因此无需在退出时移除。
+         */
+        void enterBlock(int id, int x, int z, int ly) {
+            Frame frame = frames.computeIfAbsent(id, k -> new Frame());
+            frame.x = x;
+            frame.z = z;
+            frame.ly = ly;
+            frame.globalY = globalY;
         }
 
         void enterScope() { scopes.push(new Scope()); }

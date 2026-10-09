@@ -11,7 +11,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**
- * 「公式没有 overworld 节 → 新建世界的主世界用原版生成」的注入点。
+ * 「公式世界的主世界需要原版噪声生成器时（没有 overworld 节，或 overworld 节
+ * 使用 [terrain:vanilla] 叠加模式），新建世界的主世界换成原版生成」的注入点。
  *
  * <p>创建世界界面在“创建”按钮/回车触发的 {@code onCreate} 里读取
  * {@code uiState.getSettings()}，随后用 {@code selectedDimensions().bake(...)}

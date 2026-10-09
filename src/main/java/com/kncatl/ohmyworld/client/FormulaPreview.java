@@ -45,7 +45,7 @@ public final class FormulaPreview {
 
         PatternData.PatternSnapshot snapshot = new PatternData.PatternSnapshot(
                 List.copyOf(parsedDim.layers()), "", 0L, DimensionRules.StructureRule.ALL, null, false,
-                List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false,
+                List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false, false,
                 DimensionRules.SurfaceMode.VANILLA, true);
         // 与各维度实际高度保持一致（超世界 -64 起、384 高；下界/末地 0 起、256 高）
         int minY = FormulaParser.DIM_OVERWORLD.equals(dimension) ? -64 : 0;

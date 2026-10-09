@@ -233,6 +233,34 @@ class ExprCompilerTest {
         assertEquals(first, describe(ExprEvaluator.eval(compiled, 11, -7, 3)));
     }
 
+    /**
+     * 惰性绑定必须按**所属块进入时的坐标**冻结求值。
+     *
+     * <p>回归：{@code cache2d} 会在网格角点坐标上重新求值参数；若惰性槽位按读取点
+     * 坐标判缓存/重算，编译前后会得到不同结果（曾把 {@code { let (u,v)=warp2(...);
+     * cache2d(u+v, 8) }} 算错）。
+     */
+    @Test
+    void lazyBindingsFreezeAtOwningColumnNotReadSite() {
+        String[] sources = {
+                "{ let u = x * 100 + z; cache2d(u, 8) }",
+                "{ let (u, v) = warp2(x, z, 200, 30, 6); cache2d(u + v, 8) }",
+                "{ let s = seedhash(x, z, 4) + x; s * 2 + cache2d(s, 4) }",
+        };
+        for (String source : sources) {
+            ExprNode raw = new ExprParser(ExprLexer.tokenize(source)).parse();
+            ExprNode compiled = ExprCompiler.compile(raw);
+            for (int x = -7; x <= 7; x += 2) {
+                for (int z = -7; z <= 7; z += 2) {
+                    String expected = describe(ExprEvaluator.eval(raw, x, z, 0));
+                    String actual = describe(ExprEvaluator.eval(compiled, x, z, 0));
+                    assertEquals(expected, actual, String.format(Locale.ROOT,
+                            "%s 在 (x=%d, z=%d) 处结果不一致", source, x, z));
+                }
+            }
+        }
+    }
+
     @Test
     void functionCallsCompileToIds() {
         ExprNode.CompiledBlockNode root = rootBlock("{ let a = max(abs(x), sin(z)); a }");

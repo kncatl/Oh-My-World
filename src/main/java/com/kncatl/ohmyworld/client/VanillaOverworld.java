@@ -16,7 +16,15 @@ import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
 /**
- * 「公式未定义 overworld 节时，创建出的世界主世界按原版生成」。
+ * 「公式世界的主世界需要原版噪声生成器时，创建时把主世界换掉」。
+ *
+ * <p>两种情况：
+ * <ul>
+ *   <li>公式没有 overworld 节：主世界完全按原版生成（原行为）；</li>
+ *   <li>公式的 overworld 节使用 {@code [terrain:vanilla]} 叠加模式：叠加需要
+ *       原版噪声地形作底，而「公式化生成」预设的主世界是超平坦——这里把它
+ *       换成原版噪声主世界，叠加模式即可直接生效（否则该维度公式会被停用）。</li>
+ * </ul>
  *
  * <p>在“创建新世界”真正开始的那一刻（{@code CreateWorldScreen.onCreate}）把世界
  * 创建上下文换成“主世界生成器 = 原版噪声生成器”的版本；只对新建世界生效——生成器在
@@ -30,19 +38,23 @@ import org.slf4j.Logger;
 public final class VanillaOverworld {
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    /** 条件：flat_plus 创建流程中、公式显式设置过、且没有 overworld 节。 */
+    /** 条件：flat_plus 创建流程中、公式显式设置过，且主世界需要原版噪声生成器。 */
     public static boolean shouldReplace() {
         return PatternData.isPending()
                 && PatternData.hasExplicitFormula()
-                && !PatternData.hasFormulaFor(Level.OVERWORLD);
+                && (!PatternData.hasFormulaFor(Level.OVERWORLD)
+                    || PatternData.overlayFor(Level.OVERWORLD));
     }
 
     /** 供注入点调用：满足条件时返回“主世界换成原版”的世界创建上下文，否则原样返回。 */
     public static WorldCreationContext maybeReplace(WorldCreationContext context) {
         if (shouldReplace()) {
             if (OhMyWorldConfig.debugLogsEnabled()) {
-                LOGGER.info("ohmyworld: [client] formula has no overworld section; "
-                        + "the new world's overworld will use vanilla generation");
+                String reason = PatternData.hasFormulaFor(Level.OVERWORLD)
+                        ? "the overworld section uses [terrain:vanilla]"
+                        : "the formula has no overworld section";
+                LOGGER.info("ohmyworld: [client] {}; the new world's overworld will use "
+                        + "vanilla noise generation", reason);
             }
             return context.withDimensions((access, dimensions) ->
                     dimensions.replaceOverworldGenerator(access, vanillaOverworldGenerator(access)));

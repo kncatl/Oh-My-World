@@ -204,14 +204,21 @@ public sealed interface ExprNode {
      * 编译后的 let 块：按顺序求值 {@code values} 并写入对应 {@code slots}，再求值
      * {@code body}。槽位在编译期分配，因此无需作用域进出与名字查找。
      *
-     * <p>{@code hoisted[i]} 为 true 表示第 i 个绑定与纵坐标无关，可以一列只求值一次：
-     * 求值器在每列首次用到本节点时先算好这些绑定，逐格求值时直接跳过。这样既保留了
-     * 逐格求值的高度相关内容，又不用为整层引入「与 y 无关」的额外约束。
+     * <p>{@code hoisted[i]} 为 true 表示第 i 个绑定与纵坐标无关；{@code lazyScope[i]}
+     * 记录惰性缓存的粒度（见 {@code ExprCompiler.LAZY_*}）：
+     * <ul>
+     *   <li>{@code LAZY_COLUMN}：与 y 无关，同一列只求值一次；</li>
+     *   <li>{@code LAZY_CELL}：只经 4×4×4 量化源（climate / biome 等）依赖 y，
+     *       同一 4×4×4 格只求值一次；</li>
+     *   <li>-1：逐格求值（循环里正常求值）。</li>
+     * </ul>
+     * 惰性绑定的值只在**被读取时**才计算（不再每列无条件预备）：没被用到的绑定、
+     * 以及没有被走到的分支里的绑定，完全不会求值。
      *
-     * <p>{@code id} 用于区分「本节点在当前列是否已预备」——线程内的求值上下文按它
-     * 记录预备状态。嵌套块各有各的 id，因此预备互不影响。
+     * <p>{@code id} 保留作节点标识（调试/诊断用）。嵌套块各有各的槽位与惰性标记。
      */
-    record CompiledBlockNode(int id, int[] slots, boolean[] hoisted, ExprNode[] values, ExprNode body)
+    record CompiledBlockNode(int id, int[] slots, boolean[] hoisted, int[] lazyScope,
+                             ExprNode[] values, ExprNode body)
             implements ExprNode {}
 
     enum BinaryOp { ADD, SUB, MUL, DIV, MOD, EQ, NE, LT, GT, LE, GE, AND, OR }

@@ -227,9 +227,13 @@ Default preset:
       block is skipped; on the same height later layers override earlier ones;
     - The default carver mode is vanilla (with aquifers); [carvers:...] still
       overrides it;
-    - Overlay needs a dimension with vanilla noise terrain (formulas are disabled
-      on superflat / server_mode worlds); overlay biome lines cannot read the
-      formula terrain (terrain/surfis/blockis report an error).
+    - Overlay needs a dimension with vanilla noise terrain. When creating a
+      Formula Generator world, an overworld section with [terrain:vanilla]
+      automatically swaps in the vanilla noise overworld (overlay then applies
+      directly); old superflat worlds and server_mode superflat worlds still
+      disable the formula for that dimension -- use a normal world preset
+      instead. Overlay biome lines cannot read the formula terrain
+      (terrain/surfis/blockis report an error).
     * Values available in overlay mode:
       vanilla                   vanilla block value (block layers): leave as is
       vis(block)                is the vanilla block at this position the given block?
@@ -316,6 +320,10 @@ Default preset:
     the formula terrain:
       [carvers:none]     default: carvers are cancelled, the formula owns the terrain
       [carvers:vanilla]  allow: vanilla carvers dig canyons/caves into the formula terrain
+      [carvers:vanilla-ew] allow, but skip water blocks themselves -- the
+                         water body stays intact (no cave/canyon pockets are
+                         carved into oceans/rivers/lakes); the solid seabed
+                         and underground are still carved (ew = except water)
     Works in every dimension:
     - noise-generator dimensions (normal worlds / the Nether & End sections of
       a flat world) carve with their own vanilla settings;
@@ -793,10 +801,10 @@ Default preset:
   · Put local heavy computation inside ternary / && / || branches (the engine
     is lazy and short-circuiting) with a cheap bounding-box/distance guard in
     front -- positions that do not need the value never compute it;
-  · Shared lets are evaluated unconditionally per column: only put "always
-    needed" heavy computation there; move position-specific work into branches
-    (ly-independent parts inside a branch are still cached per column, but only
-    for columns that reach that branch);
+  · Shared lets are lazy: bindings that are never used are not evaluated, and a
+    binding used only inside a branch runs only on columns that reach that branch.
+    The ly-independent part is cached per column; parts that depend on height only
+    through 4x4x4-quantised data (climate etc.) are cached per 4x4x4 cell;
   · Layer order (later overrides earlier) does not change cost; the layer's
     y range and branch structure do;
   · The editor preview renders with the "current seed": opening the editor from

@@ -126,6 +126,11 @@ case "$MODE" in
         CONFIG_FLAGS="--carvers-off"
         CHECK_ARGS="--biome-smoke 8"
         ;;
+    carvers-ew)
+        CONFIG_FLAGS="--carvers-ew"
+        CHECK_ARGS="--carvers-ew-smoke"
+        CONSOLE_FORCELOAD="forceload add -128 -128 127 127"
+        ;;
     flat-carvers)
         CONFIG_FLAGS="--flat-carvers"
         CHECK_ARGS="--biome-smoke 8"
@@ -134,8 +139,13 @@ case "$MODE" in
         CONFIG_FLAGS="--flat-carvers-off"
         CHECK_ARGS="--biome-smoke 8"
         ;;
+    flat-carvers-ew)
+        CONFIG_FLAGS="--flat-carvers-ew"
+        CHECK_ARGS="--carvers-ew-smoke"
+        CONSOLE_FORCELOAD="forceload add -128 -128 127 127"
+        ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | overlay-empty | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | flat-carvers | flat-carvers-off）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | overlay-empty | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | carvers-ew | flat-carvers | flat-carvers-off | flat-carvers-ew）" >&2
         exit 2
         ;;
 esac

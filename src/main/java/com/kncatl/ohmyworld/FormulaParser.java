@@ -480,7 +480,12 @@ public class FormulaParser {
         String a = arg.trim();
         if (a.equals("none")) return DimensionRules.CarversMode.NONE;
         if (a.equals("vanilla")) return DimensionRules.CarversMode.VANILLA;
-        errors.add(dimension + ": invalid carvers mode \"" + truncate(a) + "\" (available: none, vanilla)");
+        // vanilla-ew = except water：放行雕刻但跳过水方块本身（水不会被掏出空腔）
+        if (a.equals("vanilla-ew") || a.equals("vanilla-except-water")) {
+            return DimensionRules.CarversMode.VANILLA_EXCEPT_WATER;
+        }
+        errors.add(dimension + ": invalid carvers mode \"" + truncate(a)
+                + "\" (available: none, vanilla, vanilla-ew)");
         return null;
     }
 

@@ -618,6 +618,19 @@ class FormulaParserTest {
         assertEquals(DimensionRules.CarversMode.NONE,
                 none.dimensions().get(FormulaParser.DIM_OVERWORLD).carvers());
 
+        // vanilla-ew（except water）：别名 vanilla-except-water 等价
+        FormulaParser.DimensionParseResult ew = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[carvers:vanilla-ew] y=0: rand()}");
+        assertTrue(ew.errors().isEmpty(), ew.errors().toString());
+        assertEquals(DimensionRules.CarversMode.VANILLA_EXCEPT_WATER,
+                ew.dimensions().get(FormulaParser.DIM_OVERWORLD).carvers());
+
+        FormulaParser.DimensionParseResult ewAlias = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=[carvers:vanilla-except-water] y=0: rand()}");
+        assertTrue(ewAlias.errors().isEmpty(), ewAlias.errors().toString());
+        assertEquals(DimensionRules.CarversMode.VANILLA_EXCEPT_WATER,
+                ewAlias.dimensions().get(FormulaParser.DIM_OVERWORLD).carvers());
+
         FormulaParser.DimensionParseResult bad = FormulaParser.parseDimensionsWithErrors(
                 "{overworld=[carvers:maybe] y=0: rand()}");
         assertTrue(bad.errors().stream().anyMatch(e -> e.contains("invalid carvers mode")),

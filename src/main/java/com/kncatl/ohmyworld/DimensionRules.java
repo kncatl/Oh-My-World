@@ -75,7 +75,9 @@ public final class DimensionRules {
         /** 默认：取消雕刻器，公式完全接管地形。 */
         NONE,
         /** {@code [carvers:vanilla]}：放行原版雕刻器。 */
-        VANILLA
+        VANILLA,
+        /** {@code [carvers:vanilla-ew]}（except water）：放行原版雕刻器，但跳过水方块本身。 */
+        VANILLA_EXCEPT_WATER
     }
 
     /** 叠加模式（[terrain:vanilla]）的表面策略（M3.5；只对叠加模式有意义）。 */

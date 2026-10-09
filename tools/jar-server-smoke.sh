@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|flat-carvers|flat-carvers-off|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|carvers-ew|flat-carvers|flat-carvers-off|flat-carvers-ew|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|carvers-ew|flat-carvers|flat-carvers-off|flat-carvers-ew|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -166,8 +166,10 @@ case "$CHECK_MODE" in
     features-none)   SMOKE_CONFIG_MODE="--features-none" ;;
     carvers)         SMOKE_CONFIG_MODE="--carvers" ;;
     carvers-off)     SMOKE_CONFIG_MODE="--carvers-off" ;;
+    carvers-ew)      SMOKE_CONFIG_MODE="--carvers-ew" ;;
     flat-carvers)    SMOKE_CONFIG_MODE="--flat-carvers" ;;
     flat-carvers-off) SMOKE_CONFIG_MODE="--flat-carvers-off" ;;
+    flat-carvers-ew) SMOKE_CONFIG_MODE="--flat-carvers-ew" ;;
     spawn)           SMOKE_CONFIG_MODE="--spawn-formula" ;;
     open-ranges)     SMOKE_CONFIG_MODE="--open-ranges" ;;
     water)           SMOKE_CONFIG_MODE="--water" ;;
@@ -221,6 +223,10 @@ console_commands() {
         # 特性冒烟：下界玄武岩三角洲的装饰方块样本；16×16 区块足以扫到斑块/荧石
         echo "execute in minecraft:the_nether run forceload add 0 0 255 255"
         sleep 20
+    elif [[ "$CHECK_MODE" == "carvers-ew" || "$CHECK_MODE" == "flat-carvers-ew" ]]; then
+        # 水体保护冒烟：forceload 同时覆盖 x<0（无水侧）与 x>=0（水域）两半
+        echo "execute in minecraft:overworld run forceload add -128 -128 127 127"
+        sleep 60
     elif [[ "$CHECK_MODE" == carvers* || "$CHECK_MODE" == flat-carvers* ]]; then
         # 雕刻器冒烟：forceload 256 区块再收 60 秒——隧道/峡谷稀疏，样本要大
         echo "execute in minecraft:overworld run forceload add 1024 0 1279 255"
@@ -375,6 +381,10 @@ case "$CHECK_MODE" in
     carvers|carvers-off|flat-carvers|flat-carvers-off)
         python3 "$TOOLS/smoke-check-world.py" --biome-smoke 8 "$SRV" \
             || fail "雕刻器冒烟核验失败：石块/世界不符合预期"
+        ;;
+    carvers-ew|flat-carvers-ew)
+        python3 "$TOOLS/smoke-check-world.py" --carvers-ew-smoke "$SRV" \
+            || fail "水体保护雕刻冒烟核验失败：水下有洞或无水侧未雕刻"
         ;;
     spawn)
         python3 "$TOOLS/smoke-check-world.py" --require-all "$SRV" \

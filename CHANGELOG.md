@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.3-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Added
+- **`[carvers:vanilla-ew]` (except water)**: vanilla carvers run as usual but skip water blocks themselves -- the water body stays intact (oceans, rivers and lakes are no longer punctured by carved cave/canyon pockets), while the solid seabed/underground and dry land keep being carved. `[carvers:vanilla-except-water]` is accepted as an alias.
+
+### Changed
+- **Overlay mode is now supported for the Overworld of Formula Generator worlds**: when the Overworld section uses `[terrain:vanilla]`, world creation swaps the flat overworld for the vanilla noise overworld automatically, so overlay mode applies as written (it used to be silently disabled at load, because overlay needs vanilla noise terrain).
+
+### Performance
+- **Shared lets are now lazy**: a binding that is never used is not evaluated at all, and a binding used only inside a branch is evaluated only where that branch runs. Bindings depending on height solely through 4x4x4-quantised sources (climate, biome value, biome_at) are cached per 4x4x4 cell (the new QUART dependency class) instead of being recomputed for every block.
+
 ## v1.3.2-beta.3
 
 > Beta release — please report any issue on GitHub.

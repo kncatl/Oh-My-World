@@ -96,6 +96,7 @@ public class PatternData {
                                   boolean featuresOff, List<BiomeLayerDef> biomeLayers,
                                   List<SurfaceLayerDef> surfaceLayers,
                                   DimensionRules.BiomeFallback biomeFallback, boolean carversVanilla,
+                                  boolean carversEw,
                                   boolean usesVanillaData, boolean overlay,
                                   DimensionRules.SurfaceMode surfaceMode,
                                   boolean protectStructures) {}
@@ -122,7 +123,9 @@ public class PatternData {
                         SNAPSHOT_VERSION.incrementAndGet(), parsed.structure(), parsed.biome(),
                         parsed.featuresOff(), List.copyOf(parsed.biomeLayers()),
                         List.copyOf(parsed.surfaceLayers()), parsed.biomeFallback(),
-                        parsed.carvers() == DimensionRules.CarversMode.VANILLA,
+                        parsed.carvers() == DimensionRules.CarversMode.VANILLA
+                                || parsed.carvers() == DimensionRules.CarversMode.VANILLA_EXCEPT_WATER,
+                        parsed.carvers() == DimensionRules.CarversMode.VANILLA_EXCEPT_WATER,
                         FormulaParser.usesVanillaData(parsed), parsed.overlay(), parsed.surfaceMode(),
                         parsed.protectStructures());
                 shared.put(parsed, snapshot);
@@ -172,7 +175,7 @@ public class PatternData {
             if (defaultSnapshot == null) {
                 defaultSnapshot = new PatternSnapshot(FormulaParser.parse(DEFAULT_INPUT), DEFAULT_INPUT,
                         SNAPSHOT_VERSION.incrementAndGet(), DimensionRules.StructureRule.ALL, null, false,
-                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false,
+                        List.of(), List.of(), DimensionRules.BiomeFallback.NONE, false, false, false, false,
                         DimensionRules.SurfaceMode.VANILLA, true);
             }
             return defaultSnapshot;
@@ -263,10 +266,16 @@ public class PatternData {
         return snapshot == null ? DimensionRules.BiomeFallback.NONE : snapshot.biomeFallback();
     }
 
-    /** [carvers:vanilla] 是否生效；未绑定 / 缺省 → false。 */
+    /** [carvers:vanilla]（含 vanilla-ew）是否生效；未绑定 / 缺省 → false。 */
     public static boolean carversVanillaFor(ChunkGenerator generator) {
         PatternSnapshot snapshot = snapshotFor(generator);
         return snapshot != null && snapshot.carversVanilla();
+    }
+
+    /** [carvers:vanilla-ew]（except water）是否生效；未绑定 / 缺省 → false。 */
+    public static boolean carversEwFor(ChunkGenerator generator) {
+        PatternSnapshot snapshot = snapshotFor(generator);
+        return snapshot != null && snapshot.carversEw();
     }
 
     /** [features:none] 是否生效；未绑定 / 缺省 → false（零行为变化）。 */

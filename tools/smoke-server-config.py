@@ -102,6 +102,7 @@ SMOKE_FORMULA=0 表示保留了已有公式（不要按特征方块判定）。
 """
 
 import sys
+import os
 from pathlib import Path
 
 PROPERTIES = {
@@ -362,6 +363,14 @@ CARVERS_FORMULA = (
 CARVERS_OFF_FORMULA = (
     "{overworld=[carvers:none] y=-64..319: y <= 80 ? minecraft:stone : minecraft:air}"
 )
+# 1.3.2-beta.4：[carvers:vanilla-ew]（except water）——放行雕刻但跳过水方块本身。
+# 西半（x<0）无水：雕刻照常发生；东半（x>=0）水面 y=41..62：水必须保持完整
+# （水内出现任何非水方块 = 水被雕刻）；水下固体（海床）允许被雕刻。
+# [features:none] [structure:none]：排除海草/沉船等对水段核验的干扰。
+CARVERS_EW_FORMULA = (
+    "{overworld=[carvers:vanilla-ew] [features:none] [structure:none] "
+    "y=-64..319: y <= 40 ? minecraft:stone : (x >= 0 && y <= 62 ? minecraft:water : minecraft:air)}"
+)
 
 # 超平坦雕刻器 A/B 冒烟（--flat-carvers / --flat-carvers-off；flat_plus 预设）：
 # 公式与上面相同，区别在 level-type——验证 1.2.6 超平坦世界的"干燥代理"雕刻
@@ -503,8 +512,10 @@ def main():
     natural = "--natural" in sys.argv
     carvers = "--carvers" in sys.argv
     carvers_off = "--carvers-off" in sys.argv
+    carvers_ew = "--carvers-ew" in sys.argv
     flat_carvers = "--flat-carvers" in sys.argv
     flat_carvers_off = "--flat-carvers-off" in sys.argv
+    flat_carvers_ew = "--flat-carvers-ew" in sys.argv
     features_all = "--features-all" in sys.argv
     features_none = "--features-none" in sys.argv
     m1_functions = "--m1-functions" in sys.argv
@@ -530,7 +541,7 @@ def main():
                 key, _, value = line.partition("=")
                 props[key.strip()] = value.strip()
     props.update(PROPERTIES)
-    if carvers or carvers_off or spawn_formula or overlay_marker or overlay_empty:
+    if carvers or carvers_off or carvers_ew or spawn_formula or overlay_marker or overlay_empty:
         # 雕刻器/出生点/叠加模式只存在于噪声生成器：必须用普通世界类型。
         # 出生点专项同理：超平坦世界的出生点固定在 (0,0)，噪声世界的出生点随种子变化，
         # 才能区分"读到真实出生点"与"恒为 0"。
@@ -544,8 +555,8 @@ def main():
     elif biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value \
             or biome_structures or biome_formula or biome_formula_fallback \
             or biome_terrain or biome_biomeis or natural or features_all or features_none \
-            or flat_carvers or flat_carvers_off or m1_functions or surface or rivernet or climate \
-            or dfnoise:
+            or flat_carvers or flat_carvers_off or flat_carvers_ew or m1_functions or surface \
+            or rivernet or climate or dfnoise:
         # 群系/特性/超平坦雕刻冒烟：用我们自己的预设（三维度齐全，下界为噪声生成器）。
         props["level-type"] = "ohmyworld\\:flat_plus"
     if biome_structures:
@@ -594,10 +605,14 @@ def main():
         formula = CARVERS_FORMULA
     elif carvers_off:
         formula = CARVERS_OFF_FORMULA
+    elif carvers_ew:
+        formula = CARVERS_EW_FORMULA
     elif flat_carvers:
         formula = FLAT_CARVERS_FORMULA
     elif flat_carvers_off:
         formula = FLAT_CARVERS_OFF_FORMULA
+    elif flat_carvers_ew:
+        formula = CARVERS_EW_FORMULA
     elif features_all:
         formula = FEATURES_ALL_FORMULA
     elif features_none:
@@ -633,7 +648,8 @@ def main():
                      or overlay_marker or overlay_empty
                      or biome_structures
                      or biome_formula or biome_formula_fallback or biome_terrain or biome_biomeis or natural \
-                     or carvers or carvers_off or flat_carvers or flat_carvers_off
+                     or carvers or carvers_off or carvers_ew
+                     or flat_carvers or flat_carvers_off or flat_carvers_ew
                      or features_all or features_none or m1_functions or surface or rivernet or climate
                      or dfnoise
                      or not config.exists())
@@ -646,14 +662,21 @@ def main():
                 wrote_formula = True
         except Exception:
             pass
+    # 临时/自定义公式：SMOKE_FORMULA_TEXT 环境变量优先于一切预设（便于手工实验；
+    # 支持多行——JSON 写入已改用标准转义）。用后检查预期自行以 --expect 给出。
+    custom_text = os.environ.get("SMOKE_FORMULA_TEXT", "").strip()
+    if custom_text:
+        formula = custom_text
+        wrote_formula = True
     if wrote_formula:
         config.parent.mkdir(parents=True, exist_ok=True)
-        import os
         debug = "true" if os.environ.get("SMOKE_DEBUG") == "1" else "false"
-        config.write_text(
-            '{\n  "server_mode": %s,\n  "debug_logs": %s,\n  "formula": "%s"\n}\n'
-            % ("false" if marker_formula else "true", debug, formula), encoding="utf-8"
-        )
+        import json as _json
+        config.write_text(_json.dumps({
+            "server_mode": False if marker_formula else True,
+            "debug_logs": debug == "true",
+            "formula": formula,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     if marker_formula:
         # 预置世界 marker：server_mode=false 时由 WorldLoadHandler 的 marker 恢复路径接管
@@ -691,10 +714,14 @@ def main():
         label = "使用雕刻器冒烟（普通世界 + [carvers:vanilla]）"
     elif carvers_off:
         label = "使用雕刻器对照冒烟（普通世界 + [carvers:none]）"
+    elif carvers_ew:
+        label = "使用雕刻器水体保护冒烟（普通世界 + [carvers:vanilla-ew]）"
     elif flat_carvers:
         label = "使用超平坦雕刻器冒烟（flat_plus + [carvers:vanilla] 干燥代理）"
     elif flat_carvers_off:
         label = "使用超平坦雕刻器对照冒烟（flat_plus + [carvers:none]）"
+    elif flat_carvers_ew:
+        label = "使用超平坦雕刻器水体保护冒烟（flat_plus + [carvers:vanilla-ew] 干燥代理）"
     elif features_all:
         label = "使用特性冒烟公式（下界 [features:all] + 玄武岩三角洲）"
     elif features_none:
@@ -717,7 +744,7 @@ def main():
         label = "使用冒烟公式"
     else:
         label = "保留已有公式"
-    print(f"[smoke-config] {server}: level-type=flat, port={port}, {label}")
+    print(f"[smoke-config] {server}: level-type={props.get('level-type', '?')}, port={port}, {label}")
     print(f"SMOKE_FORMULA={1 if wrote_formula else 0}")
     return 0
 
