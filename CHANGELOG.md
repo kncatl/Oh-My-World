@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.3-beta.2
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- **Formulas with `//` line comments could not be restored from a world's saved marker after reopening the world**: the marker was stored with all line breaks stripped, so the first line comment swallowed the entire formula (`Formula is empty` in the log) and newly generated chunks came out as void. Markers now keep their original line breaks. Worlds already affected need their marker restored with the original formula text (line breaks preserved; e.g. copy `ohmyworld/custom_world_formula.txt` over `<world>/ohmyworld_marker.txt`).
+
 ## v1.3.3-beta
 
 > Beta release — please report any issue on GitHub.

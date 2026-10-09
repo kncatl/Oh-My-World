@@ -817,6 +817,17 @@ public class FormulaParser {
         return sb.toString();
     }
 
+    /**
+     * 公式文本的行尾规范化（CRLF / 裸 CR → LF），**不删除换行**。
+     * 供世界 marker 持久化使用：{@code //} 行内注释以换行为界，去掉换行会让
+     * 首条注释吞掉后续内容；解析器自身会先按行剥注释、再合并换行，因此换行
+     * 不影响解析。
+     */
+    public static String normalizeLineBreaks(String raw) {
+        if (raw == null) return "";
+        return raw.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
     private static String layerError(int lineIdx, String msg, String line) {
         return "Layer " + (lineIdx + 1) + ": " + msg + " in \"" + truncate(line) + "\"";
     }

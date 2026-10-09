@@ -102,6 +102,14 @@ case "$MODE" in
         CONFIG_FLAGS="--overlay-empty"
         CHECK_ARGS="--expect overworld minecraft:stone"
         ;;
+    marker)
+        CONFIG_FLAGS="--marker-formula"
+        CHECK_ARGS="--dimension-smoke 1"
+        # 分节 marker 覆盖主世界+下界：下界/末地各 forceload 一块再核验
+        # （两行指令依次送入服务器控制台）
+        CONSOLE_FORCELOAD="execute in minecraft:the_nether run forceload add 0 0
+execute in minecraft:the_end run forceload add 0 0"
+        ;;
     biome-formula-fallback)
         CONFIG_FLAGS="--biome-formula-fallback"
         CHECK_ARGS="--biome-smoke 4"
@@ -145,7 +153,7 @@ case "$MODE" in
         CONSOLE_FORCELOAD="forceload add -128 -128 127 127"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | overlay-marker | overlay-empty | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | carvers-ew | flat-carvers | flat-carvers-off | flat-carvers-ew）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | marker | overlay-marker | overlay-empty | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | carvers-ew | flat-carvers | flat-carvers-off | flat-carvers-ew）" >&2
         exit 2
         ;;
 esac
@@ -153,11 +161,17 @@ if [ "$MODE" = "overlay-empty" ]; then
     # 空叠加验收要从日志读"首区块写入数"（0 = 与原版一致），需要 debug 日志
     export SMOKE_DEBUG=1
 fi
+if [ "$MODE" = "marker" ]; then
+    # marker 模式：先清世界，配置阶段再预置 ohmyworld_marker.txt（下面的通用清理会跳过）
+    rm -rf "$RUN_DIR/world"
+fi
 CONFIG_OUT="$(python3 "$ROOT/tools/smoke-server-config.py" "$RUN_DIR" "$PORT" $CONFIG_FLAGS)"
 echo "$CONFIG_OUT" | grep -v '^SMOKE_FORMULA=' || true
 SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
 
-rm -rf "$RUN_DIR/world"
+if [ "$MODE" != "marker" ]; then
+    rm -rf "$RUN_DIR/world"
+fi
 
 if [ -n "$CONSOLE_FORCELOAD" ]; then
     # 需要扩大生成范围的模式（河网）：等服务器就绪后从控制台 forceload（stdin 会

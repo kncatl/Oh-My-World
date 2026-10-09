@@ -99,9 +99,9 @@ public final class WorldLoadHandler {
                     ResourceIds.keyId(dimension), generator.getClass().getSimpleName());
         }
         if (dimension == Level.OVERWORLD && generator instanceof FlatLevelSource) {
-            // 超平坦世界但没有公式 marker：无 UI 的专用服务器无法写入 marker，
+            // 超平坦世界但公式 marker 不存在或无法恢复：无 UI 的专用服务器无法写入 marker，
             // 需要在 config/ohmyworld.json 开启 server_mode
-            LOGGER.info("ohmyworld: world '{}' uses a flat generator but has no formula marker; "
+            LOGGER.info("ohmyworld: world '{}' uses a flat generator but has no usable formula marker; "
                     + "on dedicated servers enable server_mode in config/ohmyworld.json to apply a formula",
                     sl.getServer().getWorldData().getLevelName());
         }

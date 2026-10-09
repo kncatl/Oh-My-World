@@ -370,8 +370,10 @@ public class PatternData {
             Path marker = markerPath(level);
             if (overwrite || !Files.exists(marker)) {
                 Files.createDirectories(marker.getParent());
-                // marker 按单行存储（换行只影响公式文本的排版，解析不受影响）
-                String raw = stripNewlines(getRawInput());
+                // marker 必须保留换行：// 行内注释以换行为界，剥掉换行会让注释吞掉后续内容
+                // （1.3.2-beta.3 起支持 // 注释；此前"按单行存储"的写法会造成重新打开
+                //  世界时 Formula is empty）。解析侧会先按行剥注释、再合并换行。
+                String raw = FormulaParser.normalizeLineBreaks(getRawInput());
                 writeAtomically(marker, raw);
                 if (OhMyWorldConfig.debugLogsEnabled()) {
                     LOGGER.info("ohmyworld: wrote formula marker ({} chars)", raw.length());
@@ -403,6 +405,13 @@ public class PatternData {
                     FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(raw);
                     if (!result.errors().isEmpty() || result.dimensions().isEmpty()) {
                         for (String e : result.errors()) LOGGER.error("ohmyworld: marker formula error: {}", e);
+                        if (raw.indexOf('\n') < 0 && raw.contains("//")) {
+                            // 旧版 beta 的已知问题：写 marker 时把换行全部剥掉，// 注释吞掉整份公式。
+                            // 这类 marker 无法自动恢复——把公式原文（保留换行）写回 marker 即可修复。
+                            LOGGER.error("ohmyworld: the marker contains '//' comments but no line breaks"
+                                    + " (written by an early beta). Restore the marker file with the original"
+                                    + " formula text (line breaks preserved) to repair this world.");
+                        }
                         return false;
                     }
                     if (!setDimensions(result, raw)) return false;
@@ -1239,10 +1248,5 @@ public class PatternData {
         } finally {
             Files.deleteIfExists(temp);
         }
-    }
-
-    private static String stripNewlines(String s) {
-        if (s == null) return "";
-        return s.replace("\r", "").replace("\n", "");
     }
 }

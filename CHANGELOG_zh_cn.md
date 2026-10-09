@@ -1,5 +1,12 @@
 # 更新日志
 
+## v1.3.3-beta.2
+
+> 测试版（beta）——发现问题欢迎在 GitHub 反馈。
+
+### 修复
+- **带 `//` 行内注释的公式在重新打开世界后无法从 marker 恢复**：marker 保存时把换行全部剥掉，首行注释会吞掉整份公式（日志报 `Formula is empty`），新区块生成成虚空。现在 marker 保留原始换行。已受影响的存档需要用原始公式文本（保留换行）修复 marker（例如把 `ohmyworld/custom_world_formula.txt` 覆盖到 `<存档>/ohmyworld_marker.txt`）。
+
 ## v1.3.3-beta
 
 > 测试版（beta）——发现问题欢迎在 GitHub 反馈。

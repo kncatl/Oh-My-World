@@ -679,10 +679,17 @@ def main():
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     if marker_formula:
-        # 预置世界 marker：server_mode=false 时由 WorldLoadHandler 的 marker 恢复路径接管
+        # 预置世界 marker：server_mode=false 时由 WorldLoadHandler 的 marker 恢复路径接管。
+        # 附带 // 行内注释（横幅 + 节间 + 行尾）：验证 marker 存储/恢复的"换行往返"——
+        # 若存储时剥掉换行，注释会吞掉整份公式（1.3.3-beta.2 修复的回归，见 PLAN-1.3.3）。
+        marker_text = (
+            "// marker smoke: // line comments must survive the round trip\n"
+            + DIMENSION_FORMULA.replace("{the_nether=", "// comment between sections\n{the_nether=")
+            + " // trailing comment\n"
+        )
         world = server / "world"
         world.mkdir(parents=True, exist_ok=True)
-        (world / "ohmyworld_marker.txt").write_text(DIMENSION_FORMULA, encoding="utf-8")
+        (world / "ohmyworld_marker.txt").write_text(marker_text, encoding="utf-8")
 
     if marker_formula:
         label = "marker 驱动冒烟（预置分节 marker、server_mode=false）"

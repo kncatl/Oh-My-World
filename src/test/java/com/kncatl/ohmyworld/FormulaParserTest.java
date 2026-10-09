@@ -976,6 +976,33 @@ class FormulaParserTest {
                 .errors().isEmpty());
     }
 
+    /**
+     * marker 往返：带 {@code //} 注释的公式文本**必须保留换行**才能解析。
+     *
+     * <p>回归（修复）：此前写世界 marker 时会把换行全部剥掉，带注释的公式在重新
+     * 打开世界时被解析成 "Formula is empty"（首行注释吞掉全部后续内容），世界的
+     * 新区块会生成成虚空。这里同时断言失败模式，防止再犯。
+     */
+    @Test
+    void lineCommentsRequireNewlinesToSurviveMarkerRoundTrip() {
+        String raw = "// 说明注释（首行注释横幅，与真实 marker 一致）\r\n"
+                + "{overworld=\r\n"
+                + "  y=..: { let a = 1; a > 0 ? rand() : rand() } // 行尾注释\r\n"
+                + "}";
+        // 写 marker：只统一换行符（CRLF / 裸 CR → LF），保留换行
+        String stored = FormulaParser.normalizeLineBreaks(raw);
+        assertFalse(stored.contains("\r"), "marker 存储不应残留 CR");
+        assertTrue(stored.contains("\n"), "marker 存储必须保留换行");
+        // 存储文本可正常解析
+        assertTrue(FormulaParser.parseDimensionsWithErrors(stored).errors().isEmpty(),
+                FormulaParser.parseDimensionsWithErrors(stored).errors().toString());
+        // 旧存法（剥掉全部换行）：注释吞光 → "Formula is empty"（文档化失败模式）
+        String flattened = stored.replace("\n", "");
+        assertTrue(FormulaParser.parseDimensionsWithErrors(flattened).errors().stream()
+                        .anyMatch(e -> e.contains("empty")),
+                FormulaParser.parseDimensionsWithErrors(flattened).errors().toString());
+    }
+
     /** 1.3.2：把 let 直接写在层/行冒号后的友好提示（块层 / surface / biome）。 */
     @Test
     void misplacedLetGetsAFriendlyError() {
