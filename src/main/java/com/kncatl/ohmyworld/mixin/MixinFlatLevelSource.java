@@ -22,6 +22,7 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 
 import com.kncatl.ohmyworld.FlatCarvers;
 import com.kncatl.ohmyworld.PatternData;
+import com.kncatl.ohmyworld.compat.BiomeViews;
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
@@ -127,7 +128,8 @@ public class MixinFlatLevelSource {
         try {
             cir.setReturnValue(PatternData.getBaseHeight(snapshot, x, z, type,
                     LevelHeights.minY(level), LevelHeights.maxY(level),
-                    PatternData.biomeViewFor(level)));
+                    BiomeViews.view(((FlatLevelSource) (Object) this).getBiomeSource(),
+                            BiomeViews.sampler(random))));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-height evaluation failed, disabling pattern", e);
             PatternData.clearActive();
@@ -145,7 +147,8 @@ public class MixinFlatLevelSource {
         int total = height.getHeight();
         try {
             BlockState[] column = PatternData.buildColumn(snapshot, x, z, minY, total,
-                    PatternData.biomeViewFor(height));
+                    BiomeViews.view(((FlatLevelSource) (Object) this).getBiomeSource(),
+                            BiomeViews.sampler(random)));
             cir.setReturnValue(new NoiseColumn(minY, column));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-column evaluation failed, disabling pattern", e);

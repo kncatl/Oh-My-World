@@ -3,7 +3,7 @@
     "package": "com.kncatl.ohmyworld.mixin",
     "compatibilityLevel": "JAVA_21",
     "plugin": "com.kncatl.ohmyworld.mixin.OhMyWorldMixinPlugin",
-    "mixins": ["MixinFlatLevelSource", "MixinNoiseBasedChunkGenerator", "MixinChunkGenerator", "ChunkGeneratorBiomeSourceAccessor", "NoiseBasedChunkGeneratorInvoker", "ChunkMapAccessor", "MixinWorldCarver", "MixinCarvingMask"],
+    "mixins": ["MixinFlatLevelSource", "MixinNoiseBasedChunkGenerator", "MixinChunkGenerator", "MixinStructure", "ChunkGeneratorBiomeSourceAccessor", "NoiseBasedChunkGeneratorInvoker", "ChunkMapAccessor", "MixinWorldCarver", "MixinCarvingMask"],
     "client": ["MixinWorldCreationUiState", "MixinWorldOpenFlows", "MixinCreateWorldScreen"],
     "server": []
 }

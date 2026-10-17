@@ -7,6 +7,7 @@
   smoke-check-world.py --structure-smoke <1|2> <服务端目录>
   smoke-check-world.py --biome-smoke <1|2> <服务端目录>
   smoke-check-world.py --features-smoke <1|2> <服务端目录>
+  smoke-check-world.py --structure-placement-smoke <1|2> <服务端目录>
   smoke-check-world.py [--expect <维度> <方块,方块...>] [--forbid <维度> <方块,方块...>]... <服务端目录>
 
 默认模式：扫描 world/ 下所有 region 目录，要求找到冒烟公式的特征方块
@@ -34,6 +35,12 @@
 --features-smoke（P4.3）：装饰特性冒烟预设（下界固定玄武岩三角洲）：
   1 = [features:all] —— 装饰方块（黑石/荧石/岩浆块至少一种）应出现；
   2 = [features:none] —— 这些装饰方块一个都不应出现（只留公式地形）。
+
+--structure-placement-smoke（1.3.4）：结构放置优化冒烟：
+  1 = structure-water —— 非叠加水面门槛：水域侧（chunkX>=2）不应有村庄起点，
+      陆地侧（chunkX<=-2）至少 2 个（配合 datapack 加密的村庄结构组）；
+  2 = overlay-structures —— 叠加模式结构高度：村庄的 dirt_path 应落在叠加后的
+      地表附近（y<=55），不应浮在原版地表（y>=60）。
 
 --expect/--forbid：按维度核验任意方块（逗号分隔多个；维度名 overworld/
   the_nether/the_end）。1.21.x（region/DIM-1/DIM1）与 26.x（dimensions/...）
@@ -212,13 +219,15 @@ FEATURES_SMOKE_RULES = {
 
 def parse_args(argv):
     """返回 (server, require_all, dimension_smoke, structure_smoke, biome_smoke,
-    features_smoke, expects, forbids, carvers_ew_smoke)；出错返回 None。"""
+    features_smoke, structure_placement_smoke, expects, forbids, carvers_ew_smoke)；
+    出错返回 None。"""
     server = None
     require_all = False
     dimension_smoke = None
     structure_smoke = None
     biome_smoke = None
     features_smoke = None
+    structure_placement_smoke = None
     carvers_ew_smoke = False
     expects = {}
     forbids = {}
@@ -240,6 +249,9 @@ def parse_args(argv):
         elif arg == "--features-smoke" and i + 1 < len(argv):
             features_smoke = argv[i + 1]
             i += 2
+        elif arg == "--structure-placement-smoke" and i + 1 < len(argv):
+            structure_placement_smoke = argv[i + 1]
+            i += 2
         elif arg == "--carvers-ew-smoke":
             carvers_ew_smoke = True
             i += 1
@@ -257,7 +269,7 @@ def parse_args(argv):
             print("[smoke-check] FAIL: 多余的位置参数")
             return None
     return (server, require_all, dimension_smoke, structure_smoke, biome_smoke,
-            features_smoke, expects, forbids, carvers_ew_smoke)
+            features_smoke, structure_placement_smoke, expects, forbids, carvers_ew_smoke)
 
 
 def chunk_status(raw):
@@ -438,16 +450,147 @@ def check_carvers_ew(world, dimension="overworld"):
                   f"水下固体与陆地照常雕刻（{wet_carved} / {dry_carved} 格改动）")
 
 
+# 结构放置冒烟（1.3.4）的 forceload 范围（chunk 坐标；smoke-server.sh 分 4 次
+# forceload 覆盖）。只统计这个窗口内的区块：窗口外的区块可能是启动阶段生成/缓存的，
+# 统计它们会把启动期数据混进来，不能代表本特性的行为。
+STRUCTURE_SMOKE_CHUNKS = range(-12, 12)
+
+
+def _structure_smoke_inside(cx, cz):
+    return cx in STRUCTURE_SMOKE_CHUNKS and cz in STRUCTURE_SMOKE_CHUNKS
+
+
+def _load_dump_biomes():
+    """按路径加载同目录的 dump-biomes.py（复用其区块 NBT 解析/方块解码）。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "omw_dump_biomes", str(Path(__file__).resolve().parent / "dump-biomes.py"))
+    db = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(db)
+    return db
+
+
+def _overworld_dirs(world, dimension="overworld"):
+    return [world / rel for rel in DIMENSION_PATHS[dimension] if (world / rel).is_dir()]
+
+
+def check_structure_water(world):
+    """1.3.4 模式 1：非叠加水面门槛。
+
+    约定公式（STRUCTURE_WATER_FORMULA）：x<0 陆地、x>=0 水域（水 y=41..63）；
+    只放村庄（datapack 加密）。结构起点记录在区块 NBT 的 structures.starts 里，
+    直接读结构 id 与区块坐标：
+      - 水域侧（chunkX >= 2，留 2 区块边界余量）不应出现村庄起点；
+      - 陆地侧（chunkX <= -2）至少 2 个村庄起点（证明候选确实存在）。
+    """
+    db = _load_dump_biomes()
+    dirs = _overworld_dirs(world)
+    if not dirs:
+        return False, "overworld: 没有 region 目录"
+    land = 0
+    water = 0
+    water_at = []
+    for directory in dirs:
+        for cx, cz, chunk in db.load_chunks(str(directory)):
+            if not _structure_smoke_inside(cx, cz):
+                continue
+            starts = chunk.get("structures", {}).get("starts", {})
+            if not isinstance(starts, dict):
+                continue
+            for structure_id in starts:
+                if not structure_id.startswith("minecraft:village"):
+                    continue
+                if cx >= 2:
+                    water += 1
+                    water_at.append(f"({cx},{cz})")
+                elif cx <= -2:
+                    land += 1
+    if water:
+        return False, (f"overworld: 水域侧（chunkX>=2）出现 {water} 个村庄起点 "
+                       f"{water_at[:5]}（水面门槛未生效）")
+    if land < 2:
+        return False, (f"overworld: 陆地侧村庄起点仅 {land} 个（期望至少 2 个；"
+                       "datapack 未生效或陆地侧候选不足）")
+    return True, f"overworld: 陆地村庄起点 {land} 个、水域 0 个（KO）"
+
+
+def check_overlay_structures(world):
+    """1.3.4 模式 2：叠加模式的结构起点高度。
+
+    约定公式（OVERLAY_STRUCTURES_FORMULA）：[terrain:vanilla] + y>=51 挖空，
+    叠加后的地表约 y=50。只放村庄（datapack 加密）。
+    村庄的 dirt_path 只出现在地面层：
+      - 正确（结构起点看到叠加结果）：dirt_path 在 y<=55；
+      - 错误（仍用原版高度）：村庄浮在原版地表，dirt_path 在 y>=60。
+    """
+    db = _load_dump_biomes()
+    dirs = _overworld_dirs(world)
+    if not dirs:
+        return False, "overworld: 没有 region 目录"
+    low = 0
+    high = 0
+    high_at = []
+    chunks = 0
+    for directory in dirs:
+        for cx, cz, chunk in db.load_chunks(str(directory)):
+            if not _structure_smoke_inside(cx, cz):
+                continue
+            db.prepare_blocks(chunk)
+            sections = [s for s in chunk.get("sections", []) if s.get("_blocks")]
+            if not sections:
+                continue
+            chunks += 1
+            by_bottom = {s["Y"] * 16: s for s in sections}
+
+            def block(lx, y, lz):
+                section = by_bottom.get(y & ~15)
+                if section is None:
+                    return "minecraft:air"
+                return db.block_at(section, lx, y, lz)
+
+            for lx in range(16):
+                for lz in range(16):
+                    for y in range(40, 101):
+                        if block(lx, y, lz) == "minecraft:dirt_path":
+                            if y <= 55:
+                                low += 1
+                            elif y >= 60:
+                                high += 1
+                                if len(high_at) < 5:
+                                    high_at.append(f"({cx * 16 + lx},{y},{cz * 16 + lz})")
+    if chunks == 0:
+        return False, "overworld: 没有已生成地形的区块"
+    if low < 3:
+        return False, (f"overworld: 叠加后地表附近（y<=55）只有 {low} 个 dirt_path"
+                       "（结构起点没有跟随叠加地形？）")
+    if high:
+        return False, (f"overworld: 原版地表高度（y>=60）出现 {high} 个 dirt_path "
+                       f"{high_at}（结构起点仍用原版高度）")
+    return True, (f"overworld: {chunks} 个区块 OK——dirt_path 全部在叠加后地表附近"
+                  f"（{low} 个，y<=55），y>=60 为 0")
+
+
 def main():
     parsed = parse_args(sys.argv[1:])
     if parsed is None:
         return 2
     (server, require_all, dimension_smoke, structure_smoke, biome_smoke,
-     features_smoke, expects, forbids, carvers_ew_smoke) = parsed
+     features_smoke, structure_placement_smoke, expects, forbids, carvers_ew_smoke) = parsed
     if server is None:
         print(__doc__)
         return 2
     world = Path(server) / "world"
+
+    if structure_placement_smoke:
+        if structure_placement_smoke == "1":
+            ok, message = check_structure_water(world)
+        elif structure_placement_smoke == "2":
+            ok, message = check_overlay_structures(world)
+        else:
+            print(f"[smoke-check] FAIL: 未知结构放置冒烟预设 {structure_placement_smoke}")
+            return 2
+        print("[smoke-check] " + ("OK: " if ok else "FAIL: ") + message)
+        return 0 if ok else 1
 
     if carvers_ew_smoke:
         ok, message = check_carvers_ew(world)

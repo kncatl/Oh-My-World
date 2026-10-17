@@ -21,6 +21,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -29,6 +31,9 @@ import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+import net.minecraft.world.level.levelgen.NoiseSettings;
+import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
@@ -37,6 +42,7 @@ import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.pools.JigsawJunction;
 import net.minecraft.world.level.ChunkPos;
 
+import com.kncatl.ohmyworld.compat.BiomeViews;
 import com.kncatl.ohmyworld.compat.ChunkWrites;
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.kncatl.ohmyworld.compat.ResourceIds;
@@ -58,6 +64,21 @@ public class PatternData {
 
     private static final AtomicLong SNAPSHOT_VERSION = new AtomicLong();
     private static final Map<HeightKey, Integer> HEIGHT_CACHE = new LinkedHashMap<>(256, 0.75f, true);
+
+    /** 叠加高度诊断日志（debug_logs 时最多 10 条，用于排查结构起点的异常高度）。 */
+    private static final java.util.concurrent.atomic.AtomicInteger OVERLAY_HEIGHT_LOG =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 叠加模式的结构高度查询：按列缓存「原版噪声列 + 叠加公式」的结果（1.3.4）。 */
+    private static final int OVERLAY_COLUMN_CACHE_LIMIT = 1024;
+    private static final Map<OverlayColumnKey, OverlayColumn> OVERLAY_COLUMN_CACHE =
+            new LinkedHashMap<>(256, 0.75f, true);
+
+    /**
+     * 取原版列时的 ThreadLocal 旁路：{@code getBaseColumn} 的 mixin 看到它就直接放行，
+     * 避免在叠加列求值里再次进入叠加分支（递归）。
+     */
+    private static final ThreadLocal<Boolean> VANILLA_COLUMN_BYPASS = ThreadLocal.withInitial(() -> false);
 
     /**
      * 生成器 → 公式绑定。binding 里带上了维度键：P3 起热加载会按维度重新解析公式，
@@ -102,6 +123,9 @@ public class PatternData {
                                   boolean protectStructures) {}
 
     private record HeightKey(long version, int x, int z, Heightmap.Types type, int minY, int maxY) {}
+    /** 叠加求值后的整列（结构高度查询用）。 */
+    public record OverlayColumn(int minY, BlockState[] states) {}
+    private record OverlayColumnKey(long version, int x, int z, int minY, int height) {}
 
     /**
      * 设置按维度的公式（旧输入 = 仅 overworld）。有错误或没有任何维度时不生效、返回 false。
@@ -723,10 +747,17 @@ public class PatternData {
             new java.util.concurrent.atomic.AtomicBoolean();
 
     /**
-     * 叠加模式的结构保护域（M3.5；1.3.2 调整 Y 外扩）：本区块 structure starts 中所有
-     * 靠近区块（12 格）的部件的包围盒并集，**水平外扩 24、垂直 ±4**——垂直方向的小
-     * 外扩避免把「废弃矿井/古城」这类地下结构上方的地表也冻结（Y 向只保护紧邻结构的
-     * 几格）。不筛 terrainAdaptation（NONE 部件也纳入保护，更保守）。没有部件返回 null。
+     * 叠加模式的结构保护域（M3.5；1.3.2 调整 Y 外扩；1.3.4 只用部件的"地面层"）：
+     * 本区块 structure starts 中所有靠近区块（12 格）的部件的包围盒并集，
+     * <b>水平外扩 24、垂直 ±4</b>。
+     *
+     * <p>1.3.4：垂直范围取每个部件的 {@code box.minY()}（jigsaw 的落地层），不再用
+     * {@code box.maxY()}——jigsaw 的 expansion hack 会把部件包围盒向上扩展十几格，
+     * 用它做垂直保护会把结构<b>上方</b>整段地形冻结，叠加层就永远降不到结构所在的
+     * 高度（叠加模式的结构起点已经按叠加后地形计算，见 {@link #overlayBaseHeight}）。
+     * 结构自身的方块在 H1 之后才放置，不需要保护空中的体积；保护"地面带"即可
+     * 防止结构被架空/切断。不筛 terrainAdaptation（NONE 部件也纳入，更保守）。
+     * 没有部件返回 null。
      */
     private static BoundingBox protectionBox(ChunkAccess chunk) {
         ChunkPos chunkPos = chunk.getPos();
@@ -741,11 +772,12 @@ public class PatternData {
             for (StructurePiece piece : start.getPieces()) {
                 if (!piece.isCloseToChunk(chunkPos, 12)) continue;
                 BoundingBox box = piece.getBoundingBox();
+                int groundY = box.minY();
                 minX = Math.min(minX, box.minX());
-                minY = Math.min(minY, box.minY());
+                minY = Math.min(minY, groundY);
                 minZ = Math.min(minZ, box.minZ());
                 maxX = Math.max(maxX, box.maxX());
-                maxY = Math.max(maxY, box.maxY());
+                maxY = Math.max(maxY, groundY);
                 maxZ = Math.max(maxZ, box.maxZ());
                 found = true;
                 if (piece instanceof PoolElementStructurePiece pool) {
@@ -872,6 +904,101 @@ public class PatternData {
                         sw = minY + (index << 4) + localY;
                         swFound = true;
                     }
+                }
+            }
+            if (!swFound) sw = sy;
+            memoSy = sy;
+            memoSw = sw;
+        }
+    }
+
+    /**
+     * 叠加视图的"列"实现（1.3.4）：结构高度查询在 NoiseColumn 上求值叠加公式，
+     * 没有区块/分节。快照语义与 {@link SnapshotOverlayView} 一致：
+     * sy = 最高非空气；sw = 最高流体（无水时同 sy）；sdist 固定 1e6
+     * （起点阶段没有结构管理器；H1 实际写入仍用真实保护盒）。
+     */
+    private static final class ArrayOverlayView implements ExprEvaluator.OverlayView {
+        private final int minY;
+        private final BlockState[] vanilla;
+        private final BlockState[] current;
+        private int memoX = Integer.MIN_VALUE;
+        private int memoZ = Integer.MIN_VALUE;
+        private int memoSy;
+        private int memoSw;
+
+        ArrayOverlayView(int minY, BlockState[] vanilla, BlockState[] current) {
+            this.minY = minY;
+            this.vanilla = vanilla;
+            this.current = current;
+        }
+
+        BlockState stateAt(int x, int y, int z) {
+            int index = y - minY;
+            return index < 0 || index >= vanilla.length ? AIR : vanilla[index];
+        }
+
+        @Override
+        public boolean currentIs(int x, int y, int z, BlockState target) {
+            int index = y - minY;
+            return index >= 0 && index < current.length && current[index].is(target.getBlock());
+        }
+
+        @Override
+        public boolean vanillaIs(int x, int y, int z, BlockState target) {
+            return stateAt(x, y, z).is(target.getBlock());
+        }
+
+        @Override
+        public boolean vanillaSolid(int x, int y, int z) {
+            return stateAt(x, y, z).isSolid();
+        }
+
+        @Override
+        public boolean vanillaFluid(int x, int y, int z) {
+            return !stateAt(x, y, z).getFluidState().isEmpty();
+        }
+
+        @Override
+        public boolean vanillaAir(int x, int y, int z) {
+            return stateAt(x, y, z).isAir();
+        }
+
+        @Override
+        public int sy(int x, int z) {
+            ensureColumn(x, z);
+            return memoSy;
+        }
+
+        @Override
+        public int sw(int x, int z) {
+            ensureColumn(x, z);
+            return memoSw;
+        }
+
+        @Override
+        public double sdist(int x, int z) {
+            return 1_000_000;
+        }
+
+        /** 自顶向下扫一次：sy = 最高非空气；sw = 最高含流体（无水时同 sy）。 */
+        private void ensureColumn(int x, int z) {
+            if (x == memoX && z == memoZ) return;
+            memoX = x;
+            memoZ = z;
+            boolean syFound = false;
+            boolean swFound = false;
+            int sy = minY - 1;
+            int sw = minY - 1;
+            for (int index = vanilla.length - 1; index >= 0 && (!syFound || !swFound); index--) {
+                BlockState state = vanilla[index];
+                if (!syFound && !state.isAir()) {
+                    sy = minY + index;
+                    syFound = true;
+                }
+                if (!state.getFluidState().isEmpty()) {
+                    sw = minY + index;
+                    swFound = true;
                 }
             }
             if (!swFound) sw = sy;
@@ -1206,6 +1333,190 @@ public class PatternData {
             }
         }
         return result;
+    }
+
+    // ---------------------------------------------------------------------
+    // 叠加模式的结构高度（1.3.4）：结构起点必须看到叠加后的地形（设计草案 §9.5）。
+    // 原版噪声列 + 叠加公式 → 结果列；按列缓存。已知近似见 PLAN-1.3.4 §2.2：
+    // 噪声列不含原版表面材质；sdist 在起点阶段按 1e6 处理（没有结构管理器）。
+    // ---------------------------------------------------------------------
+
+    /** {@code getBaseColumn} 的 mixin 旁路：为 true 时直接走原版实现（避免递归）。 */
+    public static boolean isVanillaColumnBypass() {
+        return VANILLA_COLUMN_BYPASS.get();
+    }
+
+    /** 取原版噪声列（不进入叠加分支）。 */
+    public static NoiseColumn vanillaBaseColumn(ChunkGenerator generator, int x, int z,
+                                                LevelHeightAccessor level, RandomState random) {
+        boolean saved = VANILLA_COLUMN_BYPASS.get();
+        VANILLA_COLUMN_BYPASS.set(true);
+        try {
+            return generator.getBaseColumn(x, z, level, random);
+        } finally {
+            VANILLA_COLUMN_BYPASS.set(saved);
+        }
+    }
+
+    /** 叠加模式：原版噪声列 + 叠加公式求值后的整列（带 LRU 缓存）。 */
+    public static OverlayColumn overlayEvaluatedColumn(PatternSnapshot snapshot, ChunkGenerator generator,
+                                                       int x, int z, LevelHeightAccessor level,
+                                                       RandomState random) {
+        // 先用"关卡高度范围"做缓存键（稳定、无需先构建噪声列）；命中时完全跳过原版列构建。
+        int levelMinY = LevelHeights.minY(level);
+        int levelHeight = LevelHeights.maxY(level) - levelMinY;
+        OverlayColumnKey key = new OverlayColumnKey(snapshot.version(), x, z, levelMinY, levelHeight);
+        synchronized (OVERLAY_COLUMN_CACHE) {
+            OverlayColumn cached = OVERLAY_COLUMN_CACHE.get(key);
+            if (cached != null) return cached;
+        }
+
+        NoiseColumn base = vanillaBaseColumn(generator, x, z, level, random);
+        // 列的范围与原版 iterateNoiseColumn 一致：生成器噪声设置按本关卡高度裁剪。
+        NoiseBasedChunkGenerator noiseGenerator = (NoiseBasedChunkGenerator) generator;
+        NoiseSettings noiseSettings = noiseGenerator.generatorSettings().value()
+                .noiseSettings().clampToHeightAccessor(level);
+        int minY = noiseSettings.minY();
+        BlockState[] vanilla = new BlockState[noiseSettings.height()];
+        for (int i = 0; i < vanilla.length; i++) {
+            vanilla[i] = base.getBlock(minY + i);
+        }
+        BlockState[] result = vanilla.clone();
+        ArrayOverlayView view = new ArrayOverlayView(minY, vanilla, result);
+        ExprEvaluator.OverlayView savedOverlay = ExprEvaluator.overlayView();
+        ExprEvaluator.BiomeView savedBiome = ExprEvaluator.biomeView();
+        ExprEvaluator.VanillaView savedVanilla = ExprEvaluator.vanillaView();
+        ExprEvaluator.setOverlayView(view);
+        ExprEvaluator.setBiomeView(BiomeViews.view(generator.getBiomeSource(), BiomeViews.sampler(random)));
+        ExprEvaluator.setVanillaView(vanillaViewFor(generator));
+        try {
+            applyOverlayLayersToColumn(snapshot, x, z, minY, result, view);
+        } finally {
+            ExprEvaluator.setOverlayView(savedOverlay);
+            ExprEvaluator.setBiomeView(savedBiome);
+            ExprEvaluator.setVanillaView(savedVanilla);
+        }
+
+        OverlayColumn column = new OverlayColumn(minY, result);
+        synchronized (OVERLAY_COLUMN_CACHE) {
+            OVERLAY_COLUMN_CACHE.put(key, column);
+            while (OVERLAY_COLUMN_CACHE.size() > OVERLAY_COLUMN_CACHE_LIMIT) {
+                OVERLAY_COLUMN_CACHE.remove(OVERLAY_COLUMN_CACHE.keySet().iterator().next());
+            }
+        }
+        return column;
+    }
+
+    /** 在单列上按层序求值叠加公式（与 {@code overlayChunkInternal} 同语义）。 */
+    private static void applyOverlayLayersToColumn(PatternSnapshot snapshot, int x, int z, int minY,
+                                                   BlockState[] result, ArrayOverlayView view) {
+        int maxY = minY + result.length - 1;
+        for (Object obj : snapshot.layers()) {
+            int lo;
+            int hi;
+            if (obj instanceof FormulaLayerDef f) {
+                if (f.hasWindow()) {
+                    int base = view.sy(x, z);
+                    lo = base + f.windowStart();
+                    hi = base + f.windowEnd();
+                } else {
+                    lo = f.resolvedStart(minY);
+                    hi = f.yEnd();
+                }
+            } else if (obj instanceof CyclicLayerDef c) {
+                lo = c.resolvedStart(minY);
+                hi = c.yEnd();
+            } else {
+                continue;
+            }
+            lo = Math.max(lo, minY);
+            hi = Math.min(hi, maxY);
+            for (int y = lo; y <= hi; y++) {
+                Object value = obj instanceof FormulaLayerDef f
+                        ? f.evalResult(x, z, y, minY)
+                        : ((CyclicLayerDef) obj).evalResult(x, z, y, minY);
+                if (value == ExprEvaluator.SURFACE_KEEP) continue;
+                BlockState target = value == ExprEvaluator.VANILLA
+                        ? view.stateAt(x, y, z)
+                        : value instanceof BlockState state ? state : null;
+                if (target == null) continue;
+                if (target == result[y - minY]) continue;
+                result[y - minY] = target;
+            }
+        }
+    }
+
+    /** 叠加模式的结构起点高度（按 Heightmap.Types 谓词扫描叠加列）。 */
+    public static int overlayBaseHeight(PatternSnapshot snapshot, ChunkGenerator generator,
+                                        int x, int z, Heightmap.Types type, LevelHeightAccessor level,
+                                        RandomState random) {
+        HeightKey key = new HeightKey(snapshot.version(), x, z, type,
+                LevelHeights.minY(level), LevelHeights.maxY(level));
+        synchronized (HEIGHT_CACHE) {
+            Integer cached = HEIGHT_CACHE.get(key);
+            if (cached != null) return cached;
+        }
+        OverlayColumn column = overlayEvaluatedColumn(snapshot, generator, x, z, level, random);
+        int result = column.minY();
+        for (int i = column.states().length - 1; i >= 0; i--) {
+            if (type.isOpaque().test(column.states()[i])) {
+                result = column.minY() + i + 1;
+                break;
+            }
+        }
+        if (OhMyWorldConfig.debugLogsEnabled()
+                && type == Heightmap.Types.WORLD_SURFACE_WG && result > 55
+                && OVERLAY_HEIGHT_LOG.getAndIncrement() < 10) {
+            LOGGER.info("ohmyworld: overlay WORLD_SURFACE height {} at ({}, {}) [snapshot v{}]",
+                    result, x, z, snapshot.version());
+        }
+        synchronized (HEIGHT_CACHE) {
+            HEIGHT_CACHE.put(key, result);
+            if (HEIGHT_CACHE.size() > HEIGHT_CACHE_LIMIT) {
+                HEIGHT_CACHE.remove(HEIGHT_CACHE.keySet().iterator().next());
+            }
+        }
+        return result;
+    }
+
+    /** 叠加模式的结构基座列（RuinedPortal / NetherFossil 等 getBaseColumn 调用）。 */
+    public static NoiseColumn overlayBaseColumn(PatternSnapshot snapshot, ChunkGenerator generator,
+                                                int x, int z, LevelHeightAccessor level, RandomState random) {
+        OverlayColumn column = overlayEvaluatedColumn(snapshot, generator, x, z, level, random);
+        return new NoiseColumn(column.minY(), column.states().clone());
+    }
+
+    /** 该坐标"生效"的方块：非叠加 = 公式层结果；叠加 = 叠加列缓存。 */
+    public static BlockState effectiveBlockAt(PatternSnapshot snapshot, ChunkGenerator generator,
+                                              int x, int y, int z, LevelHeightAccessor level, RandomState random) {
+        if (!snapshot.overlay()) {
+            return blockAt(snapshot.layers(), x, z, y, LevelHeights.minY(level));
+        }
+        OverlayColumn column = overlayEvaluatedColumn(snapshot, generator, x, z, level, random);
+        int index = y - column.minY();
+        return index < 0 || index >= column.states().length ? AIR : column.states()[index];
+    }
+
+    /**
+     * 结构起点是否落在水面上（1.3.4，用户拍板：跳过）。
+     *
+     * <p>判定：该列有水体（WORLD_SURFACE 高于 OCEAN_FLOOR），起点 y 贴着水面
+     * （{@code Hw - 1 .. Hw + 1}，覆盖 Jigsaw 的 getFirstFreeHeight 与
+     * Structure.getLowestY 的 getFirstOccupiedHeight），且该列最高非空气方块是水。
+     * 只对 {@code step = SURFACE_STRUCTURES} 调用（见 MixinStructure）——海底结构
+     * （OCEAN_FLOOR 起点）与地下结构天然不在水面高度，不会被跳过；下界熔岩海
+     * 因"最高方块不是水"而不触发。
+     */
+    public static boolean isSurfaceOnWater(PatternSnapshot snapshot, ChunkGenerator generator,
+                                           BlockPos pos, LevelHeightAccessor level, RandomState random) {
+        int x = pos.getX();
+        int z = pos.getZ();
+        int worldFree = generator.getFirstFreeHeight(x, z, Heightmap.Types.WORLD_SURFACE_WG, level, random);
+        int floorFree = generator.getFirstFreeHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, level, random);
+        if (worldFree <= floorFree) return false;
+        int y = pos.getY();
+        if (y < worldFree - 1 || y > worldFree + 1) return false;
+        return effectiveBlockAt(snapshot, generator, x, worldFree - 1, z, level, random).is(Blocks.WATER);
     }
 
     private static int minLayerStart(List<Object> layers) {

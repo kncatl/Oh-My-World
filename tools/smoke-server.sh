@@ -102,6 +102,22 @@ case "$MODE" in
         CONFIG_FLAGS="--overlay-empty"
         CHECK_ARGS="--expect overworld minecraft:stone"
         ;;
+    structure-water)
+        CONFIG_FLAGS="--structure-water"
+        CHECK_ARGS="--structure-placement-smoke 1"
+        CONSOLE_FORCELOAD="forceload add -192 -192 63 63
+forceload add 64 -192 191 63
+forceload add -192 64 63 191
+forceload add 64 64 191 191"
+        ;;
+    overlay-structures)
+        CONFIG_FLAGS="--overlay-structures"
+        CHECK_ARGS="--structure-placement-smoke 2"
+        CONSOLE_FORCELOAD="forceload add -192 -192 63 63
+forceload add 64 -192 191 63
+forceload add -192 64 63 191
+forceload add 64 64 191 191"
+        ;;
     marker)
         CONFIG_FLAGS="--marker-formula"
         CHECK_ARGS="--dimension-smoke 1"
@@ -153,7 +169,7 @@ execute in minecraft:the_end run forceload add 0 0"
         CONSOLE_FORCELOAD="forceload add -128 -128 127 127"
         ;;
     *)
-        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | marker | overlay-marker | overlay-empty | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | carvers-ew | flat-carvers | flat-carvers-off | flat-carvers-ew）" >&2
+        echo "[smoke] 未知模式 \"$MODE\"（可用: seed | spawn | open-ranges | water | river | m1 | surface | rivernet | climate | dfnoise | marker | overlay-marker | overlay-empty | structure-water | overlay-structures | biome-at-flat | biome-formula | biome-formula-fallback | biome-terrain | biome-biomeis | biome-vanilla-value | biome-at-value | natural | carvers | carvers-off | carvers-ew | flat-carvers | flat-carvers-off | flat-carvers-ew）" >&2
         exit 2
         ;;
 esac
@@ -171,6 +187,33 @@ SMOKE_FORMULA="$(echo "$CONFIG_OUT" | sed -n 's/^SMOKE_FORMULA=//p')"
 
 if [ "$MODE" != "marker" ]; then
     rm -rf "$RUN_DIR/world"
+    if [ -e "$RUN_DIR/world" ]; then
+        echo "[smoke] FAIL: 旧世界目录删除失败：$RUN_DIR/world（可能是文件被占用）" >&2
+        exit 1
+    fi
+fi
+
+if [ "$MODE" = "structure-water" ] || [ "$MODE" = "overlay-structures" ]; then
+    # 1.3.4 结构放置冒烟：用 datapack 把村庄结构组加密（spacing 8），
+    # 保证 24×24 区块的冒烟范围里有足够多的候选。世界目录刚清空、尚未创建，
+    # 服务器启动时会连同 world/datapacks 一起创建并加载。
+    PACK_DIR="$RUN_DIR/world/datapacks/village_dense"
+    mkdir -p "$PACK_DIR/data/minecraft/worldgen/structure_set"
+    cat > "$PACK_DIR/pack.mcmeta" <<'EOF'
+{"pack":{"pack_format":61,"supported_formats":{"min_inclusive":1,"max_inclusive":999},"description":"dense villages for Oh My World structure smoke"}}
+EOF
+    cat > "$PACK_DIR/data/minecraft/worldgen/structure_set/villages.json" <<'EOF'
+{
+  "placement": {"type": "minecraft:random_spread", "salt": 10387312, "separation": 0, "spacing": 8},
+  "structures": [
+    {"structure": "minecraft:village_plains", "weight": 1},
+    {"structure": "minecraft:village_desert", "weight": 1},
+    {"structure": "minecraft:village_savanna", "weight": 1},
+    {"structure": "minecraft:village_snowy", "weight": 1},
+    {"structure": "minecraft:village_taiga", "weight": 1}
+  ]
+}
+EOF
 fi
 
 if [ -n "$CONSOLE_FORCELOAD" ]; then

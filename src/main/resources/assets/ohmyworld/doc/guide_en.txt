@@ -164,6 +164,16 @@ Default preset:
       ruined_portals (nether variant)
     [End] end_cities
 
+  * Structure positions follow the formula terrain (in overlay mode, the
+    overlaid terrain). Surface structures (villages, temples, igloos,
+    outposts, ...) are skipped when their start position would sit on a water
+    surface, so land structures no longer appear on formula oceans; ocean
+    structures (shipwrecks, ocean ruins, monuments) and underground structures
+    (mineshafts, strongholds, ancient cities, trial chambers, ...) are
+    unaffected. Buried structures (e.g. buried treasure) keep the vanilla
+    logic and follow the final terrain and soil (thicker soft layers bury the
+    chest deeper).
+
   * [biome:...] controls the dimension's biomes (default: unchanged --
     Overworld plains, Nether/End vanilla):
       [biome:vanilla]          vanilla biome distribution for that dimension
@@ -234,6 +244,9 @@ Default preset:
       disable the formula for that dimension -- use a normal world preset
       instead. Overlay biome lines cannot read the formula terrain
       (terrain/surfis/blockis report an error).
+    - Structure start heights follow the overlaid terrain (not the vanilla
+      height): villages, ruins etc. on lowered or raised terrain are placed
+      against the new surface.
     * Values available in overlay mode:
       vanilla                   vanilla block value (block layers): leave as is
       vis(block)                is the vanilla block at this position the given block?
@@ -256,10 +269,11 @@ Default preset:
                                 result (curis finds exposed faces)
       [surface:none]            no vanilla material/surface; surface rows do it all
     * Structure protection: [overlay:protect-structures] is on by default (no
-      writes inside piece boxes inflated by 24 horizontally and ±4 vertically --
-      the small vertical margin keeps the surface above underground structures
-      writable); turn it off with [overlay:protect-structures=off] and fade out
-      yourself using sdist.
+      writes inside the horizontal ±24 of piece ground levels and ±4 vertically
+      -- only the structure's ground band is protected; the terrain above it is
+      still modified by the overlay, so villages/ruins are not buried in the
+      vanilla terrain); turn it off with [overlay:protect-structures=off] and
+      fade out yourself using sdist.
     * The editor preview is approximate (there is no vanilla terrain: vanilla reads
       as air, sy/sw as 0).
 

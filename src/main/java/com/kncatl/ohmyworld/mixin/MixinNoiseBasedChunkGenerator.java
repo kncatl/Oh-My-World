@@ -27,6 +27,7 @@ import com.kncatl.ohmyworld.CarverWaterGuard;
 import com.kncatl.ohmyworld.DimensionRules;
 import com.kncatl.ohmyworld.OhMyWorldConfig;
 import com.kncatl.ohmyworld.PatternData;
+import com.kncatl.ohmyworld.compat.BiomeViews;
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
@@ -65,6 +66,9 @@ public class MixinNoiseBasedChunkGenerator {
             new java.util.concurrent.atomic.AtomicBoolean();
     /** 调试日志：applyCarvers 是否被调用/是否放行，只记录一次。 */
     private static final java.util.concurrent.atomic.AtomicBoolean CARVERS_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** 调试日志：结构高度查询落在未绑定生成器上，只记录一次（1.3.4 排查用）。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean UNBOUND_HEIGHT_LOGGED =
             new java.util.concurrent.atomic.AtomicBoolean();
 
     //? >=26.3 {
@@ -241,15 +245,29 @@ public class MixinNoiseBasedChunkGenerator {
                                            LevelHeightAccessor level, RandomState random,
                                            CallbackInfoReturnable<Integer> cir) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot == null) return;
+        if (snapshot == null) {
+            if (PatternData.isActive() && OhMyWorldConfig.debugLogsEnabled()
+                    && UNBOUND_HEIGHT_LOGGED.compareAndSet(false, true)) {
+                LOGGER.info("ohmyworld: getBaseHeight on an unbound generator {} (identity {})",
+                        getClass().getSimpleName(), System.identityHashCode(this));
+            }
+            return;
+        }
         if (snapshot.layers().isEmpty()) return;
-        // 叠加模式（R-D）：结构放置用原版高度，不反映叠加地形
-        if (snapshot.overlay()) return;
 
         try {
+            // 叠加模式（1.3.4）：结构起点必须看到叠加后的地形（PLAN-1.3.4 §2.2）
+            if (snapshot.overlay()) {
+                cir.setReturnValue(PatternData.overlayBaseHeight(snapshot, (ChunkGenerator) (Object) this,
+                        x, z, type, level, random));
+                return;
+            }
+            // 群系视图直接用生成器的 BiomeSource：STRUCTURE_STARTS 时区块群系尚未填充，
+            // 读 ChunkAccess.getNoiseBiome 会得到默认值（biomeis 参与高度时会算错）。
             cir.setReturnValue(PatternData.getBaseHeight(snapshot, x, z, type,
                     LevelHeights.minY(level), LevelHeights.maxY(level),
-                    PatternData.biomeViewFor(level)));
+                    BiomeViews.view(((ChunkGenerator) (Object) this).getBiomeSource(),
+                            BiomeViews.sampler(random))));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-height evaluation failed, disabling pattern", e);
             PatternData.clearActive();
@@ -259,17 +277,23 @@ public class MixinNoiseBasedChunkGenerator {
     @Inject(method = "getBaseColumn", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$onGetBaseColumn(int x, int z, LevelHeightAccessor height, RandomState random,
                                            CallbackInfoReturnable<NoiseColumn> cir) {
+        // 叠加列求值需要原版噪声列：旁路时直接走原版实现，避免递归。
+        if (PatternData.isVanillaColumnBypass()) return;
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null) return;
         if (snapshot.layers().isEmpty()) return;
-        // 叠加模式（R-D）：结构放置用原版列，不反映叠加地形
-        if (snapshot.overlay()) return;
 
-        int minY = LevelHeights.minY(height);
-        int total = height.getHeight();
         try {
+            if (snapshot.overlay()) {
+                cir.setReturnValue(PatternData.overlayBaseColumn(snapshot, (ChunkGenerator) (Object) this,
+                        x, z, height, random));
+                return;
+            }
+            int minY = LevelHeights.minY(height);
+            int total = height.getHeight();
             BlockState[] column = PatternData.buildColumn(snapshot, x, z, minY, total,
-                    PatternData.biomeViewFor(height));
+                    BiomeViews.view(((ChunkGenerator) (Object) this).getBiomeSource(),
+                            BiomeViews.sampler(random)));
             cir.setReturnValue(new NoiseColumn(minY, column));
         } catch (Exception e) {
             LOGGER.error("ohmyworld: formula base-column evaluation failed, disabling pattern", e);

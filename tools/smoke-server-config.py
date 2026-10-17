@@ -289,6 +289,29 @@ OVERLAY_EMPTY_FORMULA = (
     "{overworld=[terrain:vanilla] y=-64..: vanilla}"
 )
 
+# 1.3.4 结构放置冒烟（配合 smoke-check-world.py --structure-placement-smoke 1|2）：
+# 两种模式都用 datapack 把村庄结构组加密（spacing 8），保证 24×24 区块的冒烟范围
+# 里有足够多的候选（见 smoke-server.sh 的 world/datapacks 生成）。
+
+# 模式 1（非叠加水面门槛）：x<0 陆地（石到 y=64）/ x>=0 水域（石到 y=40、
+# 水 y=41..63）。只放村庄；水域侧的村庄起点必须被跳过，陆地侧仍应生成。
+STRUCTURE_WATER_FORMULA = (
+    "{overworld=[structure:only=villages] "
+    "y=-64: minecraft:bedrock;"
+    "y=-63..40: minecraft:stone;"
+    "y=41..64: x < 0 ? minecraft:stone : (y <= 63 ? minecraft:water : minecraft:air);"
+    "y=65..: minecraft:air}"
+)
+
+# 模式 2（叠加模式结构高度）：普通噪声世界 + [terrain:vanilla]，把 y>=51 全部挖空，
+# 叠加后的地表约在 y=50。固定平原群系（避免出生点落在海洋导致没有村庄候选）；
+# 只放村庄。结构起点若仍用原版高度，村庄会浮在原版地表（通常 y>=60）——正确时
+# 应落在叠加后地表附近（<=55）。
+OVERLAY_STRUCTURES_FORMULA = (
+    "{overworld=[terrain:vanilla] [biome:minecraft:plains] [structure:only=villages] "
+    "y=51..: minecraft:air}"
+)
+
 # 群系专属结构解锁冒烟：固定沙漠 + 只放沙漠神殿。原版在 ChunkMap 构造期按"当时的
 # 群系源（平原）"过滤过结构组，沙漠神殿本不在候选里——本模组换群系后会重建结构组
 # 状态；若重建失败，这里将扫不到 desert_pyramid。配合 --structure-smoke 3。
@@ -504,6 +527,8 @@ def main():
     biome_at_flat = "--biome-at-flat" in sys.argv
     overlay_marker = "--overlay-marker" in sys.argv
     overlay_empty = "--overlay-empty" in sys.argv
+    structure_water = "--structure-water" in sys.argv
+    overlay_structures = "--overlay-structures" in sys.argv
     biome_structures = "--biome-structures" in sys.argv
     biome_formula = "--biome-formula" in sys.argv
     biome_formula_fallback = "--biome-formula-fallback" in sys.argv
@@ -546,11 +571,15 @@ def main():
         # 出生点专项同理：超平坦世界的出生点固定在 (0,0)，噪声世界的出生点随种子变化，
         # 才能区分"读到真实出生点"与"恒为 0"。
         props["level-type"] = "minecraft\\:normal"
-    if structure_none or structure_only:
+    if structure_none or structure_only or structure_water:
         # 结构冒烟要真正生成结构：
         # - 用我们自己的预设（结构覆盖表已移除 → 候选=全部结构）；
         # - 打开结构开关（默认冒烟是关结构，避免干扰方块核验）。
         props["level-type"] = "ohmyworld\\:flat_plus"
+        props["generate-structures"] = "true"
+    elif overlay_structures:
+        # 叠加模式的结构高度以原版噪声地形为底：必须普通世界。
+        props["level-type"] = "minecraft\\:normal"
         props["generate-structures"] = "true"
     elif biome_desert or biome_vanilla or biome_vanilla_value or biome_at_value \
             or biome_structures or biome_formula or biome_formula_fallback \
@@ -589,6 +618,10 @@ def main():
         formula = OVERLAY_MARKER_FORMULA
     elif overlay_empty:
         formula = OVERLAY_EMPTY_FORMULA
+    elif structure_water:
+        formula = STRUCTURE_WATER_FORMULA
+    elif overlay_structures:
+        formula = OVERLAY_STRUCTURES_FORMULA
     elif biome_structures:
         formula = BIOME_STRUCTURES_FORMULA
     elif biome_formula:
@@ -651,7 +684,7 @@ def main():
                      or carvers or carvers_off or carvers_ew
                      or flat_carvers or flat_carvers_off or flat_carvers_ew
                      or features_all or features_none or m1_functions or surface or rivernet or climate
-                     or dfnoise
+                     or dfnoise or structure_water or overlay_structures
                      or not config.exists())
     if not wrote_formula:
         # 既有配置若本身就是「冒烟公式」（含特征方块），允许升级为本工具的最新版本；

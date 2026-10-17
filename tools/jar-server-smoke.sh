@@ -31,8 +31,8 @@ LOADER="${3:?缺少加载器（neoforge|fabric）}"
 SETTLE="${4:-15}"
 CHECK_MODE="${5:-default}"
 case "$CHECK_MODE" in
-    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|carvers-ew|flat-carvers|flat-carvers-off|flat-carvers-ew|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat) ;;
-    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|carvers-ew|flat-carvers|flat-carvers-off|flat-carvers-ew|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|biome-vanilla-value|biome-at-value|biome-at-flat）"; exit 1 ;;
+    default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|carvers-ew|flat-carvers|flat-carvers-off|flat-carvers-ew|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|structure-water|overlay-structures|biome-vanilla-value|biome-at-value|biome-at-flat) ;;
+    *) echo "[jar-smoke] FAIL: 未知检查模式 $CHECK_MODE（default|dimension|dimension-alias|marker|structure-none|structure-only|biome-desert|biome-vanilla|biome-structures|features-all|features-none|carvers|carvers-off|carvers-ew|flat-carvers|flat-carvers-off|flat-carvers-ew|spawn|open-ranges|water|river|m1|surface|rivernet|climate|dfnoise|overlay-marker|overlay-empty|structure-water|overlay-structures|biome-vanilla-value|biome-at-value|biome-at-flat）"; exit 1 ;;
 esac
 # 分节/标记冒烟要在 Done 之后通过控制台 forceload 下界/末地：至少留 45 秒收完区块；
 # 雕刻器冒烟（含超平坦）要 forceload 一大片区域，留 90 秒。
@@ -180,6 +180,8 @@ case "$CHECK_MODE" in
     climate)         SMOKE_CONFIG_MODE="--climate" ;;
     overlay-marker)  SMOKE_CONFIG_MODE="--overlay-marker" ;;
     overlay-empty)   SMOKE_CONFIG_MODE="--overlay-empty" ;;
+    structure-water) SMOKE_CONFIG_MODE="--structure-water" ;;
+    overlay-structures) SMOKE_CONFIG_MODE="--overlay-structures" ;;
     dfnoise)         SMOKE_CONFIG_MODE="--dfnoise" ;;
     *)               SMOKE_CONFIG_MODE="--force-formula" ;;
 esac
@@ -191,6 +193,28 @@ if [[ "$CHECK_MODE" == "overlay-empty" ]]; then
 fi
 python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" $SMOKE_CONFIG_MODE
 
+if [[ "$CHECK_MODE" == "structure-water" || "$CHECK_MODE" == "overlay-structures" ]]; then
+    # 1.3.4 结构放置冒烟：datapack 把村庄结构组加密（spacing 8），保证 24×24
+    # 区块范围里有足够候选（世界目录刚清空，服务器启动时随世界一起加载）。
+    PACK_DIR="$SRV/world/datapacks/village_dense"
+    mkdir -p "$PACK_DIR/data/minecraft/worldgen/structure_set"
+    cat > "$PACK_DIR/pack.mcmeta" <<'EOF'
+{"pack":{"pack_format":61,"supported_formats":{"min_inclusive":1,"max_inclusive":999},"description":"dense villages for Oh My World structure smoke"}}
+EOF
+    cat > "$PACK_DIR/data/minecraft/worldgen/structure_set/villages.json" <<'EOF'
+{
+  "placement": {"type": "minecraft:random_spread", "salt": 10387312, "separation": 0, "spacing": 8},
+  "structures": [
+    {"structure": "minecraft:village_plains", "weight": 1},
+    {"structure": "minecraft:village_desert", "weight": 1},
+    {"structure": "minecraft:village_savanna", "weight": 1},
+    {"structure": "minecraft:village_snowy", "weight": 1},
+    {"structure": "minecraft:village_taiga", "weight": 1}
+  ]
+}
+EOF
+fi
+
 # ---------- 4. 启动、等待、停止 ----------
 : > "$LOG"
 
@@ -199,7 +223,7 @@ python3 "$TOOLS/smoke-server-config.py" "$SRV" "$PORT" $SMOKE_CONFIG_MODE
 console_commands() {
     while ! grep -q 'Done (' "$LOG" 2>/dev/null; do sleep 1; done
     sleep 3
-    if [[ "$CHECK_MODE" == structure-* || "$CHECK_MODE" == biome-* ]]; then
+    if [[ "$CHECK_MODE" == "structure-none" || "$CHECK_MODE" == "structure-only" || "$CHECK_MODE" == biome-* ]]; then
         # 结构/群系冒烟：forceload 单次上限 256 区块；在出生区之外再补 16×16 区块
         # （出生区本身约 29×29 区块，矿井密度高，样本量足够）
         echo "execute in minecraft:overworld run forceload add 512 0 767 255"
@@ -235,6 +259,13 @@ console_commands() {
         # 西南方向的河段（径向坡保证原点附近必有河），再收 75 秒生成
         echo "execute in minecraft:overworld run forceload add -192 -192 63 63"
         sleep 75
+    elif [[ "$CHECK_MODE" == "structure-water" || "$CHECK_MODE" == "overlay-structures" ]]; then
+        # 结构放置冒烟：24×24 区块（分 4 次、每次 ≤256 区块）覆盖水/陆两半
+        echo "execute in minecraft:overworld run forceload add -192 -192 63 63"
+        echo "execute in minecraft:overworld run forceload add 64 -192 191 63"
+        echo "execute in minecraft:overworld run forceload add -192 64 63 191"
+        echo "execute in minecraft:overworld run forceload add 64 64 191 191"
+        sleep 90
     elif [[ "$CHECK_MODE" == "climate" ]]; then
         # 共享气候冒烟：forceload 256 区块扩大温度分带采样范围（同 rivernet 的理由）
         echo "execute in minecraft:overworld run forceload add -192 -192 63 63"
@@ -339,6 +370,14 @@ case "$CHECK_MODE" in
     structure-only)
         python3 "$TOOLS/smoke-check-world.py" --structure-smoke 2 "$SRV" \
             || fail "结构冒烟（only）核验失败：白名单外的结构出现或化石缺失"
+        ;;
+    structure-water)
+        python3 "$TOOLS/smoke-check-world.py" --structure-placement-smoke 1 "$SRV" \
+            || fail "结构放置冒烟（水面门槛）核验失败：水域出现陆地结构或陆地侧没有村庄"
+        ;;
+    overlay-structures)
+        python3 "$TOOLS/smoke-check-world.py" --structure-placement-smoke 2 "$SRV" \
+            || fail "结构放置冒烟（叠加高度）核验失败：村庄没有跟随叠加后的地表"
         ;;
     biome-desert)
         python3 "$TOOLS/smoke-check-world.py" --biome-smoke 1 "$SRV" \
