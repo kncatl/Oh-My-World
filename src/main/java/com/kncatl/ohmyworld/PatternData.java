@@ -39,6 +39,7 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
+import net.minecraft.world.level.levelgen.structure.TerrainAdjustment;
 import net.minecraft.world.level.levelgen.structure.pools.JigsawJunction;
 import net.minecraft.world.level.ChunkPos;
 
@@ -614,12 +615,17 @@ public class PatternData {
                                     ? overlayView.stateAt(worldX, y, worldZ)
                                     : result instanceof BlockState st ? st : null;
                             if (target == null) continue;
-                            // [overlay:protect-structures]（默认开）：部件包围盒内保持原版
-                            if (protection != null && protection.isInside(worldX, y, worldZ)) continue;
                             LevelChunkSection section = sections[chunk.getSectionIndex(y)];
                             int localY = y & 15;
                             BlockState current = ChunkWrites.getSectionBlock(section, x, localY, z);
                             if (target == current) continue;
+                            // [overlay:protect-structures]（默认开）：只保留原版"实心地面"。
+                            // 目标为空气/水时照常写入——否则结构上方的原版水体/陆地会被冻结，
+                            // 表现为浮空水或突出水面的地形柱（叠加模式实测问题）。
+                            if (protection != null && protection.isInside(worldX, y, worldZ)
+                                    && isSurfaceSolid(target) && isSurfaceSolid(current)) {
+                                continue;
+                            }
                             boolean wasFluid = !current.getFluidState().isEmpty();
                             ChunkWrites.setSectionBlock(section, x, localY, z, target);
                             h0.update(x, y, z, target);
@@ -814,6 +820,11 @@ public class PatternData {
         int maxZ = Integer.MIN_VALUE;
         boolean found = false;
         for (StructureStart start : chunk.getAllStarts().values()) {
+            // 只保护"会做地形适配（Beardifier）"的结构：NONE 结构的部件在 H1 之后才放置，
+            // 不需要保护地形；把 NONE 也纳入会把结构预置坐标（如海底遗迹/沉船的 y=90
+            // 哨兵）处的原版地形/水体冻结成浮空地块，结构再按实时高度图落到上面
+            // （1.3.4 实机复现：海洋群系水面上的地形柱 + 水下遗迹）。
+            if (start.getStructure().terrainAdaptation() == TerrainAdjustment.NONE) continue;
             for (StructurePiece piece : start.getPieces()) {
                 if (!piece.isCloseToChunk(chunkPos, 12)) continue;
                 BoundingBox box = piece.getBoundingBox();

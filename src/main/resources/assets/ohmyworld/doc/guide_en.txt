@@ -268,12 +268,16 @@ Default preset:
       [surface:vanilla+patch]   vanilla first, then formula surface rows patch the
                                 result (curis finds exposed faces)
       [surface:none]            no vanilla material/surface; surface rows do it all
-    * Structure protection: [overlay:protect-structures] is on by default (no
-      writes inside the horizontal ±24 of piece ground levels and ±4 vertically
-      -- only the structure's ground band is protected; the terrain above it is
-      still modified by the overlay, so villages/ruins are not buried in the
-      vanilla terrain); turn it off with [overlay:protect-structures=off] and
-      fade out yourself using sdist.
+    * Structure protection: [overlay:protect-structures] is on by default and only
+      protects structures with terrain adaptation (villages, outposts, ancient cities,
+      strongholds, trial chambers, etc. -- those whose terrain is modified by the
+      Beardifier). Structures without adaptation (ocean ruins, shipwrecks, monuments,
+      buried treasure, ...) are not protected: their pieces are placed after the
+      overlay and their heights follow the overlaid terrain. Inside protected bands
+      only solid-on-solid writes are kept; air/water targets are still written, so
+      vanilla water or land is not frozen into floating water or terrain pillars.
+      Turn it off with [overlay:protect-structures=off] and fade out yourself using
+      sdist.
     * The editor preview is approximate (there is no vanilla terrain: vanilla reads
       as air, sy/sw as 0).
 

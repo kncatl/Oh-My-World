@@ -229,9 +229,11 @@
        [surface:vanilla]           默认：只跑原版材料/表面通道
        [surface:vanilla+patch]     原版之后再用 surface 行补铺（curis 找暴露面）
        [surface:none]              不跑原版材料/表面，只由 surface 行铺
-     ★ 结构保护：[overlay:protect-structures] 默认开（部件**落地层**水平外扩 24、
-       垂直 ±4 内不修改——只保护结构所在的地面带，结构上方的地形仍由叠加层照常
-       修改，避免把村庄/遗迹埋在原版地形里）；
+     ★ 结构保护：[overlay:protect-structures] 默认开。只保护"会做地形适配"的结构
+       （村庄/前哨站/远古城市/要塞/试炼密室等，Beardifier 会改动地形）；海底遗迹、
+       沉船、海底神殿、埋藏的宝藏等无地形适配的结构不参与保护——它们的部件在叠加
+       之后才放置，高度按叠加后地形计算。保护范围内也只保留原版"实心地面"：目标为
+       空气/水的写入照常执行，避免把原版水体/陆地冻结成浮空水或突出水面的地形柱。
        [overlay:protect-structures=off] 关闭后可用 sdist 自行淡出。
      ★ 编辑器预览是近似（没有原版地形：vanilla 按空气、sy/sw 按 0）。
 
