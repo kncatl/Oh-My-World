@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.4-beta
+
+> Beta release — please report any issue on GitHub.
+
+### Changed
+- **Structure placement follows the generated terrain**: surface structures (villages, temples, igloos, outposts, ...) are skipped when their start would sit on a water surface; in overlay mode structure starts are derived from the overlaid terrain instead of the vanilla height (no more floating or buried villages). Buried structures keep vanilla behaviour.
+
+### Performance
+- **Faster chunk generation**: blocks are written directly into chunk sections and the two WORLDGEN heightmaps are maintained per column instead of per block; layers fully covered by a later layer are skipped, and simple non-overlapping formulas use a direct write path. Fill write time is about 3x faster (spawn-area generation ~15–20% faster).
+
 ## v1.3.3-beta.2
 
 > Beta release — please report any issue on GitHub.
