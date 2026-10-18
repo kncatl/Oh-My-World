@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.4
+
+> Stable release — the first stable since v1.1.7. Please report issues on GitHub.
+
+### Highlights
+- **Overlay worlds** (`[terrain:vanilla]`): formula terrain, biomes, structures, surfaces and carvers layered over the vanilla noise world, with seamless region boundaries and structure starts that follow the overlaid terrain.
+- **Formula language**: biome rows, `[structure]` / `[features]` / `[carvers]` directives, natural noise primitives, shared lazy `let` macros, `cache2d`/`cache3d`, spline, `surface` rows, `rivernet`, shared climate, and more.
+- **Structure placement**: surface structures are skipped on water; overlay structures no longer freeze vanilla terrain or water; structure water and formula water are preserved.
+- **Carvers**: `[carvers:vanilla-ew]` keeps oceans/rivers intact, removes regional carver water in formula regions, and leaves untouched vanilla regions on vanilla carvers.
+- **Performance**: chunk filling is about 3x faster (direct section writes, per-column heightmaps, covered-layer skipping); the formula editor preview is now 36x36 with column caching and stale-job cancellation.
+- **Compatibility**: Minecraft 1.21.1-1.21.11 and 26.1-26.3, Fabric and NeoForge; Java 21/25.
+
 ## v1.3.4-beta.6
 
 > Beta release — please report any issue on GitHub.
