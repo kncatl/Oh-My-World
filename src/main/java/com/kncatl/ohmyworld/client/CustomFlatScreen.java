@@ -46,6 +46,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final int WARN_COLOR = 0xFFFFAA00;
     private static final int MUTED_COLOR = 0xFF9A9A9A;
     private static final long PREVIEW_DEBOUNCE_MS = 500;
+    private static final long PREVIEW_NAV_DEBOUNCE_MS = 140;
     private static final int PREVIEW_LIMIT = 30_000_000;
     private static final int[] PREVIEW_ZOOM_LEVELS = {1, 2, 4, 8, 16};
     /** Z 标尺占用的左侧宽度（视图框外）。 */
@@ -102,6 +103,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private String previewComputedFor;
     private long previewDueAt;
     private boolean previewRunning;
+    private volatile long previewRequestId;
     private Button switchBtn;
     private Button zoomOutBtn;
     private Button zoomInBtn;
@@ -341,6 +343,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private void invalidatePreview(boolean clearImage) {
         if (clearImage) this.previewColors = null;
         this.previewComputedFor = null;
+        this.previewRequestId++;
         this.previewDueAt = System.currentTimeMillis();
     }
 
@@ -368,7 +371,10 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         if (newCenterX != this.previewCenterX || newCenterZ != this.previewCenterZ) {
             this.previewCenterX = newCenterX;
             this.previewCenterZ = newCenterZ;
-            invalidatePreview(false); // 拖动时保留旧图，异步换成新图，避免闪烁
+            // 拖动时保留旧图，等手停下来再重建；旧的后台任务会被取消。
+            this.previewComputedFor = null;
+            this.previewRequestId++;
+            this.previewDueAt = System.currentTimeMillis() + PREVIEW_NAV_DEBOUNCE_MS;
         }
     }
 
@@ -991,27 +997,33 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int centerX = this.previewCenterX;
         int centerZ = this.previewCenterZ;
         int spacing = this.previewSpacing;
-        String key = formula + "\u0000" + dimension + "\u0000" + centerX + "," + centerZ + "," + spacing;
+        ExprEvaluator.VanillaView climate = this.previewVanillaView(dimension);
+        long seed = this.previewVanillaSeed;
+        String key = formula + "\u0000" + dimension + "\u0000" + centerX + "," + centerZ + ","
+                + spacing + "\u0000" + seed;
         if (key.equals(this.previewComputedFor)) return;
         FormulaParser.DimensionParseResult parsed = this.currentResult;
+        long formulaKey = ((long) formula.hashCode() << 32) ^ formula.length();
+        long requestId = this.previewRequestId;
         this.previewRunning = true;
-        ExprEvaluator.VanillaView climate = this.previewVanillaView(dimension);
         Thread worker = new Thread(() -> {
             FormulaPreview.Result result = null;
             try {
-                result = FormulaPreview.compute(parsed, dimension, centerX, centerZ, spacing, climate);
+                result = FormulaPreview.compute(parsed, dimension, centerX, centerZ, spacing,
+                        climate, formulaKey, seed, () -> requestId != this.previewRequestId);
             } catch (Exception ignored) {}
             FormulaPreview.Result computed = result;
             Minecraft.getInstance().execute(() -> {
                 this.previewRunning = false;
-                if (computed != null) {
+                if (requestId == this.previewRequestId && computed != null) {
                     this.previewColors = computed.colors();
                     this.previewColorsCells = computed.cells();
+                    this.previewComputedFor = key;
                 }
-                this.previewComputedFor = key;
             });
         }, "ohmyworld-preview");
         worker.setDaemon(true);
+        worker.setPriority(Thread.MIN_PRIORITY);
         worker.start();
     }
 

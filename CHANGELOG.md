@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.4-beta.6
+
+> Beta release — please report any issue on GitHub.
+
+### Performance
+- **Faster formula editor preview**: the preview now always samples a fixed 36×36 grid (the old build doubled to 72×72 at zoom >1, quadrupling both drawing and formula evaluation); top-block colors are cached per column (formula/seed/dimension/position), stale background jobs are cancelled when panning/zooming, the preview worker runs at minimum priority, and panning is debounced. Complex formulas and large zoom levels no longer stall the editor.
+
 ## v1.3.4-beta.5
 
 > Beta release — please report any issue on GitHub.
