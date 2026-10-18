@@ -797,6 +797,70 @@ public class FormulaParser {
     }
 
     /**
+     * flat 模式的有效层（2026-10 性能优化）：剔除被后续层**完整覆盖**的层。
+     * flat 模式的层总是写入方块、后写覆盖先写——被完整覆盖的层求值完全是浪费。
+     * 层范围按维度高度截断；完全越界的层也一并剔除。
+     */
+    public static List<Object> effectiveFlatLayers(List<Object> layers, int minY, int maxY) {
+        int n = layers.size();
+        int[] lo = new int[n];
+        int[] hi = new int[n];
+        boolean[] keep = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            Object obj = layers.get(i);
+            if (obj instanceof FormulaLayerDef f) {
+                lo[i] = Math.max(f.resolvedStart(minY), minY);
+                hi[i] = Math.min(f.yEnd(), maxY - 1);
+                keep[i] = lo[i] <= hi[i];
+            } else if (obj instanceof CyclicLayerDef c) {
+                lo[i] = Math.max(c.resolvedStart(minY), minY);
+                hi[i] = Math.min(c.yEnd(), maxY - 1);
+                keep[i] = lo[i] <= hi[i];
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            if (!keep[i]) continue;
+            for (int j = i + 1; j < n; j++) {
+                if (keep[j] && lo[j] <= lo[i] && hi[j] >= hi[i]) {
+                    keep[i] = false;
+                    break;
+                }
+            }
+        }
+        List<Object> result = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            if (keep[i]) result.add(layers.get(i));
+        }
+        return result;
+    }
+
+    /** 有效层的 y 区间是否两两不重叠（可逐层直写 section，不需要临时数组）。 */
+    public static boolean layersDisjoint(List<Object> layers, int minY, int maxY) {
+        List<int[]> ranges = new ArrayList<>(layers.size());
+        for (Object obj : layers) {
+            int start;
+            int end;
+            if (obj instanceof FormulaLayerDef f) {
+                start = f.resolvedStart(minY);
+                end = f.yEnd();
+            } else if (obj instanceof CyclicLayerDef c) {
+                start = c.resolvedStart(minY);
+                end = c.yEnd();
+            } else {
+                continue;
+            }
+            ranges.add(new int[] { Math.max(start, minY), Math.min(end, maxY - 1) });
+        }
+        ranges.sort((a, b) -> Integer.compare(a[0], b[0]));
+        int prevEnd = Integer.MIN_VALUE;
+        for (int[] range : ranges) {
+            if (range[0] <= prevEnd) return false;
+            prevEnd = range[1];
+        }
+        return true;
+    }
+
+    /**
      * 去掉 {@code //} 行内注释（到行尾为止）。必须在合并换行之前调用——
      * 合并之后注释会把后续内容一并吃掉。公式里没有字符串字面量，
      * 因此出现 {@code //} 即可安全视为注释。

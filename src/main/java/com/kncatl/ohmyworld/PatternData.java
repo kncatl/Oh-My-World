@@ -1053,16 +1053,34 @@ public class PatternData {
     }
 
     private static void fillChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
-        List<Object> layers = snapshot.layers();
+        int minY = LevelHeights.minY(chunk);
+        int maxY = LevelHeights.maxY(chunk);
+        // 有效层：剔除被后续层完整覆盖的层（flat 后写覆盖先写，被覆盖的层不用求值）
+        List<Object> layers = FormulaParser.effectiveFlatLayers(snapshot.layers(), minY, maxY);
         boolean perf = OhMyWorldConfig.debugLogsEnabled();
         long perfT0 = perf ? System.nanoTime() : 0L;
         if (PERF_FILL_CHUNKS.get() == 0L) {
             LOGGER.info("ohmyworld: fill perf instrumentation active (debug={})", perf);
         }
+        if (layers.isEmpty()) return;
         int cx = chunk.getPos().getMinBlockX();
         int cz = chunk.getPos().getMinBlockZ();
-        int minY = LevelHeights.minY(chunk);
-        int maxY = LevelHeights.maxY(chunk);
+
+        // 快路径（2026-10 性能优化）：无 surface 行且各层区间不重叠 → 逐层直写 section，
+        // 不分配 prepared 临时数组；高度图在最后按列维护。
+        if (snapshot.surfaceLayers().isEmpty()
+                && FormulaParser.layersDisjoint(layers, minY, maxY)
+                && canFillDirect(layers, minY, maxY)) {
+            fillDirect(chunk, layers, minY, maxY);
+            if (perf) {
+                long t = System.nanoTime();
+                if (FIRST_HEIGHT_CHECK.compareAndSet(false, true)) {
+                    verifyAutoHeightmaps(chunk, minY, maxY);
+                }
+                recordFillPerf(perfT0, perfT0, perfT0, t);
+            }
+            return;
+        }
 
         int lo = Math.max(minY, minLayerStart(layers));
         int hi = Math.min(maxY - 1, maxLayerEnd(layers));
@@ -1111,9 +1129,168 @@ public class PatternData {
         updateFillHeightmaps(chunk, prepared, lo, hi);
         if (perf) {
             if (FIRST_HEIGHT_CHECK.compareAndSet(false, true)) {
-                verifyAutoHeightmaps(chunk, prepared, lo, hi, minY);
+                verifyAutoHeightmaps(chunk, minY, maxY);
             }
             recordFillPerf(perfT0, perfT1, perfT2, System.nanoTime());
+        }
+    }
+
+    /**
+     * 直接填充只对"求值本身便宜"的层启用：列不变公式层/周期循环层可以在每列只求值
+     * 一次；含逐格求值的公式仍走 prepared 路径（列外层遍历对求值器更友好，实测更稳）。
+     */
+    private static boolean canFillDirect(List<Object> layers, int minY, int maxY) {
+        for (Object obj : layers) {
+            if (obj instanceof FormulaLayerDef f) {
+                if (!f.columnInvariant()) return false;
+            } else if (obj instanceof CyclicLayerDef c) {
+                int lo = Math.max(c.resolvedStart(minY), minY);
+                int hi = Math.min(c.yEnd(), maxY - 1);
+                int period = c.columnPeriod();
+                if (period <= 0 || period > hi - lo + 1) return false;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * flat 直接填充快路径（2026-10 性能优化）：无 surface 行、层区间不重叠时，
+     * 逐层把方块直接写进 section，不分配/回读 prepared 临时数组。
+     * 每层的列不变表达式只求值一次；循环层按周期缓存。高度图按列在最后维护。
+     */
+    private static void fillDirect(ChunkAccess chunk, List<Object> layers, int minY, int maxY) {
+        int cx = chunk.getPos().getMinBlockX();
+        int cz = chunk.getPos().getMinBlockZ();
+        LevelChunkSection[] sections = chunk.getSections();
+        int[] worldTopY = new int[256];
+        int[] floorTopY = new int[256];
+        Arrays.fill(worldTopY, Integer.MIN_VALUE);
+        Arrays.fill(floorTopY, Integer.MIN_VALUE);
+        BlockState[] worldTop = new BlockState[256];
+        BlockState[] floorTop = new BlockState[256];
+
+        for (Object obj : layers) {
+            if (obj instanceof FormulaLayerDef f) {
+                int lo = Math.max(f.resolvedStart(minY), minY);
+                int hi = Math.min(f.yEnd(), maxY - 1);
+                if (lo > hi) continue;
+                if (f.columnInvariant()) {
+                    BlockState[] column = new BlockState[256];
+                    for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                            column[x * 16 + z] = f.getBlock(cx + x, cz + z, lo, minY);
+                        }
+                    }
+                    for (int y = lo; y <= hi; y++) {
+                        LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+                        int localY = y & 15;
+                        for (int x = 0; x < 16; x++) {
+                            for (int z = 0; z < 16; z++) {
+                                int idx = x * 16 + z;
+                                BlockState st = column[idx];
+                                if (st == AIR) continue;
+                                section.setBlockState(x, localY, z, st, false);
+                                trackTop(idx, y, st, worldTopY, worldTop, floorTopY, floorTop);
+                            }
+                        }
+                    }
+                } else {
+                    // 列外层遍历：保留求值器的"每列惰性预备"（按 y 外层会让每个格子
+                    // 都成为新列，共享 let 退化成逐格重算——实测 4 倍差距）。
+                    for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                            int idx = x * 16 + z;
+                            LevelChunkSection section = null;
+                            for (int y = lo; y <= hi; y++) {
+                                if (section == null || (y & 15) == 0) {
+                                    section = sections[chunk.getSectionIndex(y)];
+                                }
+                                BlockState st = f.getBlock(cx + x, cz + z, y, minY);
+                                if (st == AIR) continue;
+                                section.setBlockState(x, y & 15, z, st, false);
+                                trackTop(idx, y, st, worldTopY, worldTop, floorTopY, floorTop);
+                            }
+                        }
+                    }
+                }
+            } else if (obj instanceof CyclicLayerDef c) {
+                int lo = Math.max(c.resolvedStart(minY), minY);
+                int hi = Math.min(c.yEnd(), maxY - 1);
+                if (lo > hi) continue;
+                int rangeLen = hi - lo + 1;
+                int period = c.columnPeriod();
+                if (period == 0 || period > rangeLen) {
+                    for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                            int idx = x * 16 + z;
+                            LevelChunkSection section = null;
+                            for (int y = lo; y <= hi; y++) {
+                                if (section == null || (y & 15) == 0) {
+                                    section = sections[chunk.getSectionIndex(y)];
+                                }
+                                BlockState st = c.getBlock(cx + x, cz + z, y, minY);
+                                if (st == AIR) continue;
+                                section.setBlockState(x, y & 15, z, st, false);
+                                trackTop(idx, y, st, worldTopY, worldTop, floorTopY, floorTop);
+                            }
+                        }
+                    }
+                } else {
+                    int start = c.resolvedStart(minY);
+                    int layerY = lo - start;
+                    BlockState[] cycle = new BlockState[256 * period];
+                    for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                            int base = (x * 16 + z) * period;
+                            for (int pos = 0; pos < period; pos++) {
+                                cycle[base + pos] = c.getBlockForPos(cx + x, cz + z, pos, layerY, start);
+                            }
+                        }
+                    }
+                    for (int y = lo; y <= hi; y++) {
+                        int pos = c.posOf(y, minY);
+                        LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+                        int localY = y & 15;
+                        for (int x = 0; x < 16; x++) {
+                            for (int z = 0; z < 16; z++) {
+                                int idx = x * 16 + z;
+                                BlockState st = cycle[idx * period + pos];
+                                if (st == AIR) continue;
+                                section.setBlockState(x, localY, z, st, false);
+                                trackTop(idx, y, st, worldTopY, worldTop, floorTopY, floorTop);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        updateDirectHeightmaps(chunk, worldTopY, worldTop, floorTopY, floorTop);
+    }
+
+    private static void trackTop(int idx, int y, BlockState st, int[] worldTopY, BlockState[] worldTop,
+                                 int[] floorTopY, BlockState[] floorTop) {
+        if (y > worldTopY[idx] && Heightmap.Types.WORLD_SURFACE_WG.isOpaque().test(st)) {
+            worldTopY[idx] = y;
+            worldTop[idx] = st;
+        }
+        if (y > floorTopY[idx] && Heightmap.Types.OCEAN_FLOOR_WG.isOpaque().test(st)) {
+            floorTopY[idx] = y;
+            floorTop[idx] = st;
+        }
+    }
+
+    private static void updateDirectHeightmaps(ChunkAccess chunk, int[] worldTopY, BlockState[] worldTop,
+                                               int[] floorTopY, BlockState[] floorTop) {
+        Heightmap world = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        Heightmap floor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int idx = x * 16 + z;
+                if (worldTopY[idx] != Integer.MIN_VALUE) world.update(x, worldTopY[idx], z, worldTop[idx]);
+                if (floorTopY[idx] != Integer.MIN_VALUE) floor.update(x, floorTopY[idx], z, floorTop[idx]);
+            }
         }
     }
 
@@ -1148,11 +1325,11 @@ public class PatternData {
         }
     }
 
-    /** 一次性验证：ProtoChunk 的自动 WORLDGEN 高度图更新与 prepared 的顶面一致。 */
-    private static void verifyAutoHeightmaps(ChunkAccess chunk, BlockState[] prepared,
-                                             int lo, int hi, int minY) {
+    /** 一次性验证：高度图（自动或手工维护）与区块实际顶面一致（debug 用）。 */
+    private static void verifyAutoHeightmaps(ChunkAccess chunk, int minY, int maxY) {
         Heightmap world = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         Heightmap floor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        LevelChunkSection[] sections = chunk.getSections();
         int bad = 0;
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
@@ -1160,8 +1337,8 @@ public class PatternData {
                 int expectedFloor = minY;
                 boolean worldFound = false;
                 boolean floorFound = false;
-                for (int y = hi; y >= lo && (!worldFound || !floorFound); y--) {
-                    BlockState st = prepared[(y - lo) * 256 + x * 16 + z];
+                for (int y = maxY - 1; y >= minY && (!worldFound || !floorFound); y--) {
+                    BlockState st = sections[chunk.getSectionIndex(y)].getBlockState(x, y & 15, z);
                     if (!worldFound && Heightmap.Types.WORLD_SURFACE_WG.isOpaque().test(st)) {
                         expectedWorld = y + 1;
                         worldFound = true;

@@ -1366,4 +1366,27 @@ class FormulaParserTest {
         assertTrue(flatSdist.errors().stream().anyMatch(e -> e.contains("sdist")),
                 flatSdist.errors().toString());
     }
+
+    @Test
+    void effectiveFlatLayersDropsFullyCoveredLayers() {
+        FormulaParser.ParseResult covered = FormulaParser.parseWithErrors(
+                "y=0..10: rand(); y=..: rand()");
+        assertEquals(0, covered.errors().size(), covered.errors().toString());
+        assertEquals(1, FormulaParser.effectiveFlatLayers(covered.layers(), -64, 320).size());
+
+        FormulaParser.ParseResult partial = FormulaParser.parseWithErrors(
+                "y=..: rand(); y=0..10: rand()");
+        assertEquals(0, partial.errors().size(), partial.errors().toString());
+        assertEquals(2, FormulaParser.effectiveFlatLayers(partial.layers(), -64, 320).size());
+        assertFalse(FormulaParser.layersDisjoint(partial.layers(), -64, 320));
+
+        FormulaParser.ParseResult disjoint = FormulaParser.parseWithErrors(
+                "y=0..10: rand(); y=11..20: rand()");
+        assertEquals(0, disjoint.errors().size(), disjoint.errors().toString());
+        assertTrue(FormulaParser.layersDisjoint(disjoint.layers(), -64, 320));
+
+        FormulaParser.ParseResult touching = FormulaParser.parseWithErrors(
+                "y=0..10: rand(); y=10..20: rand()");
+        assertFalse(FormulaParser.layersDisjoint(touching.layers(), -64, 320));
+    }
 }
