@@ -121,6 +121,14 @@ public class PatternData {
     private static final Map<ChunkAccess, BitSet> OVERLAY_WATER_MASKS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
+    /** H1 是否实际改写过该区块：false = 10000 格外的纯原版区块，carver 应保持原版。 */
+    private static final Map<ChunkAccess, Boolean> OVERLAY_TOUCHED =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    public static boolean isOverlayTouched(ChunkAccess chunk) {
+        return Boolean.TRUE.equals(OVERLAY_TOUCHED.get(chunk));
+    }
+
     /** 一条绑定：该生成器属于哪个维度、生效哪份公式。 */
     public record GeneratorBinding(ResourceKey<Level> dimension, PatternSnapshot snapshot) {}
 
@@ -554,8 +562,10 @@ public class PatternData {
         ExprEvaluator.setBiomeView(biomeViewFor(chunk));
         ExprEvaluator.setVanillaView(vanillaView);
         try {
-            overlayChunkInternal(chunk, snapshot);
-            if (snapshot.carversEw()) rememberOverlayWater(chunk);
+            int writes = overlayChunkInternal(chunk, snapshot);
+            boolean touched = writes > 0;
+            OVERLAY_TOUCHED.put(chunk, touched);
+            if (touched && snapshot.carversEw()) rememberOverlayWater(chunk);
         } finally {
             ExprEvaluator.setBiomeView(savedBiome);
             ExprEvaluator.setVanillaView(savedVanilla);
@@ -628,7 +638,7 @@ public class PatternData {
     }
 
     @SuppressWarnings("unchecked")
-    private static void overlayChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
+    private static int overlayChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
         List<Object> layers = snapshot.layers();
         boolean perf = OhMyWorldConfig.debugLogsEnabled();
         long perfT0 = perf ? System.nanoTime() : 0L;
@@ -740,6 +750,7 @@ public class PatternData {
             LOGGER.info("ohmyworld: overlay writes in first processed chunk {} (first write at {} -> {})",
                     writes, firstWrite, hasFirstWrite ? chunk.getBlockState(firstWrite) : "n/a");
         }
+        return writes;
     }
 
     /**
@@ -840,8 +851,6 @@ public class PatternData {
                                     line.expression(), worldX, worldZ, y - line.resolvedStart(minY), y);
                             if (result != ExprEvaluator.SURFACE_KEEP && result instanceof BlockState replacement) {
                                 if (replacement == state) continue;
-                                // [overlay:protect-structures]：部件包围盒内不补铺
-                                if (protection != null && protection.isInside(worldX, y, worldZ)) continue;
                                 boolean wasFluid = !state.getFluidState().isEmpty();
                                 LevelChunkSection section = sections[chunk.getSectionIndex(y)];
                                 ChunkWrites.setSectionBlock(section, x, y & 15, z, replacement);

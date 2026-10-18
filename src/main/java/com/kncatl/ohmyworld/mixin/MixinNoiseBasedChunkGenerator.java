@@ -126,7 +126,7 @@ public class MixinNoiseBasedChunkGenerator {
         ohmyworld$overlayAfterTerrain(chunk);
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || !snapshot.overlay()) return;
-        if (snapshot.carversEw()) {
+        if (snapshot.carversEw() && PatternData.isOverlayTouched(chunk)) {
             // 叠加模式 + vanilla-ew：原版 buildTerrain 会继续跑到这里，必须在这里
             // 取消原版 carvers，改用干燥代理（无含水层、默认流体空气）。否则
             // 新挖出的洞穴会被原版含水层灌成区域性管道水（与公式地形不匹配）。
@@ -207,9 +207,10 @@ public class MixinNoiseBasedChunkGenerator {
                                           BiomeManager biomeManager, StructureManager structureManager,
                                           ChunkAccess chunk, CallbackInfo ci) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot != null && snapshot.overlay() && snapshot.carversEw()) {
-            // 叠加模式 + vanilla-ew：用干燥代理跑 carvers（无含水层、默认流体空气），
-            // 否则新挖出的洞穴会被原版含水层灌成区域性管道水。
+        if (snapshot != null && snapshot.overlay() && snapshot.carversEw()
+                && PatternData.isOverlayTouched(chunk)) {
+            // 叠加模式 + vanilla-ew + H1 实际改写过：用干燥代理跑 carvers。
+            // 未改写的区块（10000 格外纯原版）走原版 carver/含水层。
             FlatCarvers.carve((ChunkGenerator) (Object) this, region, seed, biomeManager,
                     structureManager, chunk);
             ci.cancel();
@@ -231,7 +232,8 @@ public class MixinNoiseBasedChunkGenerator {
                                           ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
         if (step != GenerationStep.Carving.AIR) return;
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot != null && snapshot.overlay() && snapshot.carversEw()) {
+        if (snapshot != null && snapshot.overlay() && snapshot.carversEw()
+                && PatternData.isOverlayTouched(chunk)) {
             FlatCarvers.carve((ChunkGenerator) (Object) this, region, seed, biomeManager,
                     structureManager, chunk);
             ci.cancel();
@@ -263,7 +265,7 @@ public class MixinNoiseBasedChunkGenerator {
             ci.cancel();
             return;
         }
-        if (snapshot.carversEw()) CarverWaterGuard.begin(chunk);
+        if (snapshot.carversEw() && PatternData.isOverlayTouched(chunk)) CarverWaterGuard.begin(chunk);
     }
     //?}
 

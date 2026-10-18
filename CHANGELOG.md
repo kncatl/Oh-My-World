@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.4-beta.5
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- **No more stone patches under surface structures**: the formula's surface patch (H3) is applied inside structure protection bands again, so villages/outposts keep the formula's grass/dirt surface instead of a chunk-sized stone floor. The H1 ground-shape protection is unchanged.
+- **Vanilla chunks outside the overlay keep vanilla carvers**: `[carvers:vanilla-ew]` now uses the dry carver only for chunks that the overlay actually modified (H1 writes > 0). Untouched chunks (outside the 10000 region) use the original carvers with aquifers, so rivers/oceans keep their vanilla water-filled caves instead of dry cut-off pockets.
+
 ## v1.3.4-beta.4
 
 > Beta release — please report any issue on GitHub.
