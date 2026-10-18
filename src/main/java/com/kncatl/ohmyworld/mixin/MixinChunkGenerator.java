@@ -3,6 +3,9 @@ package com.kncatl.ohmyworld.mixin;
 import java.util.List;
 
 import net.minecraft.core.Holder;
+import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.level.WorldGenLevel;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
@@ -12,6 +15,8 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * 结构控制与装饰特性开关：{@code [structure:...]} 指令在生成期裁剪结构组；
@@ -50,5 +55,16 @@ public class MixinChunkGenerator {
     private Object ohmyworld$suppressFeatures(java.util.function.Supplier<?> supplier, Operation<Object> original) {
         if (PatternData.suppressFeatures((ChunkGenerator) (Object) this)) return List.of();
         return original.call(supplier);
+    }
+
+    /**
+     * 装饰阶段结束后清除"公式水体之外"的原版水（叠加 + vanilla-ew）。
+     * 覆盖 spring_water、lush caves clay pool 等装饰阶段放的水；公式 H1 写的水
+     * 由位图保留。其他模式没有位图，直接 no-op。
+     */
+    @Inject(method = "applyBiomeDecoration", at = @At("RETURN"))
+    private void ohmyworld$cleanupFeatureWater(WorldGenLevel level, ChunkAccess chunk,
+                                               StructureManager structureManager, CallbackInfo ci) {
+        PatternData.cleanupOverlayFeatureWater(chunk);
     }
 }

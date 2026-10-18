@@ -7,6 +7,8 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -108,6 +110,14 @@ public class PatternData {
      * 与生成器同生命周期（WeakHashMap）。热加载不会改变视图（RandomState 与公式无关）。
      */
     private static final Map<ChunkGenerator, ExprEvaluator.VanillaView> VANILLA_VIEWS = new WeakHashMap<>();
+
+    /**
+     * 叠加 + {@code [carvers:vanilla-ew]}：H1 之后公式水体的位置位图。
+     * 装饰阶段结束后据此清除原版 carver/spring/lush 池等额外放的水。
+     * 以 ChunkAccess 为键（弱引用），清理后立即移除；只在对应模式下登记。
+     */
+    private static final Map<ChunkAccess, BitSet> OVERLAY_WATER_MASKS =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     /** 一条绑定：该生成器属于哪个维度、生效哪份公式。 */
     public record GeneratorBinding(ResourceKey<Level> dimension, PatternSnapshot snapshot) {}
@@ -543,9 +553,67 @@ public class PatternData {
         ExprEvaluator.setVanillaView(vanillaView);
         try {
             overlayChunkInternal(chunk, snapshot);
+            if (snapshot.carversEw()) rememberOverlayWater(chunk);
         } finally {
             ExprEvaluator.setBiomeView(savedBiome);
             ExprEvaluator.setVanillaView(savedVanilla);
+        }
+    }
+
+    /** H1 后记录公式水体（plain water）位置；仅叠加 + vanilla-ew 使用。 */
+    private static void rememberOverlayWater(ChunkAccess chunk) {
+        int minY = LevelHeights.minY(chunk);
+        int height = chunk.getHeight();
+        BitSet bits = new BitSet(height * 256);
+        LevelChunkSection[] sections = chunk.getSections();
+        for (int y = minY; y < minY + height; y++) {
+            LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+            if (section == null || section.hasOnlyAir()) continue;
+            int localY = y & 15;
+            int base = (y - minY) * 256;
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    if (ChunkWrites.getSectionBlock(section, x, localY, z).is(Blocks.WATER)) {
+                        bits.set(base + x * 16 + z);
+                    }
+                }
+            }
+        }
+        OVERLAY_WATER_MASKS.put(chunk, bits);
+    }
+
+    /**
+     * 装饰阶段结束：叠加 + vanilla-ew 时清除公式水体之外的 plain water。
+     *
+     * <p>覆盖原版 carver 含水层（正常路径已关）、spring_water、lush caves
+     * clay pool 等所有"装饰阶段放的水"；公式自己在 H1 写的水由位图保留。
+     * 非叠加 / 非 vanilla-ew / 无位图 → 零行为变化。
+     */
+    public static void cleanupOverlayFeatureWater(ChunkAccess chunk) {
+        BitSet bits = OVERLAY_WATER_MASKS.remove(chunk);
+        if (bits == null) return;
+        int minY = LevelHeights.minY(chunk);
+        int height = chunk.getHeight();
+        LevelChunkSection[] sections = chunk.getSections();
+        BlockState air = Blocks.AIR.defaultBlockState();
+        for (int y = minY; y < minY + height; y++) {
+            LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+            if (section == null || section.hasOnlyAir()) continue;
+            int localY = y & 15;
+            int base = (y - minY) * 256;
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    if (!ChunkWrites.getSectionBlock(section, x, localY, z).is(Blocks.WATER)) continue;
+                    if (bits.get(base + x * 16 + z)) continue;
+                    //? >=1.21.5 {
+                    chunk.setBlockState(new BlockPos(chunk.getPos().getMinBlockX() + x, y,
+                            chunk.getPos().getMinBlockZ() + z), air, 0);
+                    //?} else {
+                    chunk.setBlockState(new BlockPos(chunk.getPos().getMinBlockX() + x, y,
+                            chunk.getPos().getMinBlockZ() + z), air, false);
+                    //?}
+                }
+            }
         }
     }
 

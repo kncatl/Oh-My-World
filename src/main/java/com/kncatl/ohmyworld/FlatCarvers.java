@@ -6,6 +6,7 @@ import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.kncatl.ohmyworld.compat.ResourceIds;
+import com.kncatl.ohmyworld.mixin.ChunkAccessNoiseAccessor;
 import com.kncatl.ohmyworld.mixin.NoiseBasedChunkGeneratorInvoker;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.Holder;
@@ -70,9 +71,15 @@ public final class FlatCarvers {
             NoiseBasedChunkGenerator delegate = new NoiseBasedChunkGenerator(
                     flat.getBiomeSource(), cached.dry());
             if (ew) CarverWaterGuard.begin(chunk);
+            // 1.21.x 的 applyCarvers 会复用区块里原版生成阶段缓存的 NoiseChunk（含含水层）。
+            // 临时清空它，让代理生成器按干燥设置新建；雕刻完恢复原值。
+            ChunkAccessNoiseAccessor noiseAccess = (ChunkAccessNoiseAccessor) chunk;
+            NoiseChunk originalNoise = noiseAccess.ohmyworld$getNoiseChunk();
+            noiseAccess.ohmyworld$setNoiseChunk(null);
             try {
                 applyCarvers(delegate, region, seed, cached.randomState(), biomeManager, structureManager, chunk);
             } finally {
+                noiseAccess.ohmyworld$setNoiseChunk(originalNoise);
                 if (ew) CarverWaterGuard.end();
             }
         } catch (Exception e) {

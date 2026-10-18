@@ -40,6 +40,10 @@ public class OhMyWorldMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.endsWith(".MixinWorldCarver")) {
             return WORLD_CARVER_IS_CLASS;
         }
+        if (mixinClassName.endsWith(".ChunkAccessNoiseAccessor")) {
+            // 26.3 的 ChunkAccess 没有 noiseChunk 字段（雕刻显式传 NoiseChunk）。
+            return WORLD_CARVER_IS_CLASS;
+        }
         return true;
     }
 

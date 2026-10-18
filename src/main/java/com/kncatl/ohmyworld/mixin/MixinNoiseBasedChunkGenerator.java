@@ -25,6 +25,7 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 
 import com.kncatl.ohmyworld.CarverWaterGuard;
 import com.kncatl.ohmyworld.DimensionRules;
+import com.kncatl.ohmyworld.FlatCarvers;
 import com.kncatl.ohmyworld.OhMyWorldConfig;
 import com.kncatl.ohmyworld.PatternData;
 import com.kncatl.ohmyworld.compat.BiomeViews;
@@ -85,8 +86,13 @@ public class MixinNoiseBasedChunkGenerator {
         // 26.3 的雕刻并入本入口、没有公开入口：[carvers:vanilla] 时借原版私有的
         // createNoiseChunk + generateCarvers，在本生成器自身设置上补跑雕刻
         // （含水层行为与 1.21.x 的"放行原版 applyCarvers"一致）。
-        // [carvers:vanilla-ew] 的“跳过水”保护在 generateCarvers 的注入里挂载。
+        // [carvers:vanilla-ew]：用"干燥代理"跑同一套雕刻（关闭含水层 + 默认流体空气），
+        // 否则原版含水层会把新挖出的洞穴灌成区域性管道水（与公式地形不匹配）。
         NoiseBasedChunkGenerator self = (NoiseBasedChunkGenerator) (Object) this;
+        if (snapshot.carversEw()) {
+            FlatCarvers.carveModern(self, region, blender, biomeManager, structureManager, chunk);
+            return;
+        }
         try {
             NoiseGeneratorSettings settings = self.generatorSettings().value();
             NoiseSettings noiseSettings = settings.noiseSettings()
@@ -111,17 +117,22 @@ public class MixinNoiseBasedChunkGenerator {
      * 因此后处理必须放在它之后才能保留（实测：放在 buildSurface 之前的写入
      * 会在材料通道中被整段覆盖）。
      */
-    @Inject(method = "generateCarvers", at = @At("HEAD"))
+    @Inject(method = "generateCarvers", at = @At("HEAD"), cancellable = true)
     private void ohmyworld$beforeGenerateCarvers(ChunkAccess chunk, Blender blender, NoiseChunk noiseChunk,
                                                  RandomState randomState, BiomeManager biomeManager,
                                                  WorldGenRegion carverBiomeRegion,
                                                  net.minecraft.world.level.levelgen.material.rule.MaterialRule materialRule,
                                                  CallbackInfo ci) {
         ohmyworld$overlayAfterTerrain(chunk);
-        // [carvers:vanilla-ew]：在雕刻之前激活“跳过水”保护（叠加模式与公式接管模式共用本入口）。
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
-        if (snapshot != null && snapshot.carversEw()) {
-            CarverWaterGuard.begin(chunk);
+        if (snapshot == null || !snapshot.overlay()) return;
+        if (snapshot.carversEw()) {
+            // 叠加模式 + vanilla-ew：原版 buildTerrain 会继续跑到这里，必须在这里
+            // 取消原版 carvers，改用干燥代理（无含水层、默认流体空气）。否则
+            // 新挖出的洞穴会被原版含水层灌成区域性管道水（与公式地形不匹配）。
+            FlatCarvers.carveModern((NoiseBasedChunkGenerator) (Object) this, carverBiomeRegion,
+                    blender, biomeManager, carverBiomeRegion.getLevel().structureManager(), chunk);
+            ci.cancel();
         }
     }
 
@@ -195,6 +206,15 @@ public class MixinNoiseBasedChunkGenerator {
     private void ohmyworld$onApplyCarvers(WorldGenRegion region, long seed, RandomState randomState,
                                           BiomeManager biomeManager, StructureManager structureManager,
                                           ChunkAccess chunk, CallbackInfo ci) {
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot != null && snapshot.overlay() && snapshot.carversEw()) {
+            // 叠加模式 + vanilla-ew：用干燥代理跑 carvers（无含水层、默认流体空气），
+            // 否则新挖出的洞穴会被原版含水层灌成区域性管道水。
+            FlatCarvers.carve((ChunkGenerator) (Object) this, region, seed, biomeManager,
+                    structureManager, chunk);
+            ci.cancel();
+            return;
+        }
         ohmyworld$carversGate(chunk, ci);
     }
 
@@ -210,6 +230,13 @@ public class MixinNoiseBasedChunkGenerator {
                                           BiomeManager biomeManager, StructureManager structureManager,
                                           ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
         if (step != GenerationStep.Carving.AIR) return;
+        PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
+        if (snapshot != null && snapshot.overlay() && snapshot.carversEw()) {
+            FlatCarvers.carve((ChunkGenerator) (Object) this, region, seed, biomeManager,
+                    structureManager, chunk);
+            ci.cancel();
+            return;
+        }
         ohmyworld$carversGate(chunk, ci);
     }
 

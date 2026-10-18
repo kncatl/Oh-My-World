@@ -341,7 +341,11 @@ Default preset:
       [carvers:vanilla-ew] allow, but skip water blocks themselves -- the
                          water body stays intact (no cave/canyon pockets are
                          carved into oceans/rivers/lakes); the solid seabed
-                         and underground are still carved (ew = except water)
+                         and underground are still carved. In overlay mode
+                         aquifers are disabled (caves stay dry) and plain water
+                         placed by decoration (springs, lush-cave pools, ...)
+                         is removed after the feature pass; formula water stays
+                         (ew = except water)
     Works in every dimension:
     - noise-generator dimensions (normal worlds / the Nether & End sections of
       a flat world) carve with their own vanilla settings;

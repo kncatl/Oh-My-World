@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.4-beta.3
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- **Overlay carver water**: `[carvers:vanilla-ew]` now runs the vanilla carvers with aquifers disabled and air as the default fluid, so newly carved caves stay dry. On 1.21.x the chunk's cached `NoiseChunk` is temporarily cleared so the dry settings are actually used (26.3 already uses an explicit noise chunk). Plain water placed after the overlay by vanilla decoration (springs, lush-cave pools, ...) is removed after the feature pass, while water written by the formula itself is preserved. This fixes the regional pipe-shaped water in mid-air and underground caves.
+
 ## v1.3.4-beta.2
 
 > Beta release — please report any issue on GitHub.
