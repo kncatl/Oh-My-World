@@ -69,6 +69,19 @@ public class PatternData {
     private static final java.util.concurrent.atomic.AtomicInteger OVERLAY_HEIGHT_LOG =
             new java.util.concurrent.atomic.AtomicInteger();
 
+    /** 性能诊断（debug_logs）：分阶段累计耗时，每 128 个区块输出一次均值。 */
+    private static final AtomicLong PERF_FILL_CHUNKS = new AtomicLong();
+    private static final AtomicLong PERF_FILL_PREPARE = new AtomicLong();
+    private static final AtomicLong PERF_FILL_SURFACE = new AtomicLong();
+    private static final AtomicLong PERF_FILL_WRITE = new AtomicLong();
+    private static final AtomicLong PERF_OVERLAY_CHUNKS = new AtomicLong();
+    private static final AtomicLong PERF_OVERLAY_COPY = new AtomicLong();
+    private static final AtomicLong PERF_OVERLAY_LAYERS = new AtomicLong();
+    private static final AtomicLong PERF_OVERLAY_SURFACE = new AtomicLong();
+    /** 一次性高度图自检（1.3.4 性能优化时验证 ProtoChunk 的自动高度图更新）。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean FIRST_HEIGHT_CHECK =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
     /** 叠加模式的结构高度查询：按列缓存「原版噪声列 + 叠加公式」的结果（1.3.4）。 */
     private static final int OVERLAY_COLUMN_CACHE_LIMIT = 1024;
     private static final Map<OverlayColumnKey, OverlayColumn> OVERLAY_COLUMN_CACHE =
@@ -538,6 +551,8 @@ public class PatternData {
     @SuppressWarnings("unchecked")
     private static void overlayChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
         List<Object> layers = snapshot.layers();
+        boolean perf = OhMyWorldConfig.debugLogsEnabled();
+        long perfT0 = perf ? System.nanoTime() : 0L;
         int writes = 0;
         Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
@@ -558,6 +573,7 @@ public class PatternData {
         SnapshotOverlayView overlayView = new SnapshotOverlayView(minY, vanilla, chunk, protection);
         ExprEvaluator.OverlayView savedOverlay = ExprEvaluator.overlayView();
         ExprEvaluator.setOverlayView(overlayView);
+        long perfT1 = perf ? System.nanoTime() : 0L;
 
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos firstWrite = new BlockPos.MutableBlockPos();
@@ -600,25 +616,27 @@ public class PatternData {
                             if (target == null) continue;
                             // [overlay:protect-structures]（默认开）：部件包围盒内保持原版
                             if (protection != null && protection.isInside(worldX, y, worldZ)) continue;
-                            pos.set(worldX, y, worldZ);
-                            BlockState current = chunk.getBlockState(pos);
+                            LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+                            int localY = y & 15;
+                            BlockState current = ChunkWrites.getSectionBlock(section, x, localY, z);
                             if (target == current) continue;
                             boolean wasFluid = !current.getFluidState().isEmpty();
-                            ChunkWrites.setBlock(chunk, pos, target);
+                            ChunkWrites.setSectionBlock(section, x, localY, z, target);
                             h0.update(x, y, z, target);
                             h1.update(x, y, z, target);
                             if (wasFluid || !target.getFluidState().isEmpty()) {
-                                ChunkWrites.markForPostProcessing(chunk, pos);
+                                ChunkWrites.markForPostProcessing(chunk, pos.set(worldX, y, worldZ));
                             }
                             writes++;
                             if (!hasFirstWrite) {
                                 hasFirstWrite = true;
-                                firstWrite.set(pos);
+                                firstWrite.set(worldX, y, worldZ);
                             }
                         }
                     }
                 }
             }
+            long perfT2 = perf ? System.nanoTime() : 0L;
             // H3：表面补铺（[surface:vanilla+patch] 接原版之后；[surface:none] 原版已取消）
             if (snapshot.surfaceMode() != DimensionRules.SurfaceMode.VANILLA) {
                 try {
@@ -626,6 +644,9 @@ public class PatternData {
                 } finally {
                     ExprEvaluator.clearSurfaceValues();
                 }
+            }
+            if (perf) {
+                recordOverlayPerf(perfT0, perfT1, perfT2, System.nanoTime());
             }
         } finally {
             ExprEvaluator.setOverlayView(savedOverlay);
@@ -659,7 +680,24 @@ public class PatternData {
         for (SurfaceLayerDef line : rows) scanLo = Math.min(scanLo, line.resolvedStart(minY));
         scanLo = Math.max(scanLo, minY);
 
-        // 18×18 顶面（内部列读区块；边框列按 H1 前快照近似）
+        // 内部 16×16 列的当前方块一次性读入数组（H1 之后、补铺之前）：后续顶面扫描、
+        // sd/sdb 与逐列应用都读数组，避免对同一列反复 chunk.getBlockState。
+        int scanHeight = maxY - scanLo;
+        BlockState[] states = new BlockState[16 * 16 * scanHeight];
+        LevelChunkSection[] sections = chunk.getSections();
+        for (int y = scanLo; y < maxY; y++) {
+            LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+            int localY = y & 15;
+            int row = (y - scanLo) * 256;
+            for (int x = 0; x < 16; x++) {
+                int idx = row + x * 16;
+                for (int z = 0; z < 16; z++) {
+                    states[idx + z] = ChunkWrites.getSectionBlock(section, x, localY, z);
+                }
+            }
+        }
+
+        // 18×18 顶面（内部列读数组；边框列按 H1 前快照近似）
         int[] top = new int[18 * 18];
         for (int gx = 0; gx < 18; gx++) {
             for (int gz = 0; gz < 18; gz++) {
@@ -669,7 +707,7 @@ public class PatternData {
                 int found = minY - 1;
                 for (int y = maxY - 1; y >= scanLo; y--) {
                     BlockState state = interior
-                            ? chunk.getBlockState(pos.set(worldX, y, worldZ))
+                            ? surfaceState(states, scanLo, gx - 1, y, gz - 1)
                             : overlayView.stateAt(worldX, y, worldZ);
                     if (isSurfaceSolid(state)) {
                         found = y;
@@ -697,8 +735,8 @@ public class PatternData {
                 int sdAbove = 0;
                 int fluidRun = 0;
                 for (int y = maxY - 1; y >= scanLo; y--) {
-                    pos.set(worldX, y, worldZ);
-                    BlockState state = chunk.getBlockState(pos);
+                    int index = (y - scanLo) * 256 + x * 16 + z;
+                    BlockState state = states[index];
                     boolean fluid = !state.getFluidState().isEmpty();
                     boolean solid = !state.isAir() && !fluid;
                     double wd = fluidRun > 0 ? fluidRun : -1;
@@ -710,10 +748,9 @@ public class PatternData {
                             int sdb = 0;
                             int lowest = Math.max(scanLo, y - 1 - line.maxDepth());
                             for (int yy = y - 1; yy >= lowest; yy--) {
-                                if (isSurfaceSolid(chunk.getBlockState(pos.set(worldX, yy, worldZ)))) sdb++;
+                                if (isSurfaceSolid(states[(yy - scanLo) * 256 + x * 16 + z])) sdb++;
                                 else break;
                             }
-                            pos.set(worldX, y, worldZ);
                             ExprEvaluator.setSurfaceValues(sd, sdb, wd, slope);
                             Object result = ExprEvaluator.evalToSurface(
                                     line.expression(), worldX, worldZ, y - line.resolvedStart(minY), y);
@@ -722,12 +759,14 @@ public class PatternData {
                                 // [overlay:protect-structures]：部件包围盒内不补铺
                                 if (protection != null && protection.isInside(worldX, y, worldZ)) continue;
                                 boolean wasFluid = !state.getFluidState().isEmpty();
-                                ChunkWrites.setBlock(chunk, pos, replacement);
+                                LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+                                ChunkWrites.setSectionBlock(section, x, y & 15, z, replacement);
                                 h0.update(x, y, z, replacement);
                                 h1.update(x, y, z, replacement);
                                 if (wasFluid || !replacement.getFluidState().isEmpty()) {
-                                    ChunkWrites.markForPostProcessing(chunk, pos);
+                                    ChunkWrites.markForPostProcessing(chunk, pos.set(worldX, y, worldZ));
                                 }
+                                states[index] = replacement;
                                 state = replacement;
                                 fluid = !replacement.getFluidState().isEmpty();
                             }
@@ -740,6 +779,12 @@ public class PatternData {
                 }
             }
         }
+    }
+
+    /** 叠加表面通道的列数组读取（越界 = 空气）。 */
+    private static BlockState surfaceState(BlockState[] states, int baseY, int x, int y, int z) {
+        int index = (y - baseY) * 256 + x * 16 + z;
+        return index < 0 || index >= states.length ? AIR : states[index];
     }
 
     /** 调试日志：叠加后处理的首次写入计数，只记录一次。 */
@@ -1009,9 +1054,11 @@ public class PatternData {
 
     private static void fillChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
         List<Object> layers = snapshot.layers();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        Heightmap h0 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
-        Heightmap h1 = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        boolean perf = OhMyWorldConfig.debugLogsEnabled();
+        long perfT0 = perf ? System.nanoTime() : 0L;
+        if (PERF_FILL_CHUNKS.get() == 0L) {
+            LOGGER.info("ohmyworld: fill perf instrumentation active (debug={})", perf);
+        }
         int cx = chunk.getPos().getMinBlockX();
         int cz = chunk.getPos().getMinBlockZ();
         int minY = LevelHeights.minY(chunk);
@@ -1032,6 +1079,7 @@ public class PatternData {
                 prepareCyclicLayer(prepared, lo, height, cx, cz, c, minY, maxY);
             }
         }
+        long perfT1 = perf ? System.nanoTime() : 0L;
 
         // 表面通道：地形铺完之后、写入区块之前（与"surface → carvers → features"的原版顺序一致）
         if (!snapshot.surfaceLayers().isEmpty()) {
@@ -1041,23 +1089,106 @@ public class PatternData {
                 ExprEvaluator.clearSurfaceValues();
             }
         }
+        long perfT2 = perf ? System.nanoTime() : 0L;
 
+        LevelChunkSection[] sections = chunk.getSections();
         for (int y = lo; y <= hi; y++) {
+            int sectionIndex = chunk.getSectionIndex(y);
+            LevelChunkSection section = sections[sectionIndex];
+            int localY = y & 15;
             int yIndex = (y - lo) * 16 * 16;
             for (int x = 0; x < 16; x++) {
+                int xIndex = yIndex + x * 16;
                 for (int z = 0; z < 16; z++) {
-                    BlockState st = prepared[yIndex + x * 16 + z];
-                    // 新区块本就是空气，写入空气与对应的高度图更新都是空操作。
-                    // 自下而上写入时 i 只会因不透明方块前进到 y+1，重扫分支
-                    // （i-1 == y）不可能命中，因此跳过是语义等价的。
-                    // 对稀疏结构这一步能省掉绝大多数写入与高度图更新。
+                    BlockState st = prepared[xIndex + z];
+                    // 新区块本就是空气：跳过空气写入（与原版 FlatLevelSource 一致）。
                     if (st == AIR) continue;
-                    // 与原版 FlatLevelSource 一致：无标志填充，避免生成期触发额外光照/方块更新开销
-                    ChunkWrites.setBlock(chunk, pos.set(x, y, z), st);
-                    h0.update(x, y, z, st);
-                    h1.update(x, y, z, st);
+                    // 直接写 section（无锁调色板），高度图在整列写完后统一维护
+                    ChunkWrites.setSectionBlock(section, x, localY, z, st);
                 }
             }
+        }
+        updateFillHeightmaps(chunk, prepared, lo, hi);
+        if (perf) {
+            if (FIRST_HEIGHT_CHECK.compareAndSet(false, true)) {
+                verifyAutoHeightmaps(chunk, prepared, lo, hi, minY);
+            }
+            recordFillPerf(perfT0, perfT1, perfT2, System.nanoTime());
+        }
+    }
+
+    /**
+     * 按列维护填充后的 WORLDGEN 高度图（1.3.4 性能优化：不再逐方块 update）。
+     * 高度图语义与原版一致：WORLD_SURFACE = 最高非空气；OCEAN_FLOOR = 最高
+     * OCEAN_FLOOR_WG 的谓词。空列保持高度图的初始值（维度最低 y）。
+     */
+    private static void updateFillHeightmaps(ChunkAccess chunk, BlockState[] prepared, int lo, int hi) {
+        Heightmap world = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        Heightmap floor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int worldY = Integer.MIN_VALUE;
+                int floorY = Integer.MIN_VALUE;
+                BlockState worldState = null;
+                BlockState floorState = null;
+                for (int y = hi; y >= lo && (worldState == null || floorState == null); y--) {
+                    BlockState st = prepared[(y - lo) * 256 + x * 16 + z];
+                    if (worldState == null && Heightmap.Types.WORLD_SURFACE_WG.isOpaque().test(st)) {
+                        worldY = y;
+                        worldState = st;
+                    }
+                    if (floorState == null && Heightmap.Types.OCEAN_FLOOR_WG.isOpaque().test(st)) {
+                        floorY = y;
+                        floorState = st;
+                    }
+                }
+                if (worldState != null) world.update(x, worldY, z, worldState);
+                if (floorState != null) floor.update(x, floorY, z, floorState);
+            }
+        }
+    }
+
+    /** 一次性验证：ProtoChunk 的自动 WORLDGEN 高度图更新与 prepared 的顶面一致。 */
+    private static void verifyAutoHeightmaps(ChunkAccess chunk, BlockState[] prepared,
+                                             int lo, int hi, int minY) {
+        Heightmap world = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        Heightmap floor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        int bad = 0;
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int expectedWorld = minY;
+                int expectedFloor = minY;
+                boolean worldFound = false;
+                boolean floorFound = false;
+                for (int y = hi; y >= lo && (!worldFound || !floorFound); y--) {
+                    BlockState st = prepared[(y - lo) * 256 + x * 16 + z];
+                    if (!worldFound && Heightmap.Types.WORLD_SURFACE_WG.isOpaque().test(st)) {
+                        expectedWorld = y + 1;
+                        worldFound = true;
+                    }
+                    if (!floorFound && Heightmap.Types.OCEAN_FLOOR_WG.isOpaque().test(st)) {
+                        expectedFloor = y + 1;
+                        floorFound = true;
+                    }
+                }
+                if (world.getFirstAvailable(x, z) != expectedWorld) bad++;
+                if (floor.getFirstAvailable(x, z) != expectedFloor) bad++;
+            }
+        }
+        LOGGER.info("ohmyworld: heightmap auto-update check: {} mismatches", bad);
+    }
+
+    /** 性能诊断输出（debug_logs）：fill 各阶段均值（毫秒/区块），每 32 区块一条。 */
+    private static void recordFillPerf(long t0, long t1, long t2, long t3) {
+        long n = PERF_FILL_CHUNKS.incrementAndGet();
+        long prepare = PERF_FILL_PREPARE.addAndGet(t1 - t0);
+        long surface = PERF_FILL_SURFACE.addAndGet(t2 - t1);
+        long write = PERF_FILL_WRITE.addAndGet(t3 - t2);
+        if (n % 32 == 0) {
+            LOGGER.info("ohmyworld: fill perf ({} chunks avg): prepare {} ms, surface {} ms,"
+                            + " write+heightmap {} ms",
+                    n, prepare / 1_000_000.0 / n, surface / 1_000_000.0 / n,
+                    write / 1_000_000.0 / n);
         }
     }
 
@@ -1259,15 +1390,19 @@ public class PatternData {
 
     /** 按与区块填充相同的顺序计算某个世界坐标最终得到的方块状态（minY 用于解析开区间层的 ly 基准）。 */
     public static BlockState blockAt(List<Object> layers, int x, int z, int y, int dimensionMinY) {
-        BlockState result = AIR;
-        for (Object obj : layers) {
+        // 后写覆盖先写：从最后一层往前找，第一个覆盖该 y 的层就是最终结果。
+        // 公式层/循环层的结果总是方块（flat 模式的 keep/vanilla 只存在于叠加模式，
+        // 不走这里），因此可以提前返回——高度查询/表面边框列因此少算大量层。
+        for (int i = layers.size() - 1; i >= 0; i--) {
+            Object obj = layers.get(i);
             if (obj instanceof FormulaLayerDef f && y >= f.yStart() && y <= f.yEnd()) {
-                result = f.getBlock(x, z, y, dimensionMinY);
-            } else if (obj instanceof CyclicLayerDef c && y >= c.yStart() && y <= c.yEnd()) {
-                result = c.getBlock(x, z, y, dimensionMinY);
+                return f.getBlock(x, z, y, dimensionMinY);
+            }
+            if (obj instanceof CyclicLayerDef c && y >= c.yStart() && y <= c.yEnd()) {
+                return c.getBlock(x, z, y, dimensionMinY);
             }
         }
-        return result;
+        return AIR;
     }
 
     /** 带 biomeis 视图的基座高度查询（view 为 null 时沿用当前视图）。 */
@@ -1540,6 +1675,20 @@ public class PatternData {
     private static void clearHeightCache() {
         synchronized (HEIGHT_CACHE) {
             HEIGHT_CACHE.clear();
+        }
+    }
+
+    /** 性能诊断输出（debug_logs）：overlay 各阶段均值（毫秒/区块），每 128 区块一条。 */
+    private static void recordOverlayPerf(long t0, long t1, long t2, long t3) {
+        long n = PERF_OVERLAY_CHUNKS.incrementAndGet();
+        long copy = PERF_OVERLAY_COPY.addAndGet(t1 - t0);
+        long layers = PERF_OVERLAY_LAYERS.addAndGet(t2 - t1);
+        long surface = PERF_OVERLAY_SURFACE.addAndGet(t3 - t2);
+        if (n % 32 == 0) {
+            LOGGER.info("ohmyworld: overlay perf ({} chunks avg): snapshot {} ms,"
+                            + " layers+writes {} ms, surface {} ms",
+                    n, copy / 1_000_000.0 / n, layers / 1_000_000.0 / n,
+                    surface / 1_000_000.0 / n);
         }
     }
 

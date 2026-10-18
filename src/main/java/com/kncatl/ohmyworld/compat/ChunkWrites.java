@@ -3,6 +3,7 @@ package com.kncatl.ohmyworld.compat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 
 /**
  * 区块写入的版本差异收敛层。
@@ -25,6 +26,20 @@ public final class ChunkWrites {
         //?} else {
         chunk.setBlockState(pos, state, false);
         //?}
+    }
+
+    /** 生成期读取 section 方块（与 {@link #setSectionBlock} 配对使用）。 */
+    public static BlockState getSectionBlock(LevelChunkSection section, int x, int y, int z) {
+        return section.getBlockState(x, y, z);
+    }
+
+    /**
+     * 生成期直接写 section（无锁调色板）：
+     * 绕过 {@code ChunkAccess.setBlockState} 的边界/分节/光照检查与自动高度图更新，
+     * 由调用方在整块写完后按列维护高度图（2026-10 性能优化）。
+     */
+    public static void setSectionBlock(LevelChunkSection section, int x, int y, int z, BlockState state) {
+        section.setBlockState(x, y, z, state, false);
     }
 
     /**
