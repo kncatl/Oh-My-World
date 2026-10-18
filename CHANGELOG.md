@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.4-beta.4
+
+> Beta release — please report any issue on GitHub.
+
+### Fixed
+- **Structure water is preserved**: the overlay cleanup no longer removes plain water that belongs to structures (village farms/wells, stronghold fountains, ...). Water near any structure start is kept; oversized regional carver/aquifer water and vanilla feature water away from structures are still removed, and formula water remains protected. This fixes the missing village/stronghold water introduced in beta.3.
+
 ## v1.3.4-beta.3
 
 > Beta release — please report any issue on GitHub.

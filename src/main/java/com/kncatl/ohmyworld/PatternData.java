@@ -24,6 +24,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
@@ -36,6 +37,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
@@ -589,13 +591,13 @@ public class PatternData {
      * clay pool 等所有"装饰阶段放的水"；公式自己在 H1 写的水由位图保留。
      * 非叠加 / 非 vanilla-ew / 无位图 → 零行为变化。
      */
-    public static void cleanupOverlayFeatureWater(ChunkAccess chunk) {
+    public static void cleanupOverlayFeatureWater(ChunkAccess chunk, StructureManager structureManager) {
         BitSet bits = OVERLAY_WATER_MASKS.remove(chunk);
         if (bits == null) return;
         int minY = LevelHeights.minY(chunk);
         int height = chunk.getHeight();
         LevelChunkSection[] sections = chunk.getSections();
-        BlockState air = Blocks.AIR.defaultBlockState();
+        List<BlockPos> extras = new ArrayList<>();
         for (int y = minY; y < minY + height; y++) {
             LevelChunkSection section = sections[chunk.getSectionIndex(y)];
             if (section == null || section.hasOnlyAir()) continue;
@@ -605,15 +607,23 @@ public class PatternData {
                 for (int z = 0; z < 16; z++) {
                     if (!ChunkWrites.getSectionBlock(section, x, localY, z).is(Blocks.WATER)) continue;
                     if (bits.get(base + x * 16 + z)) continue;
-                    //? >=1.21.5 {
-                    chunk.setBlockState(new BlockPos(chunk.getPos().getMinBlockX() + x, y,
-                            chunk.getPos().getMinBlockZ() + z), air, 0);
-                    //?} else {
-                    chunk.setBlockState(new BlockPos(chunk.getPos().getMinBlockX() + x, y,
-                            chunk.getPos().getMinBlockZ() + z), air, false);
-                    //?}
+                    extras.add(new BlockPos(chunk.getPos().getMinBlockX() + x, y,
+                            chunk.getPos().getMinBlockZ() + z));
                 }
             }
+        }
+        if (extras.isEmpty()) return;
+
+        BlockState air = Blocks.AIR.defaultBlockState();
+        for (BlockPos pos : extras) {
+            // 结构部件内的水（村庄农田/水井、要塞喷泉等）是内容，保留。
+            // 结构附近的水（村庄农田/水井、要塞喷泉，含部件 BB 边缘）一律保留。
+            if (!structureManager.getAllStructuresAt(pos).isEmpty()) continue;
+            //? >=1.21.5 {
+            chunk.setBlockState(pos, air, 0);
+            //?} else {
+            chunk.setBlockState(pos, air, false);
+            //?}
         }
     }
 

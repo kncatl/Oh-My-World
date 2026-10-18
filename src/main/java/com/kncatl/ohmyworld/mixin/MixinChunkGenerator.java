@@ -58,13 +58,13 @@ public class MixinChunkGenerator {
     }
 
     /**
-     * 装饰阶段结束后清除"公式水体之外"的原版水（叠加 + vanilla-ew）。
-     * 覆盖 spring_water、lush caves clay pool 等装饰阶段放的水；公式 H1 写的水
-     * 由位图保留。其他模式没有位图，直接 no-op。
+     * 装饰阶段结束后清除"公式水体之外"的原版 feature 水（叠加 + vanilla-ew）。
+     * 公式 H1 水由位图保留；结构部件包围盒内的水（村庄农田/水井、要塞喷泉）
+     * 由 cleanup 内的结构 BB 检查保留。其他模式 no-op。
      */
     @Inject(method = "applyBiomeDecoration", at = @At("RETURN"))
     private void ohmyworld$cleanupFeatureWater(WorldGenLevel level, ChunkAccess chunk,
                                                StructureManager structureManager, CallbackInfo ci) {
-        PatternData.cleanupOverlayFeatureWater(chunk);
+        PatternData.cleanupOverlayFeatureWater(chunk, structureManager);
     }
 }
