@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.3.5
+
+> Stable release — server configuration, carver fluid protection and modded-biome compatibility fixes. Please report issues on GitHub.
+
+### Fixes & improvements
+- **Formula files for servers**: `config/ohmyworld.json` accepts `formula_file`, a .txt path (absolute, or relative to the server root / `config/`). UTF-8, BOM stripped, LF-normalised; edits reload in about 5 seconds. If the config or file cannot be parsed, the server no longer falls back to the default formula (fail-closed) and logs the path and reason.
+- **Carvers protect lava**: `[carvers:vanilla-ew]` now skips both water and lava (only the fluid blocks themselves; solids around and below are still carved), so Nether lava seas and pools are no longer hollowed out. Works in non-overlay dimensions too, on 1.21.x and 26.3.
+- **TerraBlender compatibility**: the vanilla fallback now reuses the generator's original biome source and performs TerraBlender region initialisation plus `possibleBiomes` merging, fixing missing TerraBlender mod biomes (e.g. More Than Apples) outside overlay regions.
+- **Guide**: internal version/test notes removed; formatting unified and a table of contents added.
+- **Compatibility**: Minecraft 1.21.1-1.21.11 and 26.1-26.3, Fabric and NeoForge; Java 21/25.
+
 ## v1.3.4
 
 > Stable release — the first stable since v1.1.7. Please report issues on GitHub.
