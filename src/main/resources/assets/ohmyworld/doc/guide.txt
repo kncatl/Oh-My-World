@@ -885,6 +885,11 @@ config/ohmyworld.json 中设置 server_mode: true，公式将应用于服务器�
   the_nether / the_end 节即可。
   ★ 运行中新增/移除维度节：需要重启服务器（单人游戏退出重进）才会对已有
     生成器生效；只改各节内的公式内容则约 5 秒自动生效。
+  ★ 复杂公式（尤其 [terrain:vanilla] 叠加 + 多条 surface 行）会让传送门落地、
+    首次进入某个维度时明显卡顿：服务端要生成落点周围的区块，v2.6 这类公式
+    实测约 0.15 秒/区块；进入过的区域会复用区块、JIT 变热后明显加快。可先用
+    /forceload 预生成常用落点/降低视距，并在公式里多用 cache2d / cache3d、
+    减少逐方块重噪声与 surface 行。
   ★ 排查问题时，可以把 config/ohmyworld.json 的 "debug_logs" 设为 true：
     日志会输出每个维度的接管决定、公式 marker 的读写、主世界替换决定等
     诊断信息（默认 false，正常游玩无需开启）。

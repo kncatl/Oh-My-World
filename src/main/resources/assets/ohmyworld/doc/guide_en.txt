@@ -904,6 +904,13 @@ noise generator). With server_mode, config formula edits take effect in about
     server restart (leave and re-enter the world in singleplayer) before it
     affects the already-created generators; editing the formula text inside
     the sections still takes effect in about 5 seconds.
+  * Complex formulas (especially [terrain:vanilla] overlay plus many surface
+    rows) make portal arrival and first visits to a dimension noticeably slower:
+    the server has to generate the chunks around the destination (v2.6 measures
+    around 0.15 s/chunk). Revisited areas reuse chunks and JIT-warmed code and
+    are much faster. Pre-generate common destinations with /forceload, lower
+    view distance, use cache2d / cache3d, and avoid per-block heavy noise and
+    excess surface rows.
   * For troubleshooting, set "debug_logs": true in config/ohmyworld.json: the
     log then shows per-dimension takeover decisions, formula marker reads and
     writes, and the overworld replacement decision (default false).
