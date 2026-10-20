@@ -338,16 +338,17 @@ Default preset:
     the formula terrain:
       [carvers:none]     default: carvers are cancelled, the formula owns the terrain
       [carvers:vanilla]  allow: vanilla carvers dig canyons/caves into the formula terrain
-      [carvers:vanilla-ew] allow, but skip water blocks themselves -- the
-                         water body stays intact (no cave/canyon pockets are
-                         carved into oceans/rivers/lakes); the solid seabed
-                         and underground are still carved. In overlay mode only
-                         chunks actually modified by the formula use the dry
-                         carver (aquifers disabled); untouched chunks outside
-                         the custom region keep vanilla carvers/aquifers.
-                         Plain water placed by decoration (springs, lush-cave
-                         pools, ...) is removed after the feature pass; formula
-                         water stays (ew = except water)
+      [carvers:vanilla-ew] allow, but skip fluid blocks themselves (water and
+                         lava) -- no cave/canyon pockets are carved into
+                         oceans/rivers/lakes or Nether lava seas; the solid
+                         seabed/rock below/around the fluid is still carved.
+                         In overlay mode only chunks actually modified by the
+                         formula use the dry carver (aquifers disabled);
+                         untouched chunks outside the custom region keep vanilla
+                         carvers/aquifers. Plain water placed by decoration
+                         (springs, lush-cave pools, ...) is removed after the
+                         feature pass; formula water stays (ew = except
+                         water/lava)
     Works in every dimension:
     - noise-generator dimensions (normal worlds / the Nether & End sections of
       a flat world) carve with their own vanilla settings;
@@ -873,9 +874,26 @@ Other blocks are resolved via BuiltInRegistries.BLOCK.
 
 Dedicated servers have no world-creation UI, so the formula marker cannot be
 written from the editor. Set server_mode: true in config/ohmyworld.json instead;
-the formula is then applied to all superflat worlds on the server (non-flat worlds
-are unaffected). With server_mode, config formula edits take effect in about
+the formula is then applied to every dimension that has a formula section (both
+superflat and noise-generator worlds; [terrain:vanilla] overlay mode requires a
+noise generator). With server_mode, config formula edits take effect in about
 5 seconds without restarting the server (newly generated chunks only).
+
+  Two ways to provide the formula (pick one):
+    "formula": "..."         Inline. Newlines must be written as \n and quotes
+                             as \" inside the JSON string; pasting a complex
+                             formula directly easily corrupts the config.
+    "formula_file": "path"   * Recommended: read the formula from a .txt file,
+                             preserving newlines/quotes/comments. Absolute paths
+                             are used as-is; relative paths are resolved against
+                             the server root first, then the config/ directory
+                             (e.g. "config/lake_realm_world_v2_6.txt" or
+                             "lake_realm_world_v2_6.txt"). formula_file wins over
+                             formula when non-empty; edits to the file are
+                             reloaded in about 5 seconds.
+  If the config or formula file cannot be parsed, server_mode does not fall back
+  to the default formula (the world stays vanilla) and the log shows the path and
+  reason; hot reload retries after the file is fixed.
 
   The server_mode formula also accepts the sectioned syntax: each dimension
   that has a section is taken over, dimensions without one stay vanilla. The

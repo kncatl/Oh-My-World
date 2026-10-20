@@ -12,6 +12,7 @@
     "NoiseBasedChunkGeneratorInvoker",
     "ChunkMapAccessor",
     "MixinWorldCarver",
+    "MixinNetherWorldCarver",
     "MixinCarvingMask",
     "ChunkAccessNoiseAccessor"
   ],

@@ -10,6 +10,7 @@ import java.util.stream.Stream;
 
 import com.kncatl.ohmyworld.compat.LevelHeights;
 import com.kncatl.ohmyworld.compat.ResourceIds;
+import com.kncatl.ohmyworld.compat.TerraBlenderCompat;
 import com.kncatl.ohmyworld.expr.ExprEvaluator;
 import com.kncatl.ohmyworld.mixin.ChunkGeneratorBiomeSourceAccessor;
 import com.kncatl.ohmyworld.mixin.ChunkMapAccessor;
@@ -96,14 +97,15 @@ public final class BiomeControl {
                     level.getChunkSource().randomState()));
 
             BiomeSource targetSource = state.source();
+            BiomeSource originalSource = state.source();
             RandomState targetRandom = state.randomState();
             Function<Holder<Biome>, BiomeGenerationSettings> targetGetter = state.settingsGetter();
             Supplier<List<FeatureSorter.StepFeatureData>> targetFeatures = state.featuresPerStep();
 
             if (rule != null || !biomeLayers.isEmpty()) {
                 BiomeSource built = !biomeLayers.isEmpty()
-                        ? buildFormulaSource(level, generator, biomeLayers, biomeFallback)
-                        : build(level, rule);
+                        ? buildFormulaSource(level, generator, biomeLayers, biomeFallback, originalSource)
+                        : build(level, rule, originalSource);
                 if (built == null) return; // 构建失败：已记日志，保持现状
                 // 需要真实气候采样的两种情形：vanilla 换源；公式源带 2d/3d 回退（回退要采样原版）。
                 boolean needsClimate = rule != null ? rule.vanilla()
@@ -127,7 +129,7 @@ public final class BiomeControl {
                 // 存档里留下的是公式占位源（说明该维度保存时正被本模组接管、现在规则已被移除）：
                 // 还原成该维度的原版群系源（主世界/下界双噪声、末地末地源），
                 // 而不是把"固定平原"的占位源留在世界里。构建失败则保持占位源。
-                BiomeSource vanilla = build(level, DimensionRules.BiomeRule.VANILLA);
+                BiomeSource vanilla = build(level, DimensionRules.BiomeRule.VANILLA, state.source());
                 if (vanilla != null) targetSource = vanilla;
             }
 
@@ -238,7 +240,8 @@ public final class BiomeControl {
      */
     private static BiomeSource buildFormulaSource(ServerLevel level, ChunkGenerator generator,
                                                   List<BiomeLayerDef> biomeLayers,
-                                                  DimensionRules.BiomeFallback fallbackMode) {
+                                                  DimensionRules.BiomeFallback fallbackMode,
+                                                  BiomeSource originalSource) {
         try {
             PatternData.PatternSnapshot snapshot = PatternData.snapshotFor(generator);
             if (snapshot == null) {
@@ -248,14 +251,14 @@ public final class BiomeControl {
             }
             BiomeSource fallbackSource = null;
             if (fallbackMode != DimensionRules.BiomeFallback.NONE) {
-                fallbackSource = build(level, DimensionRules.BiomeRule.VANILLA);
+                fallbackSource = build(level, DimensionRules.BiomeRule.VANILLA, originalSource);
                 if (fallbackSource == null) return null;
             }
             // biome 行的 vanilla / biome_at 需要该维度的原版分布源（与 [biome:vanilla]
             // 同源）；它和"未覆盖格回退"是两件事——回退可以是 none，查询源仍要建。
             BiomeSource vanillaSource = fallbackSource;
             if (vanillaSource == null && FormulaParser.usesVanillaBiomeInBiomeLines(biomeLayers)) {
-                vanillaSource = build(level, DimensionRules.BiomeRule.VANILLA);
+                vanillaSource = build(level, DimensionRules.BiomeRule.VANILLA, originalSource);
                 if (vanillaSource == null) return null;
             }
             ExprEvaluator.TerrainView terrain = new SnapshotTerrainView(snapshot,
@@ -292,20 +295,35 @@ public final class BiomeControl {
         }
     }
 
-    /** 依据规则构建群系源；无法构建（未知群系等）返回 null 并记日志。 */
-    private static BiomeSource build(ServerLevel level, DimensionRules.BiomeRule rule) {
+    /**
+     * 依据规则构建群系源。{@code preferred} 是该生成器最初的原版源（见 {@code STATE}）：
+     * vanilla 规则优先复用它，而不是每次新建——这样 TerraBlender 在服务端启动时
+     * 对该实例做的区域初始化、以及数据包/其它模组对参数表的修改都能保留。
+     * 返回前仍会调用 {@link TerraBlenderCompat#initialize}（对已初始化的源是幂等的）。
+     */
+    private static BiomeSource build(ServerLevel level, DimensionRules.BiomeRule rule,
+                                     BiomeSource preferred) {
         try {
             var registryAccess = level.registryAccess();
             if (rule.vanilla()) {
-                if (ResourceIds.sameKey(level.dimension(), Level.END)) {
-                    return TheEndBiomeSource.create(registryAccess.lookupOrThrow(Registries.BIOME));
+                BiomeSource reused = reusableVanilla(level, preferred);
+                if (reused != null) {
+                    TerraBlenderCompat.initialize(reused, level);
+                    return reused;
                 }
-                var preset = ResourceIds.sameKey(level.dimension(), Level.NETHER)
-                        ? MultiNoiseBiomeSourceParameterLists.NETHER
-                        : MultiNoiseBiomeSourceParameterLists.OVERWORLD;
-                return MultiNoiseBiomeSource.createFromPreset(
-                        registryAccess.lookupOrThrow(Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST)
-                                .getOrThrow(preset));
+                BiomeSource created;
+                if (ResourceIds.sameKey(level.dimension(), Level.END)) {
+                    created = TheEndBiomeSource.create(registryAccess.lookupOrThrow(Registries.BIOME));
+                } else {
+                    var preset = ResourceIds.sameKey(level.dimension(), Level.NETHER)
+                            ? MultiNoiseBiomeSourceParameterLists.NETHER
+                            : MultiNoiseBiomeSourceParameterLists.OVERWORLD;
+                    created = MultiNoiseBiomeSource.createFromPreset(
+                            registryAccess.lookupOrThrow(Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST)
+                                    .getOrThrow(preset));
+                }
+                TerraBlenderCompat.initialize(created, level);
+                return created;
             }
             return new FixedBiomeSource(registryAccess.lookupOrThrow(Registries.BIOME)
                     .getOrThrow(biomeKey(rule.singleBiomeId())));
@@ -314,6 +332,18 @@ public final class BiomeControl {
                     rule, ResourceIds.keyIdString(level.dimension()), e.toString());
             return null;
         }
+    }
+
+    /** 可作为该维度“原版源”复用的原始实例；不是同类源时返回 null（调用方新建）。 */
+    private static BiomeSource reusableVanilla(ServerLevel level, BiomeSource preferred) {
+        if (preferred == null || preferred instanceof FormulaBiomeSource
+                || preferred instanceof FormulaBiomeSources.Placeholder) {
+            return null;
+        }
+        if (ResourceIds.sameKey(level.dimension(), Level.END)) {
+            return preferred instanceof TheEndBiomeSource ? preferred : null;
+        }
+        return preferred instanceof MultiNoiseBiomeSource ? preferred : null;
     }
 
     /** 用该维度真实噪声设置构建 RandomState（气候采样）；失败返回 null 并记日志。 */

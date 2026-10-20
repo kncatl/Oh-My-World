@@ -57,11 +57,14 @@ Requires **Java 21** (1.21.x) or **Java 25** (26.x). Newer loader builds on the 
 
 - Dedicated servers have no world-creation UI, so the formula marker cannot be written
   from the editor. Set **`server_mode: true`** in `config/ohmyworld.json` instead; the
-  formula is then applied globally to all superflat worlds on the server (non-flat worlds
-  are unaffected).
+  formula is then applied to every dimension that has a formula section (superflat and
+  noise-generator worlds alike).
+- For complex formulas use **`"formula_file": "config/formula.txt"`** (absolute path, or
+  relative to the server root / `config/` directory) to avoid escaping newlines and
+  quotes inside JSON; edits to the file are also picked up in about 5 seconds.
 - Without `server_mode`, worlds created/specified with the `ohmyworld:flat_plus` preset
   on a dedicated server generate as vanilla superflat.
-- With `server_mode`, editing the formula in the config file takes effect in about
+- With `server_mode`, editing the formula/config text file takes effect in about
   5 seconds **without restarting the server** (only affects newly generated chunks).
 
 ### Formula Guide

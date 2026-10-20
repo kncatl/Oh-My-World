@@ -45,6 +45,14 @@ public final class WorldLoadHandler {
         ChunkGenerator generator = sl.getChunkSource().getGenerator();
         ResourceKey<Level> dimension = sl.dimension();
 
+        if (config.loadFailed()) {
+            LOGGER.error("ohmyworld: config failed to load; formula disabled for this world "
+                    + "(fix the config/formula file and restart, or wait for hot reload)");
+            PatternData.clearActive();
+            PatternData.clearAllGenerators();
+            return;
+        }
+
         if (config.serverMode()) {
             if (!applyConfigFormula(config)) {
                 PatternData.clearActive();
@@ -141,6 +149,10 @@ public final class WorldLoadHandler {
     private static final java.util.Set<String> OVERLAY_REJECTED =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /** 配置损坏时只提示一次（热加载每 5 秒会重试）。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean INVALID_CONFIG_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
     /** 出生区块（原版出生点搜索的起点；取法与各版本 setInitialSpawn 一致）。 */
     private static ChunkPos spawnAnchorChunk(ServerLevel level) {
         ServerChunkCache chunkSource = level.getChunkSource();
@@ -162,6 +174,13 @@ public final class WorldLoadHandler {
         if (!OhMyWorldConfig.reloadIfChanged()) return;
 
         OhMyWorldConfig config = OhMyWorldConfig.load();
+        if (config.loadFailed()) {
+            if (INVALID_CONFIG_LOGGED.compareAndSet(false, true)) {
+                LOGGER.error("ohmyworld: config failed to load; keeping the last valid formula "
+                        + "(fix the config/formula file; it will be retried on the next change)");
+            }
+            return;
+        }
         if (config.serverMode()) {
             // 热加载失败时保留上一次有效快照，不让临时半写入文件破坏正在生成的世界。
             if (applyConfigFormula(config)) {

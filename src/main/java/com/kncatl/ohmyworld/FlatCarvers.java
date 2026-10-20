@@ -70,7 +70,7 @@ public final class FlatCarvers {
             Cached cached = cachedFor(flat, region.getLevel());
             NoiseBasedChunkGenerator delegate = new NoiseBasedChunkGenerator(
                     flat.getBiomeSource(), cached.dry());
-            if (ew) CarverWaterGuard.begin(chunk);
+            if (ew) CarverFluidGuard.begin(chunk);
             // 1.21.x 的 applyCarvers 会复用区块里原版生成阶段缓存的 NoiseChunk（含含水层）。
             // 临时清空它，让代理生成器按干燥设置新建；雕刻完恢复原值。
             ChunkAccessNoiseAccessor noiseAccess = (ChunkAccessNoiseAccessor) chunk;
@@ -80,7 +80,7 @@ public final class FlatCarvers {
                 applyCarvers(delegate, region, seed, cached.randomState(), biomeManager, structureManager, chunk);
             } finally {
                 noiseAccess.ohmyworld$setNoiseChunk(originalNoise);
-                if (ew) CarverWaterGuard.end();
+                if (ew) CarverFluidGuard.end();
             }
         } catch (Exception e) {
             warn(region, e);
@@ -105,13 +105,13 @@ public final class FlatCarvers {
             NoiseBasedChunkGeneratorInvoker invoker = (NoiseBasedChunkGeneratorInvoker) (Object) delegate;
             NoiseSettings noiseSettings = dry.noiseSettings()
                     .clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
-            if (ew) CarverWaterGuard.begin(chunk);
+            if (ew) CarverFluidGuard.begin(chunk);
             try (NoiseChunk noiseChunk = invoker.ohmyworld$createNoiseChunk(
                     chunk, structureManager, blender, cached.randomState(), noiseSettings)) {
                 invoker.ohmyworld$generateCarvers(chunk, blender, noiseChunk, cached.randomState(),
                         biomeManager, region, dry.materialRule().value());
             } finally {
-                if (ew) CarverWaterGuard.end();
+                if (ew) CarverFluidGuard.end();
             }
         } catch (Exception e) {
             warn(region, e);

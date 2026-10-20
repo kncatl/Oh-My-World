@@ -23,7 +23,7 @@ import net.minecraft.world.level.levelgen.NoiseSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
-import com.kncatl.ohmyworld.CarverWaterGuard;
+import com.kncatl.ohmyworld.CarverFluidGuard;
 import com.kncatl.ohmyworld.DimensionRules;
 import com.kncatl.ohmyworld.FlatCarvers;
 import com.kncatl.ohmyworld.OhMyWorldConfig;
@@ -136,7 +136,7 @@ public class MixinNoiseBasedChunkGenerator {
         }
     }
 
-    /** generateCarvers 返回：结束“跳过水”保护（仅当本生成器处于 vanilla-ew 模式）。 */
+    /** generateCarvers 返回：结束“跳过流体”保护（仅当本生成器处于 vanilla-ew 模式）。 */
     @Inject(method = "generateCarvers", at = @At("RETURN"))
     private void ohmyworld$afterGenerateCarvers(ChunkAccess chunk, Blender blender, NoiseChunk noiseChunk,
                                                 RandomState randomState, BiomeManager biomeManager,
@@ -145,7 +145,7 @@ public class MixinNoiseBasedChunkGenerator {
                                                 CallbackInfo ci) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot != null && snapshot.carversEw()) {
-            CarverWaterGuard.end();
+            CarverFluidGuard.end();
         }
     }
 
@@ -223,7 +223,7 @@ public class MixinNoiseBasedChunkGenerator {
     private void ohmyworld$afterApplyCarvers(WorldGenRegion region, long seed, RandomState randomState,
                                              BiomeManager biomeManager, StructureManager structureManager,
                                              ChunkAccess chunk, CallbackInfo ci) {
-        CarverWaterGuard.end();
+        CarverFluidGuard.end();
     }
     //?} else {
     @Inject(method = "applyCarvers", at = @At("HEAD"), cancellable = true)
@@ -246,11 +246,11 @@ public class MixinNoiseBasedChunkGenerator {
     private void ohmyworld$afterApplyCarvers(WorldGenRegion region, long seed, RandomState randomState,
                                              BiomeManager biomeManager, StructureManager structureManager,
                                              ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
-        CarverWaterGuard.end();
+        CarverFluidGuard.end();
     }
     //?}
 
-    /** 雕刻门控：未接管 / 不该雕刻 → 取消；vanilla-ew → 激活“跳过水”保护。 */
+    /** 雕刻门控：未接管 / 不该雕刻 → 取消；vanilla-ew → 激活“跳过流体（水/岩浆）”保护。 */
     private void ohmyworld$carversGate(ChunkAccess chunk, CallbackInfo ci) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (OhMyWorldConfig.debugLogsEnabled() && CARVERS_LOGGED.compareAndSet(false, true)) {
@@ -265,7 +265,12 @@ public class MixinNoiseBasedChunkGenerator {
             ci.cancel();
             return;
         }
-        if (snapshot.carversEw() && PatternData.isOverlayTouched(chunk)) CarverWaterGuard.begin(chunk);
+        if (snapshot.carversEw()
+                && (!snapshot.overlay() || PatternData.isOverlayTouched(chunk))) {
+            // 非叠加：整个维度都是公式地形，直接保护公式水/岩浆；
+            // 叠加：只保护 H1 实际改写的区块（10000 格外纯原版区块保持原版 carver/含水层）。
+            CarverFluidGuard.begin(chunk);
+        }
     }
     //?}
 

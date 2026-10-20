@@ -76,7 +76,7 @@ public final class DimensionRules {
         NONE,
         /** {@code [carvers:vanilla]}：放行原版雕刻器。 */
         VANILLA,
-        /** {@code [carvers:vanilla-ew]}（except water）：放行原版雕刻器，但跳过水方块本身。 */
+        /** {@code [carvers:vanilla-ew]}（except water）：放行原版雕刻器，但跳过水/岩浆方块本身。 */
         VANILLA_EXCEPT_WATER
     }
 

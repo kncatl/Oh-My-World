@@ -37,7 +37,8 @@ public class OhMyWorldMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        if (mixinClassName.endsWith(".MixinWorldCarver")) {
+        if (mixinClassName.endsWith(".MixinWorldCarver")
+                || mixinClassName.endsWith(".MixinNetherWorldCarver")) {
             return WORLD_CARVER_IS_CLASS;
         }
         if (mixinClassName.endsWith(".ChunkAccessNoiseAccessor")) {
