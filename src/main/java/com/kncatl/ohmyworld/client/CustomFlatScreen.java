@@ -448,18 +448,20 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
                 text.append(EMPTY.getString());
                 defaultColor = MUTED_COLOR;
             } else if (this.currentResult != null) {
+                // 叠加预览警告放在摘要之前：1.21.x 小窗口的信息框可能只有一行高，
+                // 先显示警告，避免它被下方摘要挤出可见区域。
+                FormulaParser.ParsedDimension previewDim = this.previewSelectedDim == null
+                        ? null : this.currentResult.dimensions().get(this.previewSelectedDim);
+                if (previewDim != null && previewDim.overlay()) {
+                    appendWarningFirst(text, colorSpans,
+                            Component.translatable("ohmyworld.custom_screen.preview_overlay"));
+                }
                 text.append(summaryLine(this.currentResult).getString());
                 defaultColor = OK_COLOR;
                 if (this.currentResult.sectioned()
                         && !this.currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
                     appendWarning(text, colorSpans,
                             Component.translatable("ohmyworld.custom_screen.vanilla_overworld"));
-                }
-                FormulaParser.ParsedDimension previewDim = this.previewSelectedDim == null
-                        ? null : this.currentResult.dimensions().get(this.previewSelectedDim);
-                if (previewDim != null && previewDim.overlay()) {
-                    appendWarning(text, colorSpans,
-                            Component.translatable("ohmyworld.custom_screen.preview_overlay"));
                 }
             }
         }
@@ -471,6 +473,13 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.infoBox.setTextColor(defaultColor);
         this.infoBox.setColorSpans(colorSpans);
         if (this.copyInfoBtn != null) this.copyInfoBtn.active = !value.isBlank();
+    }
+
+    /** 在摘要前追加一行警告，并记录该行的警告色区间。 */
+    private static void appendWarningFirst(StringBuilder text, List<int[]> colorSpans, Component warning) {
+        int start = text.length();
+        text.append(warning.getString());
+        colorSpans.add(new int[]{start, text.length(), WARN_COLOR});
     }
 
     /** 在摘要后追加一行警告，并记录该行的警告色区间。 */
