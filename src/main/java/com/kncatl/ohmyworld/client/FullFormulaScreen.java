@@ -63,6 +63,7 @@ public class FullFormulaScreen extends Screen {
         int boxH = Math.max(40, this.height - 30 - 48);
         this.formulaBox = MultiLineBox.create(this.font, boxX, boxY, boxW, boxH,
                 FORMULA_HINT, TITLE, FormulaParser.MAX_INPUT_LENGTH, t -> validate());
+        this.formulaBox.setLineSpacing(3);
         this.formulaBox.setValue(this.initial == null ? "" : this.initial);
         this.addRenderableWidget(this.formulaBox.widget());
 

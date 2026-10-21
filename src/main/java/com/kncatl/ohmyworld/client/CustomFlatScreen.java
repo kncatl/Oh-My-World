@@ -216,6 +216,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
         this.formulaBox = MultiLineBox.create(this.font, fx, this.formulaY, leftW, formulaH,
                 FORMULA_HINT, FORMULA_LABEL, FormulaParser.MAX_INPUT_LENGTH, t -> validate());
+        this.formulaBox.setLineSpacing(3);
         this.formulaBox.setValue(pendingFormula != null ? pendingFormula : PatternData.getRawInput());
         this.addRenderableWidget(this.formulaBox.widget());
 
@@ -231,6 +232,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         int infoHeight = Math.max(24, Math.min(88, infoBottom - this.statusY));
         this.infoBox = MultiLineBox.createReadOnly(this.font, fx, this.statusY, leftW, infoHeight,
                 INFO_EMPTY, INFO_LABEL, FormulaParser.MAX_INPUT_LENGTH);
+        // init 会重建控件；不清空缓存的话，refreshInfoBox 会误以为新控件已有文本而跳过 setValue。
+        this.infoBoxText = "";
         this.addRenderableWidget(this.infoBox.widget());
         this.copyInfoBtn = Button.builder(COPY, b -> copyInfo())
                 .bounds(fx + leftW - 48, this.statusY - 18, 48, 16).build();
@@ -263,7 +266,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
 
         int right = this.cardX + this.cardW - 16;
         this.addRenderableWidget(Button.builder(EXPAND, b -> openFullscreen())
-                .bounds(fx + 26, this.formulaY - 18, 56, 16).build());
+                .bounds(fx + leftW - 56, this.formulaY - 18, 56, 16).build());
         this.addRenderableWidget(Button.builder(OPEN_GUIDE, b -> openGuide())
                 .bounds(right - 76, this.cardY + 26, 76, 20).build());
         this.addRenderableWidget(Button.builder(EXAMPLES_BTN, b -> openExamples())
@@ -427,24 +430,36 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private void refreshInfoBox() {
         if (this.infoBox == null) return;
         StringBuilder text = new StringBuilder();
+        List<int[]> colorSpans = new ArrayList<>();
+        int defaultColor = MUTED_COLOR;
         boolean statusActive = this.statusMessage != null
                 && System.currentTimeMillis() < this.statusUntil;
         if (statusActive) {
             text.append(this.statusMessage.getString());
+            defaultColor = this.statusColor;
         } else {
             this.statusMessage = null;
             if (!this.currentErrors.isEmpty()) {
                 text.append(Component.translatable("ohmyworld.custom_screen.errors",
                         this.currentErrors.size()).getString()).append('\n');
                 for (String error : this.currentErrors) text.append(error).append('\n');
+                defaultColor = ERROR_COLOR;
             } else if (this.formulaBox == null || this.formulaBox.value().isBlank()) {
                 text.append(EMPTY.getString());
+                defaultColor = MUTED_COLOR;
             } else if (this.currentResult != null) {
                 text.append(summaryLine(this.currentResult).getString());
+                defaultColor = OK_COLOR;
                 if (this.currentResult.sectioned()
                         && !this.currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
-                    text.append('\n').append(Component.translatable(
-                            "ohmyworld.custom_screen.vanilla_overworld").getString());
+                    appendWarning(text, colorSpans,
+                            Component.translatable("ohmyworld.custom_screen.vanilla_overworld"));
+                }
+                FormulaParser.ParsedDimension previewDim = this.previewSelectedDim == null
+                        ? null : this.currentResult.dimensions().get(this.previewSelectedDim);
+                if (previewDim != null && previewDim.overlay()) {
+                    appendWarning(text, colorSpans,
+                            Component.translatable("ohmyworld.custom_screen.preview_overlay"));
                 }
             }
         }
@@ -453,7 +468,16 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             this.infoBoxText = value;
             this.infoBox.setValue(value);
         }
+        this.infoBox.setTextColor(defaultColor);
+        this.infoBox.setColorSpans(colorSpans);
         if (this.copyInfoBtn != null) this.copyInfoBtn.active = !value.isBlank();
+    }
+
+    /** 在摘要后追加一行警告，并记录该行的警告色区间。 */
+    private static void appendWarning(StringBuilder text, List<int[]> colorSpans, Component warning) {
+        int start = text.length();
+        text.append('\n').append(warning.getString());
+        colorSpans.add(new int[]{start + 1, text.length(), WARN_COLOR});
     }
 
     /** 短暂提示到期后恢复成错误/摘要。 */

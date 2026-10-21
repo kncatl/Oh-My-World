@@ -44,6 +44,7 @@ public class FormulaEditor extends AbstractWidget {
     private static final int COLOR_SCROLLBAR_HOVER = 0xFF9A9A9A;
     private static final int COLOR_ERROR_BG = 0x33FF5555;
     private static final int COLOR_ERROR_UNDERLINE = 0xB0FF5555;
+    private static final int COLOR_INFO_DEFAULT = 0xFFDCDCDC;
 
     private static final int K_LEFT = InputConstants.KEY_LEFT;
     private static final int K_RIGHT = InputConstants.KEY_RIGHT;
@@ -71,6 +72,12 @@ public class FormulaEditor extends AbstractWidget {
     private boolean readOnly;
     /** 是否按公式语法着色（错误信息等纯文本关闭）。 */
     private boolean syntaxHighlight = true;
+    /** 关闭语法着色时的文本颜色；默认与公式正文一致。 */
+    private int textColor = COLOR_INFO_DEFAULT;
+    /** 文本行额外间距（像素）；0 = 原版 font.lineHeight。 */
+    private int lineSpacing = 0;
+    /** 关闭语法着色时的局部颜色区间（[start, end, ARGB]，用于摘要+警告混排）。 */
+    private List<int[]> colorSpans = List.of();
     /** 按住滑块时，光标相对滑块顶部的偏移；点轨道时为滑块高度一半（滑块居中跳过去）。 */
     private double scrollGrabOffset;
     private long focusedTime;
@@ -110,6 +117,21 @@ public class FormulaEditor extends AbstractWidget {
         this.syntaxHighlight = enabled;
     }
 
+    /** 关闭语法着色时的默认文本颜色。 */
+    public void setTextColor(int color) {
+        this.textColor = color;
+    }
+
+    /** 关闭语法着色时的局部颜色区间（原文下标；空列表表示只用默认颜色）。 */
+    public void setColorSpans(List<int[]> spans) {
+        this.colorSpans = spans == null || spans.isEmpty() ? List.of() : spans;
+    }
+
+    /** 文本行额外间距（像素）；只影响显示与命中行高。 */
+    public void setLineSpacing(int spacing) {
+        this.lineSpacing = Math.max(0, spacing);
+    }
+
     /** 设置错误标注区间（原文坐标）；空列表表示没有错误。 */
     public void setErrorSpans(List<int[]> spans) {
         this.errorSpans = spans == null || spans.isEmpty() ? List.of() : spans;
@@ -118,7 +140,7 @@ public class FormulaEditor extends AbstractWidget {
     // ---------------------------------------------------------------- 滚动
 
     private int lineHeight() {
-        return this.font.lineHeight;
+        return this.font.lineHeight + this.lineSpacing;
     }
 
     private int innerHeight() {
@@ -561,8 +583,16 @@ public class FormulaEditor extends AbstractWidget {
             for (int i = this.scrollLine; i < lines.size() && i <= this.scrollLine + visibleLines(); i++) {
                 FormulaTextModel.Line line = lines.get(i);
                 if (line.start() >= line.end()) continue;
-                drawRun(t, value, line.start(), line.end(), ix,
-                        iy + (i - this.scrollLine) * lineH, FormulaHighlighter.COLOR_DEFAULT);
+                int y = iy + (i - this.scrollLine) * lineH;
+                int pos = line.start();
+                int x = ix;
+                while (pos < line.end()) {
+                    int color = colorAt(pos);
+                    int end = pos + 1;
+                    while (end < line.end() && colorAt(end) == color) end++;
+                    x = drawRun(t, value, pos, end, x, y, color);
+                    pos = end;
+                }
             }
             return;
         }
@@ -573,6 +603,14 @@ public class FormulaEditor extends AbstractWidget {
             int y = iy + (i - this.scrollLine) * lineH;
             drawLine(t, value, line, spans, ix, y);
         }
+    }
+
+    /** 无语法着色时的字符颜色：局部区间优先，否则默认色。 */
+    private int colorAt(int index) {
+        for (int[] span : this.colorSpans) {
+            if (index >= span[0] && index < span[1]) return span[2];
+        }
+        return this.textColor;
     }
 
     private void drawLine(GuiCompat.Draw t, String value, FormulaTextModel.Line line,

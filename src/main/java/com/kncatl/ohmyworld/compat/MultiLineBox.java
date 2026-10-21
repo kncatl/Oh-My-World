@@ -36,6 +36,15 @@ public final class MultiLineBox {
 
         /** 是否按公式语法着色（错误/状态信息关闭）。 */
         void setSyntaxHighlight(boolean enabled);
+
+        /** 无语法着色时的默认文本颜色。 */
+        void setTextColor(int color);
+
+        /** 无语法着色时的局部颜色区间（原文下标，[start, end, ARGB]）。 */
+        void setColorSpans(List<int[]> spans);
+
+        /** 文本行额外间距（像素）。 */
+        void setLineSpacing(int spacing);
     }
 
     private MultiLineBox() {}
@@ -79,6 +88,21 @@ public final class MultiLineBox {
             @Override
             public void setSyntaxHighlight(boolean enabled) {
                 editor.setSyntaxHighlight(enabled);
+            }
+
+            @Override
+            public void setTextColor(int color) {
+                editor.setTextColor(color);
+            }
+
+            @Override
+            public void setColorSpans(List<int[]> spans) {
+                editor.setColorSpans(spans);
+            }
+
+            @Override
+            public void setLineSpacing(int spacing) {
+                editor.setLineSpacing(spacing);
             }
         };
     }
