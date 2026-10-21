@@ -1,6 +1,7 @@
 package com.kncatl.ohmyworld;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,6 +10,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.kncatl.ohmyworld.platform.LevelLoadCallback;
+import com.kncatl.ohmyworld.platform.Platform;
+import com.kncatl.ohmyworld.platform.ServerTickCallback;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,6 +22,18 @@ class OhMyWorldConfigTest {
 
     @TempDir
     Path tempDir;
+
+    private Platform originalPlatform;
+
+    @BeforeEach
+    void rememberPlatform() {
+        originalPlatform = Platform.get();
+    }
+
+    @AfterEach
+    void restorePlatform() {
+        Platform.set(originalPlatform);
+    }
 
     @Test
     void readsUtf8BomAndNormalizesLineEndings() throws Exception {
@@ -84,5 +102,38 @@ class OhMyWorldConfigTest {
         Files.writeString(ohmyFile, "ohmyworld", StandardCharsets.UTF_8);
 
         assertEquals(rootFile, OhMyWorldConfig.resolveFormulaPath(relative, game, config, false));
+    }
+
+    @Test
+    void nonServerModeDoesNotReadFormulaFile() throws Exception {
+        Path game = tempDir.resolve("server");
+        Path config = game.resolve("config");
+        Files.createDirectories(config);
+        Files.writeString(config.resolve("ohmyworld.json"),
+                "{\"server_mode\":false,\"formula_file\":\"missing.txt\"}",
+                StandardCharsets.UTF_8);
+        Platform.set(new TestPlatform(game, config));
+
+        OhMyWorldConfig loaded = OhMyWorldConfig.reload();
+        assertFalse(loaded.loadFailed());
+        assertEquals(PatternData.DEFAULT_INPUT, loaded.formula());
+    }
+
+    @Test
+    void serverModeStillFailsClosedWhenFormulaFileIsMissing() throws Exception {
+        Path game = tempDir.resolve("server");
+        Path config = game.resolve("config");
+        Files.createDirectories(config);
+        Files.writeString(config.resolve("ohmyworld.json"),
+                "{\"server_mode\":true,\"formula_file\":\"missing.txt\"}",
+                StandardCharsets.UTF_8);
+        Platform.set(new TestPlatform(game, config));
+
+        assertTrue(OhMyWorldConfig.reload().loadFailed());
+    }
+
+    private record TestPlatform(Path gameDir, Path configDir) implements Platform {
+        @Override public void onLevelLoad(LevelLoadCallback callback) {}
+        @Override public void onServerTick(ServerTickCallback callback) {}
     }
 }

@@ -38,7 +38,7 @@ public class OhMyWorldConfig {
     private String formula = DEFAULT_FORMULA;
     /**
      * 可选：公式 txt 文件路径（绝对路径，或相对服务器目录、ohmyworld/、config/ 目录）。
-     * 非空时优先于 {@link #formula}；文件内容按 UTF-8 读取，换行统一为 LF。
+     * 仅在 server_mode=true 时读取；非空时优先于 {@link #formula}；UTF-8、换行统一为 LF。
      * 复杂公式建议用本字段——JSON 字符串里的换行和引号必须转义，直接粘贴很容易损坏配置。
      */
     private String formula_file = "";
@@ -90,8 +90,10 @@ public class OhMyWorldConfig {
                 OhMyWorldConfig parsed = GSON.fromJson(json, OhMyWorldConfig.class);
                 if (parsed == null) throw new IllegalStateException("empty config file");
 
-                if (parsed.formula_file != null && !parsed.formula_file.isBlank()) {
-                    Path source = resolveFormulaPath(parsed.formula_file.trim(), parsed.server_mode);
+                // 非 server_mode 世界只认 marker；配置里的 formula/formula_file 不参与，
+                // 更不能因为 formula_file 读不到而让 marker 世界回到默认公式。
+                if (parsed.server_mode && parsed.formula_file != null && !parsed.formula_file.isBlank()) {
+                    Path source = resolveFormulaPath(parsed.formula_file.trim(), true);
                     if (source == null) {
                         throw new IllegalStateException("invalid formula_file path: " + parsed.formula_file);
                     }

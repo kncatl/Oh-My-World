@@ -10,6 +10,7 @@
 - **科学记数法**：数值字面量支持 `1e9`、`1.5e-3`、`2E+4` 等写法。
 - **受种子影响的方块随机**：新增 `seedrand()` / `seedrand(b1, b2, ...)`，方块池规则与 `rand()` 相同，但会把完整世界种子混入哈希，每个世界得到不同且确定可复现的方块图案。
 - **服务端公式查找**：`server_mode` 开启且 `formula_file` 非空时，相对路径改为按 `ohmyworld/` → 服务器根目录 → `config/` 查找；非 server_mode 仍保持服务器根目录 → `config/`。
+- **非 server_mode 世界忽略配置公式**：`server_mode` 为 false 时完全不读取配置里的 `formula` / `formula_file`；无 marker 的世界按原版生成，有 marker 的世界按 marker 生成，不会因为 formula_file 缺失而回退或阻断。
 - **共享 let 按实际引用校验**：只在 surface 行使用的共享 let 不再让方块层/biome 行误报 `Unknown variable: wd`；surface 与 biome 行也支持局部 `{ let ...; 表达式 }` 块。
 - **指南释放**：内置 `guide.md` / `guide_en.md` 启动时同名覆盖，不再生成 SHA-256 标记，也不清理旧文件；中英指南改用 Markdown 标题、列表和代码块，预览更清晰。
 - **兼容性**：Minecraft 1.21.1–1.21.11 与 26.1–26.3，Fabric / NeoForge；Java 21/25。

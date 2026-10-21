@@ -1052,6 +1052,10 @@ Two ways to provide the formula (pick one):
                          formula when non-empty; edits reload in about 5 s.
 ```
 
+Outside server_mode, the formula / formula_file fields in the config are not
+read at all: a world without a marker generates vanilla, and a world with a
+marker follows that marker. The config fields only apply with server_mode.
+
 If the config or formula file cannot be parsed, server_mode does not fall back
 to the default formula (the world stays vanilla) and the log shows the path and
 reason; hot reload retries after the file is fixed.
