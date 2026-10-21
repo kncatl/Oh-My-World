@@ -20,6 +20,8 @@ public final class WorldLoadHandler {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static int tickCount;
+    /** 已因配置/marker 致命错误请求停机的服务器；只用于避免同一服务器的多个维度重复刷屏。 */
+    private static volatile MinecraftServer fatalStoppedServer;
 
     public static void register() {
         Platform.get().onLevelLoad(WorldLoadHandler::onLevelLoad);
@@ -27,6 +29,8 @@ public final class WorldLoadHandler {
     }
 
     private static void onLevelLoad(ServerLevel sl) {
+        if (fatalStoppedServer == sl.getServer()) return;
+
         // 世界种子：公式内置变量 seed 的来源。加载事件早于任何区块生成
         // （各维度的公式绑定同样依赖这个时机）；各维度同值，先到先设。
         PatternData.setWorldSeed(sl.getSeed());
@@ -46,6 +50,25 @@ public final class WorldLoadHandler {
         ResourceKey<Level> dimension = sl.dimension();
 
         if (config.loadFailed()) {
+            if (config.jsonSyntaxFailed()) {
+                // JSON 损坏时无法判断 server_mode：无 marker 就按原版继续（模组不参与）；
+                // marker 存在但读不出来则说明世界配置本身也坏了，直接停机。
+                if (!PatternData.hasMarker(sl)) {
+                    LOGGER.warn("ohmyworld: config JSON is invalid and the world has no formula marker; "
+                            + "continuing with vanilla generation");
+                    PatternData.clearActive();
+                    PatternData.clearAllGenerators();
+                    return;
+                }
+                LOGGER.warn("ohmyworld: config JSON is invalid; trying formula marker fallback");
+                if (PatternData.restoreFromMarker(sl)) {
+                    bindDimension(sl, generator);
+                    logDecision(sl, "marker (config JSON invalid)", generator);
+                    return;
+                }
+                stopForFatalConfigError(sl);
+                return;
+            }
             LOGGER.error("ohmyworld: config failed to load; formula disabled for this world "
                     + "(fix the config/formula file and restart, or wait for hot reload)");
             PatternData.clearActive();
@@ -167,8 +190,28 @@ public final class WorldLoadHandler {
         //?}
     }
 
+    /** 配置 JSON 损坏且没有可用 marker：记录明确错误并请求服务器停止。 */
+    private static void stopForFatalConfigError(ServerLevel level) {
+        MinecraftServer server = level.getServer();
+        if (fatalStoppedServer == server) return;
+        fatalStoppedServer = server;
+        LOGGER.error("ohmyworld: config JSON is damaged and no usable formula marker was found; "
+                + "stopping the server instead of generating with an unknown formula");
+        LOGGER.error("ohmyworld: fix config/ohmyworld.json, or provide a valid ohmyworld_marker.txt "
+                + "in the world root, then restart");
+        PatternData.clearActive();
+        PatternData.clearAllGenerators();
+        try {
+            // halt(false) 只设置 running=false，不等待服务器线程；从世界加载回调调用是安全的。
+            server.halt(false);
+        } catch (Throwable t) {
+            LOGGER.error("ohmyworld: failed to stop the server after the config failure", t);
+        }
+    }
+
     /** 运行中热加载：server_mode 下每 5 秒检查一次配置文件，变化时立即应用新公式。 */
     private static void onServerTick(MinecraftServer server) {
+        if (fatalStoppedServer == server) return;
         if (++tickCount % 100 != 0) return;
 
         if (!OhMyWorldConfig.reloadIfChanged()) return;

@@ -1056,6 +1056,12 @@ Outside server_mode, the formula / formula_file fields in the config are not
 read at all: a world without a marker generates vanilla, and a world with a
 marker follows that marker. The config fields only apply with server_mode.
 
+If the config JSON is syntactically damaged: a world without a marker continues
+vanilla (the mod does not take over); a valid marker is used if present; if the
+marker exists but cannot be parsed, the mod logs an error and stops the server
+instead of generating with an unknown formula. Fix the config or marker and
+restart.
+
 If the config or formula file cannot be parsed, server_mode does not fall back
 to the default formula (the world stays vanilla) and the log shows the path and
 reason; hot reload retries after the file is fixed.

@@ -1032,6 +1032,10 @@ config/ohmyworld.json 中设置 server_mode: true，公式将应用于服务器�
 非 server_mode 世界不会读取配置里的 formula / formula_file：没有 marker 时直接按
 原版生成；有 marker 时按 marker 里的公式生成。配置字段只在 server_mode 下生效。
 
+如果配置 JSON 语法损坏：没有 marker 时按原版继续（模组不参与生成）；有 marker
+时尝试按 marker 生成；marker 存在但无法解析时会记录错误并停止服务器，避免用
+错误公式继续生成。修好配置或 marker 后重启即可。
+
 配置或公式文件解析失败时，server_mode 不会用默认公式生成世界（保持原版），
 并在日志中打印具体路径/原因；修好后热加载会自动重试。
 

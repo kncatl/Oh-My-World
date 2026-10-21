@@ -11,6 +11,7 @@
 - **Seed-driven block randomness**: new `seedrand()` / `seedrand(b1, b2, ...)` uses the same block-pool rules as `rand()` but mixes the full world seed into the hash, so each world gets a different deterministic block pattern.
 - **Server formula lookup**: with `server_mode` enabled and `formula_file` set, relative paths now search `ohmyworld/` first, then the server root, then `config/`. Outside server mode the previous root → `config/` order is unchanged.
 - **Non-server worlds ignore config formulas**: outside `server_mode`, the `formula` / `formula_file` fields are not read at all. A world without a marker generates vanilla; a world with a marker follows that marker, even if the config points at a missing formula file.
+- **Config JSON failure fallback**: if the config JSON is malformed, a markerless world continues with vanilla generation; a valid marker is used; a marker that exists but cannot be parsed logs an error and stops the server instead of generating with an unknown formula.
 - **Shared lets validated by use**: a shared let referenced only by surface rows no longer triggers `Unknown variable: wd` in block or biome layers. Local `{ let ...; expression }` blocks in surface and biome rows are supported as well.
 - **Guide delivery**: the bundled `guide.md` / `guide_en.md` overwrite the same names at startup; there is no SHA-256 marker or old-file cleanup. Both guides now use Markdown headings, lists and fenced examples for clean preview.
 - **Compatibility**: Minecraft 1.21.1-1.21.11 and 26.1-26.3, Fabric and NeoForge; Java 21/25.

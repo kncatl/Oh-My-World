@@ -2,6 +2,7 @@ package com.kncatl.ohmyworld;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonSyntaxException;
 import com.kncatl.ohmyworld.platform.Platform;
 import com.mojang.logging.LogUtils;
@@ -46,12 +47,15 @@ public class OhMyWorldConfig {
     private boolean debug_logs = false;
     /** 加载失败（JSON 损坏 / formula_file 读不到）：server_mode 下不在错误配置上生成世界。 */
     private transient boolean loadFailed = false;
+    /** 失败原因是配置 JSON 语法损坏（可供非 server_mode 尝试 marker 回退）。 */
+    private transient boolean jsonSyntaxFailed = false;
 
     public boolean serverMode() { return server_mode; }
     public String formula() { return formula; }
     public String formulaFile() { return formula_file; }
     public boolean debugLogs() { return debug_logs; }
     public boolean loadFailed() { return loadFailed; }
+    public boolean jsonSyntaxFailed() { return jsonSyntaxFailed; }
 
     /** 当前配置是否开启了诊断日志（供各处的日志门控使用；未加载时按需读取一次）。 */
     public static boolean debugLogsEnabled() {
@@ -83,13 +87,23 @@ public class OhMyWorldConfig {
 
         if (Files.exists(configPath, LinkOption.NOFOLLOW_LINKS)) {
             long configModified = -1;
+            OhMyWorldConfig parsed;
             try {
                 configModified = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
                 String json = Files.readString(configPath, StandardCharsets.UTF_8);
                 if (!json.isEmpty() && json.charAt(0) == '\uFEFF') json = json.substring(1);
-                OhMyWorldConfig parsed = GSON.fromJson(json, OhMyWorldConfig.class);
-                if (parsed == null) throw new IllegalStateException("empty config file");
+                try {
+                    parsed = GSON.fromJson(json, OhMyWorldConfig.class);
+                    if (parsed == null) throw new JsonSyntaxException("empty config file");
+                } catch (JsonParseException e) {
+                    return configJsonFailure(configPath, configModified, e);
+                }
+            } catch (Exception e) {
+                // 配置文件读不到/不可读：不是 JSON 语法问题，保持原有 fail-closed。
+                return configLoadFailure(configPath, configModified, e, false);
+            }
 
+            try {
                 // 非 server_mode 世界只认 marker；配置里的 formula/formula_file 不参与，
                 // 更不能因为 formula_file 读不到而让 marker 世界回到默认公式。
                 if (parsed.server_mode && parsed.formula_file != null && !parsed.formula_file.isBlank()) {
@@ -113,22 +127,37 @@ public class OhMyWorldConfig {
                 LOGGER.debug("Config loaded from {}", configPath);
                 return instance;
             } catch (Exception e) {
-                // 解析失败：使用默认值，但保留原文件供用户修复
-                LOGGER.error("ohmyworld: failed to parse config {}, using defaults (original file kept)", configPath, e);
-                if (e instanceof JsonSyntaxException) {
-                    LOGGER.error("ohmyworld: inline \"formula\" strings must escape newlines and quotes; "
-                            + "put complex formulas in a .txt file and use \"formula_file\" instead");
-                }
-                lastModified = configModified;
+                // formula_file 读取/解析失败：不是配置 JSON 语法问题，保持原有 fail-closed。
+                return configLoadFailure(configPath, configModified, e, false);
             }
-            instance = new OhMyWorldConfig();
-            instance.loadFailed = true;
-            return instance;
         }
 
         instance = new OhMyWorldConfig();
         save();
         return instance;
+    }
+
+    /** 配置 JSON 语法失败：记录日志并标记，供非 server_mode 的 marker 回退使用。 */
+    private static OhMyWorldConfig configJsonFailure(Path configPath, long configModified, Exception e) {
+        LOGGER.error("ohmyworld: failed to parse config {}, using defaults (original file kept)", configPath, e);
+        LOGGER.error("ohmyworld: inline \"formula\" strings must escape newlines and quotes; "
+                + "put complex formulas in a .txt file and use \"formula_file\" instead");
+        lastModified = configModified;
+        OhMyWorldConfig failed = new OhMyWorldConfig();
+        failed.loadFailed = true;
+        failed.jsonSyntaxFailed = true;
+        return failed;
+    }
+
+    /** 配置读取/公式文件失败：记录日志并标记 loadFailed（不标记 JSON 语法失败）。 */
+    private static OhMyWorldConfig configLoadFailure(Path configPath, long configModified, Exception e,
+                                                      boolean jsonSyntaxFailed) {
+        LOGGER.error("ohmyworld: failed to load config {}, using defaults (original file kept)", configPath, e);
+        lastModified = configModified;
+        OhMyWorldConfig failed = new OhMyWorldConfig();
+        failed.loadFailed = true;
+        failed.jsonSyntaxFailed = jsonSyntaxFailed;
+        return failed;
     }
 
     /** 解析 formula_file（非 server_mode）：绝对路径原样；相对路径先游戏/服务器目录，再 config/。 */

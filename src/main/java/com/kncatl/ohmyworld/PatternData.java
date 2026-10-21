@@ -419,6 +419,11 @@ public class PatternData {
                 .resolve("ohmyworld_marker.txt");
     }
 
+    /** 世界根目录是否存在 marker（仅判断文件存在，不判断内容是否有效）。 */
+    public static boolean hasMarker(ServerLevel level) {
+        return Files.exists(markerPath(level), LinkOption.NOFOLLOW_LINKS);
+    }
+
     /** 激活图案并写入 marker（仅当 marker 不存在时）。overwrite=true 时无条件覆写（server_mode 下配置公式为准）。 */
     public static void markActive(ServerLevel level, boolean overwrite) {
         active = true;

@@ -105,6 +105,20 @@ class OhMyWorldConfigTest {
     }
 
     @Test
+    void malformedJsonIsFlaggedForMarkerFallback() throws Exception {
+        Path game = tempDir.resolve("server");
+        Path config = game.resolve("config");
+        Files.createDirectories(config);
+        Files.writeString(config.resolve("ohmyworld.json"), "{ this is not json",
+                StandardCharsets.UTF_8);
+        Platform.set(new TestPlatform(game, config));
+
+        OhMyWorldConfig loaded = OhMyWorldConfig.reload();
+        assertTrue(loaded.loadFailed());
+        assertTrue(loaded.jsonSyntaxFailed());
+    }
+
+    @Test
     void nonServerModeDoesNotReadFormulaFile() throws Exception {
         Path game = tempDir.resolve("server");
         Path config = game.resolve("config");
