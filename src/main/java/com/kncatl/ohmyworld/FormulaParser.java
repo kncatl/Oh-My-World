@@ -591,11 +591,16 @@ public class FormulaParser {
         String[] lines = smartSplit(cleaned);
         int[] sourceLines = new int[lines.length];
         int searchFrom = 0;
+        int lineCursor = baseLine;
         for (int i = 0; i < lines.length; i++) {
             int start = cleaned.indexOf(lines[i], searchFrom);
             if (start < 0) start = searchFrom;
-            sourceLines[i] = baseLine + countNewlines(cleaned, 0, start);
-            searchFrom = start + lines[i].length();
+            // 只统计上一段末尾到本段起点的换行；整段扫描总计 O(公式长度)。
+            lineCursor += countNewlines(cleaned, searchFrom, start);
+            sourceLines[i] = lineCursor;
+            int end = start + lines[i].length();
+            lineCursor += countNewlines(cleaned, start, end);
+            searchFrom = end;
         }
 
         // 第一遍：收集共享节级 let（`let 名称 = 表达式` / `let 名称(参数, ...) = 表达式`），
