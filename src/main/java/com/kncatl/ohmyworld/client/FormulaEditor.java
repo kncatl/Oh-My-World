@@ -143,6 +143,16 @@ public class FormulaEditor extends AbstractWidget {
         return this.font.lineHeight + this.lineSpacing;
     }
 
+    /** 一行的行顶（含行间距）；文本在其中垂直居中。 */
+    private int lineTop(int lineIndex, int iy) {
+        return iy + (lineIndex - this.scrollLine) * lineHeight();
+    }
+
+    /** 文本字形顶端：行间距上下各分一半。 */
+    private int textTop(int lineIndex, int iy) {
+        return lineTop(lineIndex, iy) + this.lineSpacing / 2;
+    }
+
     private int innerHeight() {
         return Math.max(1, getHeight() - PAD * 2);
     }
@@ -517,8 +527,8 @@ public class FormulaEditor extends AbstractWidget {
         String text = this.placeholder.getString();
         int lineH = lineHeight();
         int start = 0;
-        int y = iy;
-        while (start < text.length() && y + lineH <= iy + ih) {
+        int y = iy + this.lineSpacing / 2;
+        while (start < text.length() && y + this.font.lineHeight <= iy + ih) {
             int width = 0;
             int end = start;
             while (end < text.length()) {
@@ -549,11 +559,13 @@ public class FormulaEditor extends AbstractWidget {
                 int s = Math.max(from, line.start());
                 int e = Math.min(to, line.end());
                 if (s >= e) continue;
-                int y = iy + (i - this.scrollLine) * lineH;
+                int top = lineTop(i, iy);
                 int x1 = ix + this.model.xInLine(i, s);
                 int x2 = ix + this.model.xInLine(i, e);
-                t.fill(x1, y, x2, y + lineH, COLOR_ERROR_BG);
-                t.fill(x1, y + lineH - 1, x2, y + lineH + 1, COLOR_ERROR_UNDERLINE);
+                t.fill(x1, top, x2, top + lineH, COLOR_ERROR_BG);
+                // 下划线贴近字形底部，不占下一行的上边距。
+                int underlineY = textTop(i, iy) + this.font.lineHeight - 1;
+                t.fill(x1, underlineY, x2, underlineY + 2, COLOR_ERROR_UNDERLINE);
             }
         }
     }
@@ -569,10 +581,11 @@ public class FormulaEditor extends AbstractWidget {
             int s = Math.max(from, line.start());
             int e = Math.min(to, line.end());
             if (s >= e) continue;
-            int y = iy + (i - this.scrollLine) * lineH;
+            int top = lineTop(i, iy);
             int x1 = ix + this.model.xInLine(i, s);
             int x2 = ix + this.model.xInLine(i, e);
-            t.fill(x1, y - 1, x2, y + lineH + 1, COLOR_SELECTION);
+            // 整行选区；文本在行内垂直居中，上下各留一半行距。
+            t.fill(x1, top, x2, top + lineH, COLOR_SELECTION);
         }
     }
 
@@ -583,7 +596,7 @@ public class FormulaEditor extends AbstractWidget {
             for (int i = this.scrollLine; i < lines.size() && i <= this.scrollLine + visibleLines(); i++) {
                 FormulaTextModel.Line line = lines.get(i);
                 if (line.start() >= line.end()) continue;
-                int y = iy + (i - this.scrollLine) * lineH;
+                int y = textTop(i, iy);
                 int pos = line.start();
                 int x = ix;
                 while (pos < line.end()) {
@@ -600,7 +613,7 @@ public class FormulaEditor extends AbstractWidget {
         for (int i = this.scrollLine; i < lines.size() && i <= this.scrollLine + visibleLines(); i++) {
             FormulaTextModel.Line line = lines.get(i);
             if (line.start() >= line.end()) continue;
-            int y = iy + (i - this.scrollLine) * lineH;
+            int y = textTop(i, iy);
             drawLine(t, value, line, spans, ix, y);
         }
     }
@@ -640,18 +653,18 @@ public class FormulaEditor extends AbstractWidget {
 
     private void drawCursor(GuiCompat.Draw t, int ix, int iy) {
         if (this.readOnly || !isFocused()) return;
-        int lineH = lineHeight();
-        int y = iy + (this.model.cursorLine() - this.scrollLine) * lineH;
+        int y = textTop(this.model.cursorLine(), iy);
         int cx = ix + this.model.cursorX();
         //? >=26.3 {
         // 告诉输入法光标在哪：候选窗定位用（原版多行框在渲染时做同样的事）
         if (capturesInput()) {
-            Minecraft.getInstance().textInputManager().setTextInputArea(cx, y, cx + 1, y + lineH + 1);
+            Minecraft.getInstance().textInputManager().setTextInputArea(cx, y, cx + 1,
+                    y + this.font.lineHeight + 1);
         }
         //?}
         long phase = System.currentTimeMillis() - this.focusedTime;
         if (phase > 350 && (phase / 350) % 2 == 1) return;
-        t.fill(cx, y - 1, cx + 1, y + lineH + 1, COLOR_CURSOR);
+        t.fill(cx, y - 1, cx + 1, y + this.font.lineHeight + 1, COLOR_CURSOR);
     }
 
     private void drawScrollbar(GuiCompat.Draw t, int mouseX, int mouseY) {
