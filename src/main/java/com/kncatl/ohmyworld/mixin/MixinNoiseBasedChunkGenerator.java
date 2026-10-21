@@ -123,7 +123,7 @@ public class MixinNoiseBasedChunkGenerator {
                                                  WorldGenRegion carverBiomeRegion,
                                                  net.minecraft.world.level.levelgen.material.rule.MaterialRule materialRule,
                                                  CallbackInfo ci) {
-        ohmyworld$overlayAfterTerrain(chunk);
+        ohmyworld$overlayAfterTerrain(chunk, randomState);
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || !snapshot.overlay()) return;
         if (snapshot.carversEw() && PatternData.isOverlayTouched(chunk)) {
@@ -185,7 +185,7 @@ public class MixinNoiseBasedChunkGenerator {
         }
         if (snapshot.surfaceMode() == DimensionRules.SurfaceMode.NONE) {
             // 不跑原版表面：H1（含补铺）就地执行后取消原版（RETURN 里不再执行）
-            ohmyworld$overlayAfterTerrain(chunk);
+            ohmyworld$overlayAfterTerrain(chunk, randomState);
             ci.cancel();
         }
     }
@@ -197,7 +197,7 @@ public class MixinNoiseBasedChunkGenerator {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || !snapshot.overlay()) return;
         if (snapshot.surfaceMode() == DimensionRules.SurfaceMode.NONE) return; // 已在 HEAD 执行
-        ohmyworld$overlayAfterTerrain(chunk);
+        ohmyworld$overlayAfterTerrain(chunk, randomState);
     }
 
     /** 公式接管地形时，不再让原版雕刻器在公式方块上挖洞；[carvers:vanilla]（含 vanilla-ew）可放行。 */
@@ -357,7 +357,7 @@ public class MixinNoiseBasedChunkGenerator {
     }
 
     /** 叠加模式（H1）：原版地形写完后的公式后处理；非 overlay 时无事发生。 */
-    private void ohmyworld$overlayAfterTerrain(ChunkAccess chunk) {
+    private void ohmyworld$overlayAfterTerrain(ChunkAccess chunk, RandomState randomState) {
         PatternData.PatternSnapshot snapshot = PatternData.snapshotFor((ChunkGenerator) (Object) this);
         if (snapshot == null || !snapshot.overlay()) return;
         if (OhMyWorldConfig.debugLogsEnabled() && OVERLAY_LOGGED.compareAndSet(false, true)) {
@@ -365,7 +365,8 @@ public class MixinNoiseBasedChunkGenerator {
         }
         try {
             PatternData.overlayChunk(chunk, snapshot,
-                    PatternData.vanillaViewFor((ChunkGenerator) (Object) this));
+                    PatternData.vanillaViewFor((ChunkGenerator) (Object) this),
+                    (ChunkGenerator) (Object) this, randomState);
         } catch (Exception e) {
             LOGGER.error("ohmyworld: overlay terrain processing failed, disabling pattern", e);
             PatternData.clearActive();

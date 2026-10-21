@@ -555,14 +555,15 @@ public class PatternData {
      * 高度图按写入增量更新；新放置/移除的水与岩浆标记生成后处理。
      */
     public static void overlayChunk(ChunkAccess chunk, PatternSnapshot snapshot,
-                                    ExprEvaluator.VanillaView vanillaView) {
+                                    ExprEvaluator.VanillaView vanillaView,
+                                    ChunkGenerator generator, RandomState randomState) {
         if (snapshot.layers().isEmpty()) return;
         ExprEvaluator.BiomeView savedBiome = ExprEvaluator.biomeView();
         ExprEvaluator.VanillaView savedVanilla = ExprEvaluator.vanillaView();
         ExprEvaluator.setBiomeView(biomeViewFor(chunk));
         ExprEvaluator.setVanillaView(vanillaView);
         try {
-            int writes = overlayChunkInternal(chunk, snapshot);
+            int writes = overlayChunkInternal(chunk, snapshot, generator, randomState);
             boolean touched = writes > 0;
             OVERLAY_TOUCHED.put(chunk, touched);
             if (touched && snapshot.carversEw()) rememberOverlayWater(chunk);
@@ -638,7 +639,8 @@ public class PatternData {
     }
 
     @SuppressWarnings("unchecked")
-    private static int overlayChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot) {
+    private static int overlayChunkInternal(ChunkAccess chunk, PatternSnapshot snapshot,
+                                            ChunkGenerator generator, RandomState randomState) {
         List<Object> layers = snapshot.layers();
         boolean perf = OhMyWorldConfig.debugLogsEnabled();
         long perfT0 = perf ? System.nanoTime() : 0L;
@@ -734,7 +736,8 @@ public class PatternData {
             // H3：表面补铺（[surface:vanilla+patch] 接原版之后；[surface:none] 原版已取消）
             if (snapshot.surfaceMode() != DimensionRules.SurfaceMode.VANILLA) {
                 try {
-                    applyOverlaySurface(chunk, snapshot, overlayView, protection, minY, maxY);
+                    applyOverlaySurface(chunk, snapshot, overlayView, protection, minY, maxY,
+                            generator, randomState);
                 } finally {
                     ExprEvaluator.clearSurfaceValues();
                 }
@@ -756,12 +759,13 @@ public class PatternData {
     /**
      * 叠加模式的表面补铺（H3；M3.5）：在 H1 之后按 surface 行扫列（读当前区块方块）。
      * {@code curis} 读到的就是当前（补铺进行中）方块；{@code sd/sdb/wd/slope} 语义与
-     * flat 表面通道一致。slope 的边框列按 H1 前快照近似（不读邻区块）。
+     * flat 表面通道一致。slope 的边框列读真实相邻列的 H1 结果（叠加列求值）。
      * 仅在 [surface:vanilla+patch]（接原版之后）或 [surface:none]（原版被取消后）执行。
      */
     private static void applyOverlaySurface(ChunkAccess chunk, PatternSnapshot snapshot,
                                             SnapshotOverlayView overlayView, BoundingBox protection,
-                                            int minY, int maxY) {
+                                            int minY, int maxY, ChunkGenerator generator,
+                                            RandomState randomState) {
         List<SurfaceLayerDef> rows = snapshot.surfaceLayers();
         if (rows.isEmpty()) return;
         int cx = chunk.getPos().getMinBlockX();
@@ -792,7 +796,7 @@ public class PatternData {
             }
         }
 
-        // 18×18 顶面（内部列读数组；边框列按 H1 前快照近似）
+        // 18×18 顶面（内部列读数组；边框列读相邻列的真实 H1 结果）
         int[] top = new int[18 * 18];
         for (int gx = 0; gx < 18; gx++) {
             for (int gz = 0; gz < 18; gz++) {
@@ -803,7 +807,8 @@ public class PatternData {
                 for (int y = maxY - 1; y >= scanLo; y--) {
                     BlockState state = interior
                             ? surfaceState(states, scanLo, gx - 1, y, gz - 1)
-                            : overlayView.stateAt(worldX, y, worldZ);
+                            : borderOverlayState(snapshot, generator, randomState, chunk,
+                                    overlayView, worldX, y, worldZ);
                     if (isSurfaceSolid(state)) {
                         found = y;
                         break;
@@ -871,6 +876,29 @@ public class PatternData {
                     fluidRun = fluid ? fluidRun + 1 : 0;
                 }
             }
+        }
+    }
+
+    /**
+     * 叠加 surface 的边框列：必须读**相邻列的真实 H1 结果**，不能像旧实现那样
+     * 用当前区块快照回绕 x/z（那会让每一列边缘的 slope 取到当前区块另一侧的列，
+     * 产生 1 格石头边框/16×16 网格）。
+     *
+     * <p>这里直接用叠加列求值（原版噪声列 + 公式层；与 H1/结构高度共用缓存），
+     * 因此与区块生成顺序无关，也不依赖邻区块是否已经处理。结构保护带内的少数
+     * 列可能与 H1 的实心对实心跳过略有差异，但 surface 的 slope 只用于材质选择，
+     * 不会改动地形形状。
+     */
+    private static BlockState borderOverlayState(PatternSnapshot snapshot, ChunkGenerator generator,
+                                                 RandomState randomState, LevelHeightAccessor level,
+                                                 SnapshotOverlayView fallback, int x, int y, int z) {
+        if (generator == null || randomState == null) return fallback.stateAt(x, y, z);
+        try {
+            OverlayColumn column = overlayEvaluatedColumn(snapshot, generator, x, z, level, randomState);
+            int index = y - column.minY();
+            return index < 0 || index >= column.states().length ? AIR : column.states()[index];
+        } catch (Exception e) {
+            return fallback.stateAt(x, y, z);
         }
     }
 
