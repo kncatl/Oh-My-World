@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.6
+
+> Stable release — formula diagnostics, guide delivery and overlay surface fixes. Please report issues on GitHub.
+
+### Fixes & improvements
+- **Snow-mountain grid fixed**: overlay surface border columns now evaluate the real adjacent vanilla + overlay column instead of wrapping the current chunk snapshot. `slope` stays consistent across chunk edges, removing the one-block stone border and 16×16 grid on snowy slopes.
+- **Clearer formula diagnostics**: errors include the source line and column, plus the shared-let name when relevant; long formulas keep fast source-line lookup. The editor shows the full error, warning or load message in a scrollable read-only box with a copy button.
+- **Scientific notation**: numeric literals accept forms such as `1e9`, `1.5e-3` and `2E+4`.
+- **Shared lets validated by use**: a shared let referenced only by surface rows no longer triggers `Unknown variable: wd` in block or biome layers. Local `{ let ...; expression }` blocks in surface and biome rows are supported as well.
+- **Guide delivery**: the bundled `guide.md` / `guide_en.md` overwrite the same names at startup; there is no SHA-256 marker or old-file cleanup. Both guides now use Markdown headings, lists and fenced examples for clean preview.
+- **Compatibility**: Minecraft 1.21.1-1.21.11 and 26.1-26.3, Fabric and NeoForge; Java 21/25.
+
 ## v1.3.5
 
 > Stable release — server configuration, carver fluid protection and modded-biome compatibility fixes. Please report issues on GitHub.
