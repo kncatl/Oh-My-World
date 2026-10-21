@@ -62,6 +62,7 @@ class DependsOnLyTest {
         // pickIndex 以 ly 作为散列输入，因此结果是 y 相关的
         assertTrue(depends("rand(minecraft:stone, minecraft:dirt)"));
         assertTrue(depends("randexcept(minecraft:stone)"));
+        assertTrue(depends("seedrand(minecraft:stone, minecraft:dirt)"));
         // 出现在子表达式里同样要算作 y 相关
         assertTrue(depends("x > 0 ? rand(1, 2) : 3"));
     }

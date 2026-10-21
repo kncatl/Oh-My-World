@@ -513,10 +513,17 @@ torad(deg)       Degrees to radians
 rand()                        Random block from ALL registered blocks (excluding air)
 rand(b1, b2, ...)             Whitelist — random from the specified blocks
 randexcept(b1, b2, ...)       Blacklist — random from all blocks EXCEPT specified ones
+seedrand()                    Same as rand(), but mixes in the current world seed
+seedrand(b1, b2, ...)         Same as rand(b1, b2, ...), with the world seed mixed in
 ```
 
 - Note: rand() does NOT use the world seed — the same formula gives the same
-  result in every world. Use seedhash() below for per-world variation.
+  result in every world.
+- seedrand() has the same pool/argument rules as rand(), but mixes the **full
+  world seed** into the (x, z, y) hash: the same world and coordinates remain
+  fully deterministic, while another world gets a different random pattern.
+  Use it when the random block palette should differ per world.
+- For seed-driven numeric branches, use seedhash() below.
 
 ### Seed hashing
 
@@ -879,6 +886,12 @@ y=-64..64: (x+z)%2==0 && ly<10 ? minecraft:white_concrete : minecraft:air
 ```
 
 10-block-tall pillars only on checkerboard white positions, air elsewhere.
+
+### Example: Seeded block random (different worlds, different pattern)
+
+```text
+y=-64..64: seedrand(minecraft:stone, minecraft:cobblestone, minecraft:mossy_cobblestone)
+```
 
 ### Example: Seed-driven pattern (same formula, different worlds differ)
 

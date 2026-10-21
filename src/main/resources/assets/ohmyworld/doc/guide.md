@@ -443,12 +443,17 @@ torad(deg)       角度转弧度
 rand()                     从所有已注册方块（排除空气）中等概率随机选取一个
 rand(b1, b2, ...)          白名单模式——从指定的方块列表中随机选取
 randexcept(b1, b2, ...)    黑名单模式——从全部方块中排除指定的方块后随机选取
+seedrand()                 与 rand() 相同，但混入当前世界种子
+seedrand(b1, b2, ...)      与 rand(b1, b2, ...) 相同，但混入当前世界种子
 ```
 
 - rand() 基于 (x, z, y) 坐标哈希生成"伪随机"值——同一坐标永远返回同一方块，
   不会闪烁变化。每个坐标的随机结果在创建时即确定且不会改变。
 - 注意：rand() 不使用世界种子——同一公式在任何世界的结果都一样。
-  需要"随世界种子变化"的图案请用下面的 seedhash()。
+- seedrand() 的方块池/参数规则与 rand() 相同，但会把**完整世界种子**混入
+  (x, z, y) 哈希：同一世界与坐标仍完全确定，换一个世界则会得到另一套随机
+  图案。需要每个世界都不同的随机方块时用它。
+- 需要"随世界种子变化"的数值分支仍用下面的 seedhash()。
 
 ### 种子散列
 
@@ -840,6 +845,12 @@ y=-64..64: (floordiv(x,4)+floordiv(z,4))%2==0 ? rand(minecraft:stone, minecraft:
 
 ```text
 y=-64..64: randexcept(minecraft:stone, minecraft:dirt, minecraft:grass_block)
+```
+
+### 示例：受世界种子影响的方块随机（每个世界图案不同）
+
+```text
+y=-64..64: seedrand(minecraft:stone, minecraft:cobblestone, minecraft:mossy_cobblestone)
 ```
 
 ### 示例：立体模型（ly 用于 y 方向，配合 air 可实现镂空）

@@ -135,8 +135,8 @@ public final class ExprCompiler {
 
             case ExprNode.FuncCallNode f -> {
                 List<ExprNode> args = new ArrayList<>(f.args().size());
-                // rand/randexcept 经 pickIndex 隐式取用 ly，即使参数里不含 ly
-                boolean dependent = f.name().equals("rand") || f.name().equals("randexcept");
+                // 方块随机函数经 pickIndex 隐式取用 ly，即使参数里不含 ly
+                boolean dependent = ExprEvaluator.isRandomBlockFunction(f.name());
                 for (int i = 0; i < f.args().size(); i++) {
                     ExprNode arg = f.args().get(i);
                     // climate(字段名, …)：字段名在编译期解析为序号（兜底：解析器重写之外的直接编译）
@@ -466,7 +466,7 @@ public final class ExprCompiler {
                             || usesVertical(c.thenExpr(), includeY, shadowed)
                             || usesVertical(c.elseExpr(), includeY, shadowed);
             case ExprNode.FuncCallNode f -> {
-                if (f.name().equals("rand") || f.name().equals("randexcept")) yield true;
+                if (ExprEvaluator.isRandomBlockFunction(f.name())) yield true;
                 for (ExprNode arg : f.args()) {
                     if (usesVertical(arg, includeY, shadowed)) yield true;
                 }
@@ -512,14 +512,15 @@ public final class ExprCompiler {
             case ExprNode.ConditionalNode c ->
                     lyDependent(c.condition()) || lyDependent(c.thenExpr()) || lyDependent(c.elseExpr());
             case ExprNode.FuncCallNode f -> {
-                if (f.name().equals("rand") || f.name().equals("randexcept")) yield true;
+                if (ExprEvaluator.isRandomBlockFunction(f.name())) yield true;
                 for (ExprNode arg : f.args()) {
                     if (lyDependent(arg)) yield true;
                 }
                 yield false;
             }
             case ExprNode.CompiledFuncCallNode f -> {
-                if (f.id() == ExprEvaluator.FN_RAND || f.id() == ExprEvaluator.FN_RANDEXCEPT) yield true;
+                if (f.id() == ExprEvaluator.FN_RAND || f.id() == ExprEvaluator.FN_RANDEXCEPT
+                        || f.id() == ExprEvaluator.FN_SEEDRAND) yield true;
                 for (ExprNode arg : f.args()) {
                     if (lyDependent(arg)) yield true;
                 }
@@ -614,7 +615,7 @@ public final class ExprCompiler {
         if (name.equals("climate")) return !climateCellInvariant(args);
         if (name.equals("biomeis")) return !biomeIsCellInvariant(args);
         if (name.equals("biome_at")) return anyCellVarying(args);
-        if (name.equals("rand") || name.equals("randexcept")) return true;
+        if (ExprEvaluator.isRandomBlockFunction(name)) return true;
         if (name.equals("peaks")) return anyCellVarying(args);
         // 纯数值/噪声函数：值只由参数决定
         if (ExprEvaluator.isPureNumericFunction(name)) return anyCellVarying(args);
@@ -626,7 +627,8 @@ public final class ExprCompiler {
         if (id == ExprEvaluator.FN_CLIMATE) return !climateCellInvariant(args);
         if (id == ExprEvaluator.FN_BIOMEIS) return !biomeIsCellInvariant(args);
         if (id == ExprEvaluator.FN_BIOME_AT) return anyCellVarying(args);
-        if (id == ExprEvaluator.FN_RAND || id == ExprEvaluator.FN_RANDEXCEPT) return true;
+        if (id == ExprEvaluator.FN_RAND || id == ExprEvaluator.FN_RANDEXCEPT
+                || id == ExprEvaluator.FN_SEEDRAND) return true;
         if (id == ExprEvaluator.FN_PEAKS) return anyCellVarying(args);
         if (ExprEvaluator.isPureNumericFunctionId(id)) return anyCellVarying(args);
         return true;

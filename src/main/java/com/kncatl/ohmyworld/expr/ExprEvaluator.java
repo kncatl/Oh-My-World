@@ -266,7 +266,7 @@ public class ExprEvaluator {
             Map.entry("asin", 1), Map.entry("acos", 1), Map.entry("atan", 1),
             Map.entry("todeg", 1), Map.entry("torad", 1),
             Map.entry("seedhash", -1),
-            Map.entry("rand", -1), Map.entry("randexcept", -1),
+            Map.entry("rand", -1), Map.entry("randexcept", -1), Map.entry("seedrand", -1),
             // biome 行的地形查询（只能出现在 biome 行；参数位决定方块字面量语义）
             Map.entry("terrain", 2), Map.entry("surfis", 3), Map.entry("blockis", 4),
             // 方块层的群系查询（只能出现在方块层；末位是群系字面量）
@@ -335,6 +335,11 @@ public class ExprEvaluator {
         return FUNCTION_ARITY.containsKey(name);
     }
 
+    /** 方块随机函数：参数为方块池，结果隐式依赖 x/z/y（ly）与世界种子。 */
+    public static boolean isRandomBlockFunction(String name) {
+        return name.equals("rand") || name.equals("randexcept") || name.equals("seedrand");
+    }
+
     /** 全部函数名（单一来源；供指南漂移测试等使用）。 */
     public static Set<String> functionNames() {
         return FUNCTION_ARITY.keySet();
@@ -368,12 +373,12 @@ public class ExprEvaluator {
     public static final int FN_BIOME_AT = 154;
     public static final int FN_VIS = 155;
     public static final int FN_CURIS = 156;
-    public static final int FN_SDIST = 157;
+    public static final int FN_SDIST = 157, FN_SEEDRAND = 158;
     /** 未知函数：编译期保留原名，运行期仍按原来的方式报错。 */
     public static final int FN_UNKNOWN = -1;
 
     /**
-     * 是否是"纯数值函数"：值完全由实参决定（不隐式读取坐标/世界状态，不用 rand）。
+     * 是否是"纯数值函数"：值完全由实参决定（不隐式读取坐标/世界状态，不用随机函数）。
      * 供 QUART 分类使用：实参在 4×4×4 格内不变时，结果也格内不变。
      */
     public static boolean isPureNumericFunction(String name) {
@@ -431,6 +436,7 @@ public class ExprEvaluator {
             case "seedhash" -> FN_SEEDHASH;
             case "rand" -> FN_RAND;
             case "randexcept" -> FN_RANDEXCEPT;
+            case "seedrand" -> FN_SEEDRAND;
             case "terrain" -> FN_TERRAIN;
             case "surfis" -> FN_SURFIS;
             case "blockis" -> FN_BLOCKIS;
@@ -721,7 +727,7 @@ public class ExprEvaluator {
                             || dependsOnLy(c.thenExpr(), shadowed)
                             || dependsOnLy(c.elseExpr(), shadowed);
             case ExprNode.FuncCallNode f -> {
-                if (f.name().equals("rand") || f.name().equals("randexcept")) yield true;
+                if (isRandomBlockFunction(f.name())) yield true;
                 for (ExprNode arg : f.args()) {
                     if (dependsOnLy(arg, shadowed)) yield true;
                 }
@@ -894,7 +900,7 @@ public class ExprEvaluator {
     }
 
     private static boolean isNumericFunction(String name) {
-        return !name.equals("rand") && !name.equals("randexcept")
+        return !isRandomBlockFunction(name)
                 && !name.equals("biome_at")
                 && FUNCTION_ARITY.containsKey(name);
     }
@@ -906,9 +912,10 @@ public class ExprEvaluator {
         if (isNumericFunction(f.name())) return evalNumberFunc(f, x, z, ly, context);
         List<ExprNode> args = f.args();
         return switch (f.name()) {
-            // rand/randexcept 是变参且返回方块，不属于数值路径
+            // 方块随机函数是变参且返回方块，不属于数值路径
             case "rand" -> evalRand(args, x, z, ly, context);
             case "randexcept" -> evalRandExcept(args, x, z, ly, context);
+            case "seedrand" -> evalSeedRand(args, x, z, ly, context);
             default -> throw new IllegalArgumentException("Unknown function: " + f.name());
         };
     }
@@ -1048,6 +1055,7 @@ public class ExprEvaluator {
         if (f.id() == FN_BIOME_AT) return biomeAtOf(f.args(), x, z, ly, context);
         if (f.id() == FN_RAND) return evalRand(f.args(), x, z, ly, context);
         if (f.id() == FN_RANDEXCEPT) return evalRandExcept(f.args(), x, z, ly, context);
+        if (f.id() == FN_SEEDRAND) return evalSeedRand(f.args(), x, z, ly, context);
         return evalCompiledNumberFunc(f, x, z, ly, context);
     }
 
@@ -1167,8 +1175,8 @@ public class ExprEvaluator {
             case FN_VIS -> overlayVisOf(args, x, z, ly, context) ? 1 : 0;
             case FN_CURIS -> overlayCurisOf(args, x, z, ly, context) ? 1 : 0;
             case FN_SDIST -> overlaySdistOf(args, x, z, ly, context);
-            // rand/randexcept 返回方块，按数值语境取 0（与未编译路径一致）
-            case FN_RAND, FN_RANDEXCEPT -> toDouble(evalCompiledFunc(f, x, z, ly, context));
+            // 方块随机函数返回方块，按数值语境取 0（与未编译路径一致）
+            case FN_RAND, FN_RANDEXCEPT, FN_SEEDRAND -> toDouble(evalCompiledFunc(f, x, z, ly, context));
             default -> throw new IllegalArgumentException("Unknown compiled function id: " + f.id());
         };
     }
@@ -1312,6 +1320,38 @@ public class ExprEvaluator {
             }
         }
         return value instanceof String id ? id : null;
+    }
+
+    /**
+     * {@code seedrand(...)}：与 {@code rand} 相同的方块池语义，但把世界种子混入
+     * x/z/ly 的哈希。同一世界与坐标完全确定；不同世界得到另一套随机图案。
+     *
+     * <p><b>算法是兼容性契约，一经发布不得更改</b>——与 {@link #pickIndex} 同等对待。
+     */
+    private static Object evalSeedRand(List<ExprNode> args, int x, int z, int ly, EvalContext context) {
+        if (args.isEmpty()) {
+            List<BlockState> all = getAllBlocks();
+            return all.isEmpty() ? BlockResolver.resolve("minecraft:air")
+                    : all.get(pickSeededIndex(x, z, ly, all.size()));
+        }
+        List<BlockState> states = new ArrayList<>(args.size());
+        for (ExprNode arg : args) {
+            Object value = eval(arg, x, z, ly, context);
+            if (value instanceof BlockState bs) states.add(bs);
+        }
+        if (states.isEmpty()) return BlockResolver.resolve("minecraft:air");
+        return states.get(pickSeededIndex(x, z, ly, states.size()));
+    }
+
+    /** 受世界种子影响的方块随机索引（算法冻结）。 */
+    static int pickSeededIndex(int x, int z, int y, int bound) {
+        if (bound <= 0) return 0;
+        long h = Noise.worldSeed;
+        h = Noise.mix64(h + 0x9E3779B97F4A7C15L);
+        h = Noise.mix64(h + (long) x * 0x9E3779B97F4A7C15L);
+        h = Noise.mix64(h + (long) z * 0xC2B2AE3D27D4EB4FL);
+        h = Noise.mix64(h + (long) y * 0x165667B19E3779F9L);
+        return (int) Math.floorMod(h, (long) bound);
     }
 
     private static int pickIndex(int x, int z, int y, int bound) {

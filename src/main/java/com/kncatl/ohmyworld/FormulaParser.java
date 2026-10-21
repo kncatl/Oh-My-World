@@ -1249,7 +1249,7 @@ public class FormulaParser {
      * 语义校验：同时推导表达式类型，避免非法结果在运行时静默变成空气。
      *
      * <p>{@code biomeMode=true} 时按"群系表达式"校验：字面量查群系名单（带命名空间
-     * 放行、运行期再向注册表解析）、rand/randexcept 不可用，其余规则一致；群系值
+     * 放行、运行期再向注册表解析）、rand/randexcept/seedrand 不可用，其余规则一致；群系值
      * 沿用 {@code BLOCK} 类型槽位表示"不可参与算术的不透明值"。
      */
     private static ExprEvaluator.ValueType validateNode(ExprNode node, List<String> errors,
@@ -1410,7 +1410,7 @@ public class FormulaParser {
                     for (ExprNode a : f.args()) validateNode(a, errors, variables, true, overlay);
                     return ExprEvaluator.ValueType.UNKNOWN;
                 }
-                if (biomeMode && (f.name().equals("rand") || f.name().equals("randexcept"))) {
+                if (biomeMode && ExprEvaluator.isRandomBlockFunction(f.name())) {
                     errors.add("Function '" + f.name() + "' cannot be used in a biome expression");
                     for (ExprNode a : f.args()) validateNode(a, errors, variables, true, overlay);
                     return ExprEvaluator.ValueType.UNKNOWN;
@@ -1463,7 +1463,7 @@ public class FormulaParser {
                     }
                     return ExprEvaluator.ValueType.BOOLEAN;
                 }
-                if (f.name().equals("rand") || f.name().equals("randexcept")) {
+                if (ExprEvaluator.isRandomBlockFunction(f.name())) {
                     for (ExprNode a : f.args()) {
                         ExprEvaluator.ValueType type = validateNode(a, errors, variables, biomeMode, overlay);
                         if (type != ExprEvaluator.ValueType.BLOCK && type != ExprEvaluator.ValueType.UNKNOWN) {
@@ -1571,7 +1571,7 @@ public class FormulaParser {
         }
         if (containsCacheForbiddenFunctions(expr)) {
             errors.add("Function '" + name + "': the expression cannot use "
-                    + "terrain/surfis/blockis/biomeis/rand/randexcept");
+                    + "terrain/surfis/blockis/biomeis/rand/randexcept/seedrand");
         }
         boolean forbidY = name.equals("cache2d") || name.equals("blur2");
         if (ExprCompiler.usesVertical(expr, forbidY)) {
@@ -1638,7 +1638,7 @@ public class FormulaParser {
                     || containsCacheForbiddenFunctions(c.elseExpr());
             case ExprNode.FuncCallNode f -> {
                 if (isTerrainQueryFunction(f.name()) || f.name().equals("biomeis")
-                        || f.name().equals("rand") || f.name().equals("randexcept")) {
+                        || ExprEvaluator.isRandomBlockFunction(f.name())) {
                     yield true;
                 }
                 yield f.args().stream().anyMatch(FormulaParser::containsCacheForbiddenFunctions);
@@ -1869,7 +1869,7 @@ public class FormulaParser {
             }
             if (containsCacheForbiddenFunctions(coarse)) {
                 errors.add("Function 'rivernet': the coarse expression cannot use "
-                        + "terrain/surfis/blockis/biomeis/rand/randexcept");
+                        + "terrain/surfis/blockis/biomeis/rand/randexcept/seedrand");
             }
             if (ExprCompiler.usesVertical(coarse, true)) {
                 errors.add("Function 'rivernet': the coarse expression cannot reference ly or y");
