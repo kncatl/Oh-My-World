@@ -45,4 +45,44 @@ class OhMyWorldConfigTest {
         Path file = tempDir.resolve("absolute.txt");
         assertEquals(file, OhMyWorldConfig.resolveFormulaPath(file.toString()));
     }
+
+    @Test
+    void serverModePrefersOhmyworldThenServerRootThenConfig() throws Exception {
+        Path game = tempDir.resolve("server");
+        Path config = game.resolve("config");
+        Path ohmyworld = game.resolve("ohmyworld");
+        Files.createDirectories(ohmyworld);
+        Files.createDirectories(config);
+        Path relative = Path.of("formula.txt");
+        Path rootFile = game.resolve(relative);
+        Path configFile = config.resolve(relative);
+        Path ohmyFile = ohmyworld.resolve(relative);
+
+        Files.writeString(rootFile, "root", StandardCharsets.UTF_8);
+        Files.writeString(configFile, "config", StandardCharsets.UTF_8);
+        Files.writeString(ohmyFile, "ohmyworld", StandardCharsets.UTF_8);
+        assertEquals(ohmyFile, OhMyWorldConfig.resolveFormulaPath(relative, game, config, true));
+
+        Files.delete(ohmyFile);
+        assertEquals(rootFile, OhMyWorldConfig.resolveFormulaPath(relative, game, config, true));
+
+        Files.delete(rootFile);
+        assertEquals(configFile, OhMyWorldConfig.resolveFormulaPath(relative, game, config, true));
+    }
+
+    @Test
+    void nonServerModeKeepsRootThenConfigOrder() throws Exception {
+        Path game = tempDir.resolve("client");
+        Path config = game.resolve("config");
+        Path ohmyworld = game.resolve("ohmyworld");
+        Files.createDirectories(ohmyworld);
+        Files.createDirectories(config);
+        Path relative = Path.of("formula.txt");
+        Path rootFile = game.resolve(relative);
+        Path ohmyFile = ohmyworld.resolve(relative);
+        Files.writeString(rootFile, "root", StandardCharsets.UTF_8);
+        Files.writeString(ohmyFile, "ohmyworld", StandardCharsets.UTF_8);
+
+        assertEquals(rootFile, OhMyWorldConfig.resolveFormulaPath(relative, game, config, false));
+    }
 }

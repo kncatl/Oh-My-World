@@ -37,7 +37,7 @@ public class OhMyWorldConfig {
     private boolean server_mode = false;
     private String formula = DEFAULT_FORMULA;
     /**
-     * 可选：公式 txt 文件路径（绝对路径，或相对服务器/游戏目录、相对 config/ 目录）。
+     * 可选：公式 txt 文件路径（绝对路径，或相对服务器目录、ohmyworld/、config/ 目录）。
      * 非空时优先于 {@link #formula}；文件内容按 UTF-8 读取，换行统一为 LF。
      * 复杂公式建议用本字段——JSON 字符串里的换行和引号必须转义，直接粘贴很容易损坏配置。
      */
@@ -91,7 +91,7 @@ public class OhMyWorldConfig {
                 if (parsed == null) throw new IllegalStateException("empty config file");
 
                 if (parsed.formula_file != null && !parsed.formula_file.isBlank()) {
-                    Path source = resolveFormulaPath(parsed.formula_file.trim());
+                    Path source = resolveFormulaPath(parsed.formula_file.trim(), parsed.server_mode);
                     if (source == null) {
                         throw new IllegalStateException("invalid formula_file path: " + parsed.formula_file);
                     }
@@ -129,25 +129,44 @@ public class OhMyWorldConfig {
         return instance;
     }
 
-    /** 解析 formula_file：绝对路径原样；相对路径先按游戏/服务器目录，再按 config/ 目录。 */
+    /** 解析 formula_file（非 server_mode）：绝对路径原样；相对路径先游戏/服务器目录，再 config/。 */
     static Path resolveFormulaPath(String raw) {
+        return resolveFormulaPath(raw, false);
+    }
+
+    /**
+     * 解析 formula_file：绝对路径原样；相对路径按 server_mode 决定顺序。
+     *
+     * <p>server_mode 且 formula_file 非空时：ohmyworld/ → 服务器/游戏根目录 →
+     * config/。其他情况保持旧顺序：服务器/游戏根目录 → config/。
+     */
+    static Path resolveFormulaPath(String raw, boolean serverMode) {
         try {
             Path path = Path.of(expandHome(raw));
             if (path.isAbsolute()) return path;
             Platform platform = Platform.get();
             if (platform != null) {
-                Path game = platform.gameDir().resolve(path);
-                if (Files.isRegularFile(game)) return game;
-                Path config = platform.configDir().resolve(path);
-                if (Files.isRegularFile(config)) return config;
-                // 都不存在时返回游戏目录下的路径，错误信息里能看到实际查找位置
-                return game;
+                return resolveFormulaPath(path, platform.gameDir(), platform.configDir(), serverMode);
             }
             return path.toAbsolutePath();
         } catch (InvalidPathException e) {
             LOGGER.error("ohmyworld: invalid formula_file path \"{}\": {}", raw, e.getMessage());
             return null;
         }
+    }
+
+    /** 可单测的相对路径查找：优先级见 {@link #resolveFormulaPath(String, boolean)}。 */
+    static Path resolveFormulaPath(Path path, Path gameDir, Path configDir, boolean serverMode) {
+        Path server = gameDir.resolve(path);
+        Path config = configDir.resolve(path);
+        if (serverMode) {
+            Path ohmyworld = gameDir.resolve("ohmyworld").resolve(path);
+            if (Files.isRegularFile(ohmyworld)) return ohmyworld;
+        }
+        if (Files.isRegularFile(server)) return server;
+        if (Files.isRegularFile(config)) return config;
+        // 都不存在时返回第一查找位置，错误信息里能看到实际查找路径。
+        return serverMode ? gameDir.resolve("ohmyworld").resolve(path) : server;
     }
 
     /** 支持 ~/xxx（Windows 下也接受 ~\xxx），其余路径交给 Path.of。 */

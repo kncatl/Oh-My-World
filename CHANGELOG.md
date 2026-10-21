@@ -9,6 +9,7 @@
 - **Clearer formula diagnostics**: errors include the source line and column, plus the shared-let name when relevant; long formulas keep fast source-line lookup. The editor shows the full error, warning or load message in a scrollable read-only box with a copy button.
 - **Scientific notation**: numeric literals accept forms such as `1e9`, `1.5e-3` and `2E+4`.
 - **Seed-driven block randomness**: new `seedrand()` / `seedrand(b1, b2, ...)` uses the same block-pool rules as `rand()` but mixes the full world seed into the hash, so each world gets a different deterministic block pattern.
+- **Server formula lookup**: with `server_mode` enabled and `formula_file` set, relative paths now search `ohmyworld/` first, then the server root, then `config/`. Outside server mode the previous root → `config/` order is unchanged.
 - **Shared lets validated by use**: a shared let referenced only by surface rows no longer triggers `Unknown variable: wd` in block or biome layers. Local `{ let ...; expression }` blocks in surface and biome rows are supported as well.
 - **Guide delivery**: the bundled `guide.md` / `guide_en.md` overwrite the same names at startup; there is no SHA-256 marker or old-file cleanup. Both guides now use Markdown headings, lists and fenced examples for clean preview.
 - **Compatibility**: Minecraft 1.21.1-1.21.11 and 26.1-26.3, Fabric and NeoForge; Java 21/25.

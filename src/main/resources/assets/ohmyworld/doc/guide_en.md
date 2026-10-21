@@ -1044,11 +1044,12 @@ Two ways to provide the formula (pick one):
                          formula directly easily corrupts the config.
 "formula_file": "path"   Recommended: read the formula from a .txt file,
                          preserving newlines/quotes/comments. Absolute paths
-                         are used as-is; relative paths are resolved against
-                         the server root first, then the config/ directory
-                         (e.g. "config/formula.txt" or "formula.txt").
-                         formula_file wins over formula when non-empty; edits
-                         to the file are reloaded in about 5 seconds.
+                         are used as-is. With server_mode, relative paths are
+                         resolved in this order: ohmyworld/ → server root →
+                         config/ (e.g. ohmyworld/formula.txt, formula.txt or
+                         config/formula.txt); outside server_mode the order is
+                         still server root → config/. formula_file wins over
+                         formula when non-empty; edits reload in about 5 s.
 ```
 
 If the config or formula file cannot be parsed, server_mode does not fall back

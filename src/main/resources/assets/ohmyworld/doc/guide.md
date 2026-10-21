@@ -1021,11 +1021,12 @@ config/ohmyworld.json 中设置 server_mode: true，公式将应用于服务器�
 "formula": "……"         直接内联。JSON 字符串里的换行必须写成 \n、
                          引号必须写成 \"，复杂公式直接粘贴很容易损坏配置。
 "formula_file": "路径"   推荐：从 txt 文件读取公式，原样支持换行/引号/
-                         注释。绝对路径原样使用；相对路径先按服务器根目录
-                         查找，再按 config/ 目录查找（例如
-                         "config/formula.txt" 或 "formula.txt"）。
-                         formula_file 非空时优先于 formula；文件被修改后
-                         约 5 秒自动重载。
+                         注释。绝对路径原样使用；server_mode 下相对路径按
+                         ohmyworld/ → 服务器根目录 → config/ 查找（例如
+                         ohmyworld/formula.txt、formula.txt 或
+                         config/formula.txt）；非 server_mode 仍按服务器根目录
+                         → config/。formula_file 非空时优先于 formula；
+                         文件被修改后约 5 秒自动重载。
 ```
 
 配置或公式文件解析失败时，server_mode 不会用默认公式生成世界（保持原版），
