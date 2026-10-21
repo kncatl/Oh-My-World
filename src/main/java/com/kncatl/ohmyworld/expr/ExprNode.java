@@ -39,8 +39,10 @@ public sealed interface ExprNode {
      * let 绑定。{@code names} 通常只有一个；多个名字（如 {@code let (u, v) = warp2(...)}）
      * 表示绑定一个多返回函数的结果，此时 {@code value} 必须是 {@link TupleCallNode}。
      */
-    record LetBinding(List<String> names, ExprNode value) {
-        public LetBinding(String name, ExprNode value) { this(List.of(name), value); }
+    record LetBinding(List<String> names, ExprNode value, int line) {
+        public LetBinding(List<String> names, ExprNode value) { this(names, value, -1); }
+        public LetBinding(String name, ExprNode value) { this(List.of(name), value, -1); }
+        public LetBinding(String name, ExprNode value, int line) { this(List.of(name), value, line); }
     }
 
     /**

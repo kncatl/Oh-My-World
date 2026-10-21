@@ -30,6 +30,12 @@ public final class MultiLineBox {
 
         /** 标注错误区间（原文坐标），用于「可能出错的位置」提示。 */
         void setErrorSpans(List<int[]> spans);
+
+        /** 只读显示模式（滚动/选区/复制可用，禁止编辑）。 */
+        void setReadOnly(boolean readOnly);
+
+        /** 是否按公式语法着色（错误/状态信息关闭）。 */
+        void setSyntaxHighlight(boolean enabled);
     }
 
     private MultiLineBox() {}
@@ -64,6 +70,25 @@ public final class MultiLineBox {
             public void setErrorSpans(List<int[]> spans) {
                 editor.setErrorSpans(spans);
             }
+
+            @Override
+            public void setReadOnly(boolean readOnly) {
+                editor.setReadOnly(readOnly);
+            }
+
+            @Override
+            public void setSyntaxHighlight(boolean enabled) {
+                editor.setSyntaxHighlight(enabled);
+            }
         };
+    }
+
+    /** 只读多行显示框：可滚动、框选、Ctrl+A/C，不显示语法高亮与光标。 */
+    public static Handle createReadOnly(Font font, int x, int y, int width, int height,
+                                        Component placeholder, Component narration, int maxLength) {
+        Handle handle = create(font, x, y, width, height, placeholder, narration, maxLength, null);
+        handle.setReadOnly(true);
+        handle.setSyntaxHighlight(false);
+        return handle;
     }
 }

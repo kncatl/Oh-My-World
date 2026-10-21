@@ -11,6 +11,10 @@ Contents
   8. Notes
   9. Dedicated Servers
 
+This guide is written to ohmyworld/guide.md (guide_en.md in English) at startup.
+The bundled version overwrites the same file name on every launch; save your own
+edits under a different name.
+
 1. Format
 
 Separate layers with semicolons ";". The following forms are supported:
@@ -408,6 +412,8 @@ Default preset:
   Grouping:     ( )
 
   Ternary:      condition ? valueA : valueB
+
+  Numbers accept integers, decimals and scientific notation (e.g. 1e9, 1.5e-3, 2E+4).
 
 4. Built-in Functions
 

@@ -205,8 +205,8 @@ class FormulaParserTest {
         FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
                 "{overworld=y=0: 1}{the_nether=y=0: 2}");
         assertEquals(2, result.errors().size(), result.errors().toString());
-        assertTrue(result.errors().get(0).startsWith("overworld: Layer 1: "), result.errors().toString());
-        assertTrue(result.errors().get(1).startsWith("the_nether: Layer 1: "), result.errors().toString());
+        assertTrue(result.errors().get(0).startsWith("overworld: Layer 1 (Line 1): "), result.errors().toString());
+        assertTrue(result.errors().get(1).startsWith("the_nether: Layer 1 (Line 1): "), result.errors().toString());
         assertTrue(result.dimensions().isEmpty());
     }
 
@@ -1388,5 +1388,55 @@ class FormulaParserTest {
         FormulaParser.ParseResult touching = FormulaParser.parseWithErrors(
                 "y=0..10: rand(); y=10..20: rand()");
         assertFalse(FormulaParser.layersDisjoint(touching.layers(), -64, 320));
+    }
+
+    @Test
+    void scientificNotationIsAccepted() {
+        for (String literal : List.of("1e9", "1E9", "1.5e-3", "2.0E+4")) {
+            FormulaParser.ParseResult result = FormulaParser.parseWithErrors(
+                    "y=0: " + literal + " > 0 ? rand() : rand()");
+            assertTrue(result.errors().isEmpty(), literal + " -> " + result.errors());
+            assertEquals(1, result.layers().size());
+        }
+    }
+
+    @Test
+    void sharedLetIsOnlyValidatedWhenReferenced() {
+        // sharedWd 只被 surface 行引用：方块层不应因它引用 wd 而报错。
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=\n"
+                        + " let sharedWd = wd + 1;\n"
+                        + " y=..: rand();\n"
+                        + " surface: sharedWd > 0 ? rand() : keep\n"
+                        + "}");
+        assertTrue(result.errors().isEmpty(), result.errors().toString());
+        assertTrue(result.dimensions().containsKey(FormulaParser.DIM_OVERWORLD));
+        assertEquals(1, result.dimensions().get(FormulaParser.DIM_OVERWORLD).surfaceLayers().size());
+    }
+
+    @Test
+    void sharedLetErrorCarriesSourceLineAndName() {
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=\n"
+                        + " let bad = wd + 1;\n"
+                        + " y=..: bad > 0 ? rand() : rand()\n"
+                        + "}");
+        assertFalse(result.errors().isEmpty());
+        assertTrue(result.errors().stream().anyMatch(e -> e.contains("Line 2")
+                        && e.contains("in shared let 'bad'")
+                        && e.contains("Unknown variable: wd")),
+                result.errors().toString());
+    }
+
+    @Test
+    void layerErrorCarriesSourceLine() {
+        FormulaParser.DimensionParseResult result = FormulaParser.parseDimensionsWithErrors(
+                "{overworld=\n"
+                        + " [structure:none]\n"
+                        + " y=..: missingVariable > 0 ? rand() : rand()\n"
+                        + "}");
+        assertTrue(result.errors().stream().anyMatch(e -> e.contains("Line 3")
+                        && e.contains("Unknown variable: missingVariable")),
+                result.errors().toString());
     }
 }

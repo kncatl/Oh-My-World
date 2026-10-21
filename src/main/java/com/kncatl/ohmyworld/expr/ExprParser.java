@@ -118,12 +118,12 @@ public class ExprParser {
                 throw new IllegalArgumentException("Block parse error: " + e.getMessage(), e);
             }
         }
-        throw new IllegalArgumentException("Unexpected token: " + peek() + " at position " + (peek() != null ? peek().pos() : -1));
+        throw new IllegalArgumentException("Unexpected token: " + peek() + " at " + at(peek()));
     }
 
     private boolean match(TokenType type) { if (pos < tokens.size() && tokens.get(pos).type() == type) { pos++; return true; } return false; }
     private boolean check(TokenType type) { return pos < tokens.size() && tokens.get(pos).type() == type; }
-    private void expect(TokenType type) { if (!match(type)) throw new IllegalArgumentException("Expected " + type + " but got " + peek() + " at position " + (peek() != null ? peek().pos() : -1)); }
+    private void expect(TokenType type) { if (!match(type)) throw new IllegalArgumentException("Expected " + type + " but got " + peek() + " at " + at(peek())); }
     private Token peek() { return pos < tokens.size() ? tokens.get(pos) : null; }
     private Token previous() { return tokens.get(pos - 1); }
     private void advance() { pos++; }
@@ -138,7 +138,7 @@ public class ExprParser {
                     // 元组 let：let (a, b, ...) = 多返回函数(...)
                     List<String> names = new ArrayList<>();
                     do {
-                        if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected a variable name in tuple let at position " + (peek() != null ? peek().pos() : -1));
+                        if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected a variable name in tuple let at " + at(peek()));
                         names.add(previous().text());
                     } while (match(TokenType.COMMA));
                     expect(TokenType.RPAREN);
@@ -149,7 +149,7 @@ public class ExprParser {
                     bindings.add(new ExprNode.LetBinding(List.copyOf(names), value));
                     continue;
                 }
-                if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected variable name after 'let' at position " + (peek() != null ? peek().pos() : -1));
+                if (!match(TokenType.IDENTIFIER)) throw new IllegalArgumentException("Expected variable name after 'let' at " + at(peek()));
                 String name = previous().text();
                 expect(TokenType.ASSIGN);
                 ExprNode value = conditional();
@@ -160,6 +160,10 @@ public class ExprParser {
             }
         }
         return new ExprNode.BlockExprNode(bindings, new ExprNode.NumberNode(0));
+    }
+
+    private static String at(Token token) {
+        return token == null ? "end of input" : "line " + token.line() + ", column " + token.column();
     }
 
     private void enterRecursion() {

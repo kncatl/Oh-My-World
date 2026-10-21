@@ -20,9 +20,12 @@ public final class FormulaErrorLocator {
     private static final String[] DIMENSIONS = {"overworld", "the_nether", "the_end"};
 
     private static final Pattern AT_POSITION = Pattern.compile("at position (\\d+)");
+    private static final Pattern AT_LINE_COLUMN = Pattern.compile("line (\\d+), column (\\d+)");
+    private static final Pattern LAYER_PREFIX = Pattern.compile("^(?:Layer|Biome layer) (\\d+)");
     private static final Pattern UNKNOWN_VARIABLE = Pattern.compile("Unknown variable: (\\S+)");
     private static final Pattern UNKNOWN_BLOCK = Pattern.compile("Unknown block: (\\S+)");
     private static final Pattern UNKNOWN_FUNCTION = Pattern.compile("Unknown function: (\\S+)");
+    private static final Pattern SHARED_LET_NAME = Pattern.compile("in shared let '([^']+)'");
     private static final Pattern UNKNOWN_DIRECTIVE = Pattern.compile("unknown directive \\[([^\\]]{1,60})\\]");
     private static final Pattern DOUBLE_QUOTED = Pattern.compile("\"([^\"]{1,60})\"");
     private static final Pattern SINGLE_QUOTED = Pattern.compile("'([^']{2,60})'");
@@ -62,11 +65,13 @@ public final class FormulaErrorLocator {
             }
         }
 
-        // 2) 层前缀："Layer N: ..."，N 是所在节（或整段）里的层序号
+        // 2) 层前缀："Layer N (Line L): ..." / "Biome layer N (Line L): ..."；
+        //    N 是所在节（或整段）里的层序号，Line 是源码行号（仅展示，定位仍按 N）。
         int[] segment = null;
-        if (rest.startsWith("Layer ")) {
+        Matcher layerPrefix = LAYER_PREFIX.matcher(rest);
+        if (layerPrefix.find()) {
             int colon = rest.indexOf(':');
-            int number = colon > 6 ? parseNumber(rest.substring(6, colon)) : -1;
+            int number = parseNumber(layerPrefix.group(1));
             if (number > 0) {
                 segment = scope != null
                         ? sectionLayerSegment(text, scope, number - 1)
@@ -100,6 +105,15 @@ public final class FormulaErrorLocator {
                     if (at >= base[0] && at < base[1]) return tokenRange(text, at, base[1]);
                 }
             }
+            Matcher lc = AT_LINE_COLUMN.matcher(message);
+            if (lc.find()) {
+                int column = parseNumber(lc.group(2));
+                if (column > 0) {
+                    int exprStart = expressionStart(text, base);
+                    int at = exprStart + Math.max(0, column - 1);
+                    if (at >= base[0] && at < base[1]) return tokenRange(text, at, base[1]);
+                }
+            }
         }
 
         // (b) 名字类消息
@@ -126,6 +140,11 @@ public final class FormulaErrorLocator {
     }
 
     private static int[] locateStructural(String text, List<Section> sections, String message) {
+        Matcher shared = SHARED_LET_NAME.matcher(message);
+        if (shared.find()) {
+            int idx = text.indexOf(shared.group(1));
+            if (idx >= 0) return new int[] {idx, idx + shared.group(1).length()};
+        }
         if (message.startsWith("Formula is empty") || message.startsWith("Formula contains no")
                 || message.startsWith("Formula exceeds")) {
             return null; // 整体性问题没有可指的局部

@@ -30,12 +30,12 @@ class GuideFunctionTableTest {
 
     @Test
     void everyFunctionIsDocumentedInBothGuides() throws IOException {
-        String zh = readGuide("/assets/ohmyworld/doc/guide.txt");
-        String en = readGuide("/assets/ohmyworld/doc/guide_en.txt");
+        String zh = readGuide("/assets/ohmyworld/doc/guide.md");
+        String en = readGuide("/assets/ohmyworld/doc/guide_en.md");
         List<String> missing = new ArrayList<>();
         for (String name : ExprEvaluator.functionNames()) {
-            if (!zh.contains(name + "(")) missing.add("guide.txt: " + name);
-            if (!en.contains(name + "(")) missing.add("guide_en.txt: " + name);
+            if (!zh.contains(name + "(")) missing.add("guide.md: " + name);
+            if (!en.contains(name + "(")) missing.add("guide_en.md: " + name);
         }
         assertTrue(missing.isEmpty(), "指南缺少以下函数的说明: " + missing);
     }

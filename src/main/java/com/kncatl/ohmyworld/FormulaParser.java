@@ -99,7 +99,7 @@ public class FormulaParser {
             return invalid("Formula exceeds the maximum input size of " + MAX_INPUT_LENGTH + " characters");
         }
 
-        String cleaned = stripComments(input).replace("\r", "").replace("\n", "");
+        String cleaned = stripComments(normalizeLineBreaks(input));
         if (cleaned.isBlank()) return invalid("Formula is empty");
         return parseLayers(cleaned);
     }
@@ -114,7 +114,7 @@ public class FormulaParser {
             return dimensionInvalid("Formula exceeds the maximum input size of " + MAX_INPUT_LENGTH + " characters");
         }
 
-        String cleaned = stripComments(input).replace("\r", "").replace("\n", "");
+        String cleaned = stripComments(normalizeLineBreaks(input));
         if (cleaned.isBlank()) return dimensionInvalid("Formula is empty");
 
         if (cleaned.trim().startsWith("{")) return parseSections(cleaned.trim());
@@ -150,7 +150,7 @@ public class FormulaParser {
 
         while (pos < length) {
             char c = input.charAt(pos);
-            if (c == ' ' || c == '\t' || c == ';') {
+            if (c == ' ' || c == '\t' || c == '\n' || c == ';') {
                 pos++;
                 continue;
             }
@@ -174,9 +174,10 @@ public class FormulaParser {
                 break;
             }
 
-            String body = input.substring(pos + 1, end);
+            int bodyStart = pos + 1;
+            String body = input.substring(bodyStart, end);
             pos = end + 1;
-            parseSection(body, dimensions, aliases, errors);
+            parseSection(body, bodyStart, input, dimensions, aliases, errors);
         }
 
         if (sections == 0 && errors.isEmpty()) errors.add("Formula contains no dimension sections");
@@ -185,7 +186,8 @@ public class FormulaParser {
     }
 
     /** 解析单个 {名称=内容} 节：内容是维度名 → 别名；否则解析可选指令 + 层语法（错误带维度前缀）。 */
-    private static void parseSection(String body, Map<String, ParsedDimension> dimensions,
+    private static void parseSection(String body, int bodyStart, String source,
+                                     Map<String, ParsedDimension> dimensions,
                                      Map<String, String> aliases, List<String> errors) {
         int eq = body.indexOf('=');
         if (eq < 0) {
@@ -193,7 +195,12 @@ public class FormulaParser {
             return;
         }
         String rawName = body.substring(0, eq).trim();
-        String content = body.substring(eq + 1).trim();
+        int contentOffset = eq + 1;
+        while (contentOffset < body.length() && Character.isWhitespace(body.charAt(contentOffset))) {
+            contentOffset++;
+        }
+        String content = body.substring(contentOffset).trim();
+        int contentLine = 1 + countNewlines(source, 0, bodyStart + contentOffset);
         if (rawName.isEmpty()) {
             errors.add("Dimension section is missing a name before '='");
             return;
@@ -364,12 +371,17 @@ public class FormulaParser {
         // 叠加模式默认雕刻器 = 原版原生（含含水层）；显式 [carvers:...] 仍可覆盖（第九章 §9.1）
         if (overlay && !carversSeen) carvers = DimensionRules.CarversMode.VANILLA;
 
-        String layerText = content.substring(pos).trim();
+        int layerOffset = pos;
+        while (layerOffset < content.length() && Character.isWhitespace(content.charAt(layerOffset))) {
+            layerOffset++;
+        }
+        String layerText = content.substring(layerOffset).trim();
         if (layerText.isEmpty()) {
             errors.add(name + ": dimension section is empty");
             return;
         }
-        ParseResult result = parseLayers(layerText, overlay);
+        int layerLine = contentLine + countNewlines(content, 0, layerOffset);
+        ParseResult result = parseLayers(layerText, overlay, layerLine);
         for (String error : result.errors()) errors.add(name + ": " + error);
         if (!result.errors().isEmpty()) return;
 
@@ -563,16 +575,28 @@ public class FormulaParser {
     }
 
     private static ParseResult parseLayers(String cleaned) {
-        return parseLayers(cleaned, false);
+        return parseLayers(cleaned, false, 1);
     }
 
     private static ParseResult parseLayers(String cleaned, boolean overlay) {
+        return parseLayers(cleaned, overlay, 1);
+    }
+
+    private static ParseResult parseLayers(String cleaned, boolean overlay, int baseLine) {
         List<Object> layers = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         List<BiomeLayerDef> biomeLayers = new ArrayList<>();
         List<SurfaceLayerDef> surfaceLayers = new ArrayList<>();
         boolean usesBiomeQueries = false;
         String[] lines = smartSplit(cleaned);
+        int[] sourceLines = new int[lines.length];
+        int searchFrom = 0;
+        for (int i = 0; i < lines.length; i++) {
+            int start = cleaned.indexOf(lines[i], searchFrom);
+            if (start < 0) start = searchFrom;
+            sourceLines[i] = baseLine + countNewlines(cleaned, 0, start);
+            searchFrom = start + lines[i].length();
+        }
 
         // 第一遍：收集共享节级 let（`let 名称 = 表达式` / `let 名称(参数, ...) = 表达式`），
         // 供本段所有层/群系行复用。任一解析失败即整体报错返回：它坏掉时所有层都会
@@ -583,7 +607,7 @@ public class FormulaParser {
             String raw = lines[lineIdx].trim();
             if (raw.isEmpty() || !isSharedLet(raw)) continue;
             try {
-                SharedLet parsed = parseSharedLet(raw);
+                SharedLet parsed = parseSharedLet(raw, sourceLines[lineIdx]);
                 if (parsed.macro() != null) {
                     if (macros.putIfAbsent(parsed.macro().name(), parsed.macro()) != null) {
                         throw new IllegalArgumentException("duplicate shared let '" + parsed.macro().name() + "'");
@@ -592,7 +616,7 @@ public class FormulaParser {
                     plainLets.add(parsed.binding());
                 }
             } catch (Exception e) {
-                errors.add("Shared let (segment " + (lineIdx + 1) + "): " + e.getMessage());
+                errors.add("Line " + sourceLines[lineIdx] + " (in shared let): " + e.getMessage());
             }
         }
         if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), List.of(), false, false);
@@ -601,9 +625,10 @@ public class FormulaParser {
         for (ExprNode.LetBinding binding : plainLets) {
             try {
                 shared.add(new ExprNode.LetBinding(binding.names(),
-                        expandLoops(expandMacros(binding.value(), macros))));
+                        expandLoops(expandMacros(binding.value(), macros)), binding.line()));
             } catch (Exception e) {
-                errors.add("Shared let '" + String.join(", ", binding.names()) + "': " + e.getMessage());
+                errors.add("Line " + binding.line() + " (in shared let '"
+                        + String.join(", ", binding.names()) + "'): " + e.getMessage());
             }
         }
         if (!errors.isEmpty()) return new ParseResult(List.of(), List.copyOf(errors), List.of(), List.of(), false, false);
@@ -618,38 +643,38 @@ public class FormulaParser {
 
             try {
                 if (isSurfaceLine(line)) {
-                    parseSurfaceLine(line, lineIdx, shared, macros, overlay, surfaceLayers, errors);
+                    parseSurfaceLine(line, lineIdx, sourceLines[lineIdx], shared, macros, overlay, surfaceLayers, errors);
                     continue;
                 }
                 if (isBiomeLine(line)) {
-                    parseBiomeLayer(line, lineIdx, shared, macros, overlay, biomeLayers, errors);
+                    parseBiomeLayer(line, lineIdx, sourceLines[lineIdx], shared, macros, overlay, biomeLayers, errors);
                     continue;
                 }
                 int colonIdx = findColon(line);
                 if (colonIdx < 0) {
-                    errors.add(layerError(lineIdx, "missing range separator ':'", line));
+                    errors.add(layerError(lineIdx, sourceLines[lineIdx], "missing range separator ':'", line));
                     continue;
                 }
 
                 String rangePart = line.substring(0, colonIdx).trim();
                 String exprPart = line.substring(colonIdx + 1).trim();
                 if (exprPart.isEmpty()) {
-                    errors.add(layerError(lineIdx, "empty expression after ':'", line));
+                    errors.add(layerError(lineIdx, sourceLines[lineIdx], "empty expression after ':'", line));
                     continue;
                 }
                 if (startsWithLet(exprPart)) {
-                    errors.add(layerError(lineIdx, MISPLACED_LET_HELP, line));
+                    errors.add(layerError(lineIdx, sourceLines[lineIdx], MISPLACED_LET_HELP, line));
                     continue;
                 }
 
                 int eqIdx = rangePart.indexOf('=');
                 if (eqIdx < 0) {
-                    errors.add(layerError(lineIdx, "missing '=' in range \"" + rangePart + "\"", line));
+                    errors.add(layerError(lineIdx, sourceLines[lineIdx], "missing '=' in range \"" + rangePart + "\"", line));
                     continue;
                 }
                 String varName = rangePart.substring(0, eqIdx).trim();
                 if (!varName.equals("y")) {
-                    errors.add(layerError(lineIdx, "only 'y' is supported as layer axis, got \"" + varName + "\"", line));
+                    errors.add(layerError(lineIdx, sourceLines[lineIdx], "only 'y' is supported as layer axis, got \"" + varName + "\"", line));
                     continue;
                 }
 
@@ -662,7 +687,7 @@ public class FormulaParser {
                 if (windowed) {
                     // y=surf(a..b)：以该列 sy（含水面）为基准的叠加窗口（仅叠加模式）。
                     if (!overlay) {
-                        errors.add(layerError(lineIdx,
+                        errors.add(layerError(lineIdx, sourceLines[lineIdx],
                                 "y=surf(...) windows can only be used in [terrain:vanilla] overlay mode", line));
                         continue;
                     }
@@ -672,7 +697,7 @@ public class FormulaParser {
                             ? valuePart.substring(open + 1, close).trim() : null;
                     int dots = inner == null ? -1 : inner.indexOf("..");
                     if (dots < 0) {
-                        errors.add(layerError(lineIdx,
+                        errors.add(layerError(lineIdx, sourceLines[lineIdx],
                                 "malformed window \"" + valuePart + "\" (expected surf(a..b))", line));
                         continue;
                     }
@@ -680,12 +705,12 @@ public class FormulaParser {
                         windowStart = Integer.parseInt(inner.substring(0, dots).trim());
                         windowEnd = Integer.parseInt(inner.substring(dots + 2).trim());
                     } catch (NumberFormatException e) {
-                        errors.add(layerError(lineIdx,
+                        errors.add(layerError(lineIdx, sourceLines[lineIdx],
                                 "malformed window \"" + valuePart + "\" (expected surf(a..b))", line));
                         continue;
                     }
                     if (windowStart > windowEnd) {
-                        errors.add(layerError(lineIdx,
+                        errors.add(layerError(lineIdx, sourceLines[lineIdx],
                                 "window start " + windowStart + " is greater than end " + windowEnd, line));
                         continue;
                     }
@@ -696,20 +721,20 @@ public class FormulaParser {
                     yStart = range[0];
                     yEnd = range[1];
                     if (yStart > yEnd) {
-                        errors.add(layerError(lineIdx, "range start " + yStart + " is greater than end " + yEnd, line));
+                        errors.add(layerError(lineIdx, sourceLines[lineIdx], "range start " + yStart + " is greater than end " + yEnd, line));
                         continue;
                     }
                 }
 
                 if (windowed && exprPart.contains("*[")) {
-                    errors.add(layerError(lineIdx,
+                    errors.add(layerError(lineIdx, sourceLines[lineIdx],
                             "y=surf(...) windows are not supported on cyclic layers", line));
                     continue;
                 }
                 if (exprPart.contains("*[")) {
                     List<CyclicEntry> srcEntries = parseCyclic(exprPart, shared, macros);
                     if (srcEntries.isEmpty()) {
-                        errors.add(layerError(lineIdx, "cyclic layer has no valid entries", line));
+                        errors.add(layerError(lineIdx, sourceLines[lineIdx], "cyclic layer has no valid entries", line));
                         continue;
                     }
                     for (CyclicEntry entry : srcEntries) {
@@ -730,7 +755,7 @@ public class FormulaParser {
                         }
                     }
                     if (!valErrors.isEmpty()) {
-                        for (String ve : valErrors) errors.add(layerError(lineIdx, ve, line));
+                        for (String ve : valErrors) errors.add(layerError(lineIdx, sourceLines[lineIdx], ve, line));
                         continue;
                     }
                     List<CyclicLayerDef.Entry> entries = new ArrayList<>(srcEntries.size());
@@ -749,7 +774,7 @@ public class FormulaParser {
                         valErrors.add("Layer expression must return a block, got " + type);
                     }
                     if (!valErrors.isEmpty()) {
-                        for (String ve : valErrors) errors.add(layerError(lineIdx, ve, line));
+                        for (String ve : valErrors) errors.add(layerError(lineIdx, sourceLines[lineIdx], ve, line));
                         continue;
                     }
                     // 「是否与 y 相关」必须在编译前判定：编译后变量变成槽位下标，
@@ -761,9 +786,9 @@ public class FormulaParser {
                             : new FormulaLayerDef(yStart, yEnd, compiled, !lyDependent));
                 }
             } catch (StackOverflowError e) {
-                errors.add(layerError(lineIdx, "expression nesting is too deep", line));
+                errors.add(layerError(lineIdx, sourceLines[lineIdx], "expression nesting is too deep", line));
             } catch (Exception e) {
-                errors.add(layerError(lineIdx, e.getMessage(), line));
+                errors.add(layerError(lineIdx, sourceLines[lineIdx], e.getMessage(), line));
             }
         }
         if (layers.isEmpty() && errors.isEmpty()) {
@@ -892,8 +917,18 @@ public class FormulaParser {
         return raw.replace("\r\n", "\n").replace('\r', '\n');
     }
 
-    private static String layerError(int lineIdx, String msg, String line) {
-        return "Layer " + (lineIdx + 1) + ": " + msg + " in \"" + truncate(line) + "\"";
+    private static int countNewlines(String text, int from, int to) {
+        int count = 0;
+        int end = Math.min(to, text.length());
+        for (int i = Math.max(0, from); i < end; i++) {
+            if (text.charAt(i) == '\n') count++;
+        }
+        return count;
+    }
+
+    private static String layerError(int lineIdx, int sourceLine, String msg, String line) {
+        return "Layer " + (lineIdx + 1) + " (Line " + sourceLine + "): " + msg
+                + " in \"" + truncate(line) + "\"";
     }
 
     private static String truncate(String s) {
@@ -924,8 +959,9 @@ public class FormulaParser {
     }
 
     /** 群系行的语义错误前缀（与方块层错误区分，便于在编辑器里定位）。 */
-    private static String biomeError(int lineIdx, String msg, String line) {
-        return "Biome layer " + (lineIdx + 1) + ": " + msg + " in \"" + truncate(line) + "\"";
+    private static String biomeError(int lineIdx, int sourceLine, String msg, String line) {
+        return "Biome layer " + (lineIdx + 1) + " (Line " + sourceLine + "): " + msg
+                + " in \"" + truncate(line) + "\"";
     }
 
     /** 群系字面量是否在编译期名单内（裸名查名单；带命名空间放行，运行时再向注册表解析）。 */
@@ -1055,7 +1091,8 @@ public class FormulaParser {
      * {@code surface y=a..b: 表达式}、{@code surface: 表达式}（整维简写）、
      * 可选前缀 {@code surface[maxdepth=N]}（N ∈ 1..64，默认 8）。
      */
-    private static void parseSurfaceLine(String line, int lineIdx, List<ExprNode.LetBinding> shared,
+    private static void parseSurfaceLine(String line, int lineIdx, int sourceLine,
+                                         List<ExprNode.LetBinding> shared,
                                          Map<String, ParametricLet> macros, boolean overlay,
                                          List<SurfaceLayerDef> surfaceLayers, List<String> errors) {
         String rest = line.substring("surface".length()).trim();
@@ -1122,14 +1159,15 @@ public class FormulaParser {
             valErrors.add("Surface expression must return a block or keep, got " + type);
         }
         if (!valErrors.isEmpty()) {
-            for (String ve : valErrors) errors.add(layerError(lineIdx, ve, line));
+            for (String ve : valErrors) errors.add(layerError(lineIdx, sourceLine, ve, line));
             return;
         }
         surfaceLayers.add(new SurfaceLayerDef(yStart, yEnd, shorthand, maxDepth, ExprCompiler.compile(expr)));
     }
 
     /** 解析一行群系层：{@code biome: 表达式}（整维简写）或 {@code biome y=a..b: 表达式}。 */
-    private static void parseBiomeLayer(String line, int lineIdx, List<ExprNode.LetBinding> shared,
+    private static void parseBiomeLayer(String line, int lineIdx, int sourceLine,
+                                        List<ExprNode.LetBinding> shared,
                                         Map<String, ParametricLet> macros, boolean overlay,
                                         List<BiomeLayerDef> biomeLayers, List<String> errors) {
         try {
@@ -1173,7 +1211,7 @@ public class FormulaParser {
                     expandLoops(expandMacros(new ExprParser(ExprLexer.tokenize(exprPart)).parse(), macros)));
             if (overlay && usesTerrainQuery(expr)) {
                 // 叠加模式下群系填充先于噪声地形：没有"公式地形"可读（第九章 §9.2）
-                errors.add(biomeError(lineIdx,
+                errors.add(biomeError(lineIdx, sourceLine,
                         "terrain queries (terrain/surfis/blockis) cannot be used in biome lines"
                                 + " in [terrain:vanilla] overlay mode", line));
                 return;
@@ -1188,7 +1226,7 @@ public class FormulaParser {
                 valErrors.add("Biome layer expression must return a biome, got " + type);
             }
             if (!valErrors.isEmpty()) {
-                for (String ve : valErrors) errors.add(biomeError(lineIdx, ve, line));
+                for (String ve : valErrors) errors.add(biomeError(lineIdx, sourceLine, ve, line));
                 return;
             }
             // 与方块层同理：「是否与 y 相关」必须在编译前判定（编译后变量变成槽位下标）。
@@ -1196,9 +1234,9 @@ public class FormulaParser {
             biomeLayers.add(new BiomeLayerDef(yStart, yEnd, shorthand,
                     ExprCompiler.compile(expr), !lyDependent));
         } catch (StackOverflowError e) {
-            errors.add(biomeError(lineIdx, "expression nesting is too deep", line));
+            errors.add(biomeError(lineIdx, sourceLine, "expression nesting is too deep", line));
         } catch (Exception e) {
-            errors.add(biomeError(lineIdx, e.getMessage(), line));
+            errors.add(biomeError(lineIdx, sourceLine, e.getMessage(), line));
         }
     }
 
@@ -1441,11 +1479,22 @@ public class FormulaParser {
             case ExprNode.BlockExprNode be -> {
                 Map<String, ExprEvaluator.ValueType> local = new HashMap<>(variables);
                 for (ExprNode.LetBinding lb : be.bindings()) {
+                    int before = errors.size();
+                    String bindingName = String.join(", ", lb.names());
                     if (lb.names().size() == 1) {
                         local.put(lb.names().get(0), validateNode(lb.value(), errors, local, biomeMode, overlay));
                     } else {
                         validateTupleBinding(lb, errors, local, biomeMode, overlay);
                         for (String name : lb.names()) local.put(name, ExprEvaluator.ValueType.NUMBER);
+                    }
+                    if (lb.line() > 0) {
+                        for (int i = before; i < errors.size(); i++) {
+                            String message = errors.get(i);
+                            if (!message.startsWith("Line ")) {
+                                errors.set(i, "Line " + lb.line() + " (in shared let '"
+                                        + bindingName + "'): " + message);
+                            }
+                        }
                     }
                 }
                 return validateNode(be.body(), errors, local, biomeMode, overlay);
@@ -1936,7 +1985,7 @@ public class FormulaParser {
     private record ParametricLet(String name, List<String> params, ExprNode body) {}
 
     /** 解析 `let 名称 = 表达式`、`let 名称(参数, ...) = 表达式` 或 `let (a, b, ...) = 表达式`。 */
-    private static SharedLet parseSharedLet(String line) {
+    private static SharedLet parseSharedLet(String line, int sourceLine) {
         String rest = line.substring(3).trim();
         if (rest.startsWith("(")) {
             // 元组 let：let (a, b, ...) = 多返回函数(...)
@@ -1965,7 +2014,7 @@ public class FormulaParser {
                 throw new IllegalArgumentException("expected an expression after 'let (...) ='");
             }
             ExprNode value = new ExprParser(ExprLexer.tokenize(valueText)).parse();
-            return new SharedLet(new ExprNode.LetBinding(List.copyOf(names), value), null);
+            return new SharedLet(new ExprNode.LetBinding(List.copyOf(names), value, sourceLine), null);
         }
         int i = 0;
         while (i < rest.length() && (Character.isLetterOrDigit(rest.charAt(i)) || rest.charAt(i) == '_')) i++;
@@ -2007,7 +2056,7 @@ public class FormulaParser {
         }
         ExprNode value = new ExprParser(ExprLexer.tokenize(valueText)).parse();
         if (!parens) {
-            return new SharedLet(new ExprNode.LetBinding(name, value), null);
+            return new SharedLet(new ExprNode.LetBinding(name, value, sourceLine), null);
         }
         if (ExprEvaluator.isFunctionName(name)) {
             throw new IllegalArgumentException("shared let '" + name + "' collides with a built-in function");
@@ -2069,7 +2118,7 @@ public class FormulaParser {
                 List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
                 for (ExprNode.LetBinding binding : be.bindings()) {
                     bindings.add(new ExprNode.LetBinding(binding.names(),
-                            expandMacros(binding.value(), macros, depth)));
+                            expandMacros(binding.value(), macros, depth), binding.line()));
                 }
                 yield new ExprNode.BlockExprNode(bindings, expandMacros(be.body(), macros, depth));
             }
@@ -2164,7 +2213,7 @@ public class FormulaParser {
                 List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
                 for (ExprNode.LetBinding binding : be.bindings()) {
                     bindings.add(new ExprNode.LetBinding(binding.names(),
-                            rewriteClimateFields(binding.value(), inner)));
+                            rewriteClimateFields(binding.value(), inner), binding.line()));
                     inner.addAll(binding.names());
                 }
                 yield new ExprNode.BlockExprNode(bindings, rewriteClimateFields(be.body(), inner));
@@ -2214,7 +2263,7 @@ public class FormulaParser {
                 List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
                 for (ExprNode.LetBinding binding : be.bindings()) {
                     bindings.add(new ExprNode.LetBinding(binding.names(),
-                            expandLoops(binding.value(), multiplier)));
+                            expandLoops(binding.value(), multiplier), binding.line()));
                 }
                 yield new ExprNode.BlockExprNode(bindings, expandLoops(be.body(), multiplier));
             }
@@ -2364,7 +2413,8 @@ public class FormulaParser {
                 List<ExprNode.LetBinding> bindings = new ArrayList<>(be.bindings().size());
                 for (ExprNode.LetBinding binding : be.bindings()) {
                     // 绑定值先于绑定名可见（与求值器一致）
-                    bindings.add(new ExprNode.LetBinding(binding.names(), substitute(binding.value(), inner)));
+                    bindings.add(new ExprNode.LetBinding(binding.names(),
+                            substitute(binding.value(), inner), binding.line()));
                     for (String name : binding.names()) inner.remove(name);
                 }
                 yield new ExprNode.BlockExprNode(bindings, substitute(be.body(), inner));
@@ -2387,10 +2437,99 @@ public class FormulaParser {
         };
     }
 
-    /** 把共享绑定前置到层表达式外：{ 共享绑定...; 原表达式 }。 */
+    /**
+     * 把共享绑定前置到层表达式外：{ 共享绑定...; 原表达式 }。
+     *
+     * <p>只包装本表达式**实际引用**到的共享 let（及其依赖链）。共享 let 可能只在
+     * surface 行使用（例如引用 wd/sd），如果无条件把它们塞进方块层/biome 行校验，
+     * 会误报 {@code Unknown variable: wd}；按实际引用过滤后，未使用的绑定完全不参与
+     * 该层的校验与编译。
+     */
     private static ExprNode wrapShared(List<ExprNode.LetBinding> shared, ExprNode body) {
         if (shared.isEmpty()) return body;
-        return new ExprNode.BlockExprNode(List.copyOf(shared), body);
+
+        Map<String, ExprNode.LetBinding> byName = new HashMap<>();
+        for (ExprNode.LetBinding binding : shared) {
+            for (String name : binding.names()) byName.putIfAbsent(name, binding);
+        }
+
+        Set<String> referenced = new HashSet<>();
+        collectFreeVariables(body, Set.of(), referenced);
+        Set<String> needed = new HashSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(referenced);
+        while (!queue.isEmpty()) {
+            String name = queue.removeFirst();
+            ExprNode.LetBinding binding = byName.get(name);
+            if (binding == null || !needed.add(name)) continue;
+            Set<String> deps = new HashSet<>();
+            collectFreeVariables(binding.value(), Set.of(), deps);
+            queue.addAll(deps);
+        }
+
+        List<ExprNode.LetBinding> filtered = new ArrayList<>();
+        for (ExprNode.LetBinding binding : shared) {
+            for (String name : binding.names()) {
+                if (needed.contains(name)) {
+                    filtered.add(binding);
+                    break;
+                }
+            }
+        }
+        return filtered.isEmpty() ? body : new ExprNode.BlockExprNode(List.copyOf(filtered), body);
+    }
+
+    /** 收集表达式的自由变量（尊重 let 绑定与遮蔽；用于共享 let 的按引用包装）。 */
+    private static void collectFreeVariables(ExprNode node, Set<String> bound, Set<String> out) {
+        switch (node) {
+            case ExprNode.NumberNode n -> { }
+            case ExprNode.VariableNode v -> {
+                if (!bound.contains(v.name())) out.add(v.name());
+            }
+            case ExprNode.BlockNode b -> { }
+            case ExprNode.BinaryNode b -> {
+                collectFreeVariables(b.left(), bound, out);
+                collectFreeVariables(b.right(), bound, out);
+            }
+            case ExprNode.UnaryNode u -> collectFreeVariables(u.operand(), bound, out);
+            case ExprNode.ConditionalNode c -> {
+                collectFreeVariables(c.condition(), bound, out);
+                collectFreeVariables(c.thenExpr(), bound, out);
+                collectFreeVariables(c.elseExpr(), bound, out);
+            }
+            case ExprNode.FuncCallNode f -> {
+                for (ExprNode arg : f.args()) collectFreeVariables(arg, bound, out);
+            }
+            case ExprNode.BlockExprNode be -> {
+                Set<String> local = new HashSet<>(bound);
+                for (ExprNode.LetBinding binding : be.bindings()) {
+                    collectFreeVariables(binding.value(), local, out);
+                    local.addAll(binding.names());
+                }
+                collectFreeVariables(be.body(), local, out);
+            }
+            case ExprNode.TupleCallNode t -> {
+                for (ExprNode arg : t.args()) collectFreeVariables(arg, bound, out);
+            }
+            case ExprNode.BuiltinNode b -> { }
+            case ExprNode.SlotNode s -> { }
+            case ExprNode.CompiledFuncCallNode f -> {
+                for (ExprNode arg : f.args()) collectFreeVariables(arg, bound, out);
+            }
+            case ExprNode.CompiledTupleCallNode t -> {
+                for (ExprNode arg : t.args()) collectFreeVariables(arg, bound, out);
+            }
+            case ExprNode.TupleComponentNode t -> { }
+            case ExprNode.CompiledRiverNetNode r -> {
+                if (r.coarseExpr() != null) collectFreeVariables(r.coarseExpr(), bound, out);
+            }
+            case ExprNode.CompiledBlur2Node c -> collectFreeVariables(c.expr(), bound, out);
+            case ExprNode.CompiledCache2dNode c -> collectFreeVariables(c.expr(), bound, out);
+            case ExprNode.CompiledCache3dNode c -> collectFreeVariables(c.expr(), bound, out);
+            case ExprNode.CompiledBlockNode cb -> {
+                for (ExprNode value : cb.values()) collectFreeVariables(value, bound, out);
+                collectFreeVariables(cb.body(), bound, out);
+            }
+        }
     }
 
     private static String[] smartSplit(String input) {

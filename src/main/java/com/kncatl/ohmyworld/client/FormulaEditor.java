@@ -67,6 +67,10 @@ public class FormulaEditor extends AbstractWidget {
     private List<int[]> errorSpans = List.of();
     private boolean dragging;
     private boolean scrollDragging;
+    /** 只读显示模式：允许滚动/选区/复制，禁止任何文本修改。 */
+    private boolean readOnly;
+    /** 是否按公式语法着色（错误信息等纯文本关闭）。 */
+    private boolean syntaxHighlight = true;
     /** 按住滑块时，光标相对滑块顶部的偏移；点轨道时为滑块高度一半（滑块居中跳过去）。 */
     private double scrollGrabOffset;
     private long focusedTime;
@@ -94,6 +98,16 @@ public class FormulaEditor extends AbstractWidget {
 
     public void setResponder(Consumer<String> responder) {
         this.model.setValueListener(responder);
+    }
+
+    /** 只读模式：可滚动、框选、Ctrl+A/C，但不能编辑。 */
+    public void setReadOnly(boolean readOnly) {
+        this.readOnly = readOnly;
+    }
+
+    /** 关闭语法着色（用于错误/状态信息等普通文本）。 */
+    public void setSyntaxHighlight(boolean enabled) {
+        this.syntaxHighlight = enabled;
     }
 
     /** 设置错误标注区间（原文坐标）；空列表表示没有错误。 */
@@ -230,7 +244,7 @@ public class FormulaEditor extends AbstractWidget {
     @Override
     public boolean capturesInput() {
         // 26.3 起聚焦的文本控件需声明捕获输入（文本输入模式与全局快捷键让位均以此判断）
-        return this.visible && isFocused();
+        return this.visible && isFocused() && !this.readOnly;
     }
     //?}
 
@@ -240,6 +254,7 @@ public class FormulaEditor extends AbstractWidget {
                             boolean selectAll, boolean copy, boolean paste, boolean cut) {}
 
     private boolean handleKey(KeyInput in) {
+        if (this.readOnly && (in.enter() || in.paste())) return true;
         if (in.enter()) {
             if (in.ctrl()) return false; // Ctrl+Enter 由屏幕处理（完成 / 全屏写回）
             this.model.insertText("\n");
@@ -284,11 +299,15 @@ public class FormulaEditor extends AbstractWidget {
         } else if (key == K_PAGE_DOWN) {
             this.model.moveVertical(visibleLines(), in.shift());
         } else if (key == K_BACKSPACE) {
-            if (in.ctrl()) this.model.deleteWord(-1);
-            else this.model.deleteText(-1);
+            if (!this.readOnly) {
+                if (in.ctrl()) this.model.deleteWord(-1);
+                else this.model.deleteText(-1);
+            }
         } else if (key == K_DELETE) {
-            if (in.ctrl()) this.model.deleteWord(1);
-            else this.model.deleteText(1);
+            if (!this.readOnly) {
+                if (in.ctrl()) this.model.deleteWord(1);
+                else this.model.deleteText(1);
+            }
         } else {
             return false;
         }
@@ -359,6 +378,7 @@ public class FormulaEditor extends AbstractWidget {
 
     @Override
     public boolean charTyped(net.minecraft.client.input.CharacterEvent event) {
+        if (this.readOnly) return true;
         if (!this.visible || !isFocused() || !event.isAllowedChatCharacter()) return false;
         this.model.insertText(event.codepointAsString());
         scrollToCursor();
@@ -408,6 +428,7 @@ public class FormulaEditor extends AbstractWidget {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (this.readOnly) return true;
         if (!this.visible || !isFocused() || !StringUtil.isAllowedChatCharacter(codePoint)) return false;
         this.model.insertText(String.valueOf(codePoint));
         scrollToCursor();
@@ -456,7 +477,7 @@ public class FormulaEditor extends AbstractWidget {
 
         t.pushClip(ix, iy, ix + this.innerWidth, iy + ih);
         try {
-            if (value.isEmpty() && !isFocused()) {
+            if (value.isEmpty() && (!isFocused() || this.readOnly)) {
                 drawPlaceholder(t, ix, iy, ih);
             } else {
                 drawSelection(t, ix, iy);
@@ -534,9 +555,18 @@ public class FormulaEditor extends AbstractWidget {
     }
 
     private void drawText(GuiCompat.Draw t, String value, int ix, int iy) {
-        List<FormulaHighlighter.Span> spans = FormulaHighlighter.spans(value);
-        int lineH = lineHeight();
         List<FormulaTextModel.Line> lines = this.model.lines();
+        int lineH = lineHeight();
+        if (!this.syntaxHighlight) {
+            for (int i = this.scrollLine; i < lines.size() && i <= this.scrollLine + visibleLines(); i++) {
+                FormulaTextModel.Line line = lines.get(i);
+                if (line.start() >= line.end()) continue;
+                drawRun(t, value, line.start(), line.end(), ix,
+                        iy + (i - this.scrollLine) * lineH, FormulaHighlighter.COLOR_DEFAULT);
+            }
+            return;
+        }
+        List<FormulaHighlighter.Span> spans = FormulaHighlighter.spans(value);
         for (int i = this.scrollLine; i < lines.size() && i <= this.scrollLine + visibleLines(); i++) {
             FormulaTextModel.Line line = lines.get(i);
             if (line.start() >= line.end()) continue;
@@ -571,7 +601,7 @@ public class FormulaEditor extends AbstractWidget {
     }
 
     private void drawCursor(GuiCompat.Draw t, int ix, int iy) {
-        if (!isFocused()) return;
+        if (this.readOnly || !isFocused()) return;
         int lineH = lineHeight();
         int y = iy + (this.model.cursorLine() - this.scrollLine) * lineH;
         int cx = ix + this.model.cursorX();

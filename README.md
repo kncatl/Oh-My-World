@@ -69,9 +69,9 @@ Requires **Java 21** (1.21.x) or **Java 25** (26.x). Newer loader builds on the 
 
 ### Formula Guide
 
-A comprehensive formula writing guide (`README_en_us.md` / `README_zh_cn.md`) is
-automatically created in `<game_dir>/ohmyworld/` on first launch. On mod upgrades the
-files are auto-updated as long as you have not edited them yourself.
+The formula guide is written to `<game_dir>/ohmyworld/guide.md` (Chinese) and
+`guide_en.md` (English) at startup. The bundled version overwrites the same file
+names on every launch; save your own edits under a different name.
 
 **Quick examples:**
 

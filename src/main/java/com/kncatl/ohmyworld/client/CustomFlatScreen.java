@@ -78,6 +78,9 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private long previewVanillaSeed = Long.MIN_VALUE;
     private final java.util.Map<String, ExprEvaluator.VanillaView> previewVanillaViews = new java.util.HashMap<>();
     private MultiLineBox.Handle formulaBox;
+    private MultiLineBox.Handle infoBox;
+    private Button copyInfoBtn;
+    private String infoBoxText = "";
     private EditBox nameInput;
     private Button saveBtn;
     private Button loadBtn;
@@ -125,6 +128,9 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private static final Component FORMULA_HINT = Component.translatable("ohmyworld.custom_screen.formula_hint");
     private static final Component NAME_LABEL = Component.translatable("ohmyworld.custom_screen.name_label");
     private static final Component NAME_HINT = Component.translatable("ohmyworld.custom_screen.name_hint");
+    private static final Component INFO_LABEL = Component.translatable("ohmyworld.custom_screen.info_label");
+    private static final Component INFO_EMPTY = Component.translatable("ohmyworld.custom_screen.info_empty");
+    private static final Component COPY = Component.translatable("ohmyworld.custom_screen.copy");
     private static final Component OPEN_GUIDE = Component.translatable("ohmyworld.custom_screen.open_guide");
     private static final Component EXAMPLES_BTN = Component.translatable("ohmyworld.custom_screen.examples");
     private static final Component EXAMPLES_TITLE = Component.translatable("ohmyworld.custom_screen.examples_title");
@@ -221,6 +227,14 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.addRenderableWidget(this.nameInput);
 
         this.statusY = this.nameY + 40;
+        int infoBottom = this.cardY + this.cardH - 30 - 8;
+        int infoHeight = Math.max(24, Math.min(88, infoBottom - this.statusY));
+        this.infoBox = MultiLineBox.createReadOnly(this.font, fx, this.statusY, leftW, infoHeight,
+                INFO_EMPTY, INFO_LABEL, FormulaParser.MAX_INPUT_LENGTH);
+        this.addRenderableWidget(this.infoBox.widget());
+        this.copyInfoBtn = Button.builder(COPY, b -> copyInfo())
+                .bounds(fx + leftW - 48, this.statusY - 18, 48, 16).build();
+        this.addRenderableWidget(this.copyInfoBtn);
         this.switchBtn = null;
         this.zoomOutBtn = null;
         this.zoomInBtn = null;
@@ -295,6 +309,7 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
             this.switchBtn.visible = available.size() > 1;
         }
         updateButtonState();
+        refreshInfoBox();
     }
 
     /** 当前公式里有内容的维度，按固定顺序返回。 */
@@ -398,6 +413,55 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         this.statusMessage = message;
         this.statusColor = color;
         this.statusUntil = System.currentTimeMillis() + millis;
+        refreshInfoBox();
+    }
+
+    /** 复制信息框全文到剪贴板（错误/加载信息排查用）。 */
+    private void copyInfo() {
+        if (this.infoBox == null) return;
+        String text = this.infoBox.value();
+        if (!text.isBlank()) Minecraft.getInstance().keyboardHandler.setClipboard(text);
+    }
+
+    /** 信息框内容：短暂提示 > 完整错误 > 空输入提示 > 解析摘要/警告。 */
+    private void refreshInfoBox() {
+        if (this.infoBox == null) return;
+        StringBuilder text = new StringBuilder();
+        boolean statusActive = this.statusMessage != null
+                && System.currentTimeMillis() < this.statusUntil;
+        if (statusActive) {
+            text.append(this.statusMessage.getString());
+        } else {
+            this.statusMessage = null;
+            if (!this.currentErrors.isEmpty()) {
+                text.append(Component.translatable("ohmyworld.custom_screen.errors",
+                        this.currentErrors.size()).getString()).append('\n');
+                for (String error : this.currentErrors) text.append(error).append('\n');
+            } else if (this.formulaBox == null || this.formulaBox.value().isBlank()) {
+                text.append(EMPTY.getString());
+            } else if (this.currentResult != null) {
+                text.append(summaryLine(this.currentResult).getString());
+                if (this.currentResult.sectioned()
+                        && !this.currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
+                    text.append('\n').append(Component.translatable(
+                            "ohmyworld.custom_screen.vanilla_overworld").getString());
+                }
+            }
+        }
+        String value = text.toString().stripTrailing();
+        if (!value.equals(this.infoBoxText)) {
+            this.infoBoxText = value;
+            this.infoBox.setValue(value);
+        }
+        if (this.copyInfoBtn != null) this.copyInfoBtn.active = !value.isBlank();
+    }
+
+    /** 短暂提示到期后恢复成错误/摘要。 */
+    private void tickInfoBox() {
+        if (this.statusMessage != null && System.currentTimeMillis() >= this.statusUntil) {
+            this.statusMessage = null;
+            refreshInfoBox();
+        }
     }
 
     private void onSave() {
@@ -419,8 +483,8 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
     private void openGuide() {
         Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("ohmyworld");
         String language = this.minecraft.options.languageCode;
-        Path zh = dir.resolve("README_zh_cn.md");
-        Path en = dir.resolve("README_en_us.md");
+        Path zh = dir.resolve("guide.md");
+        Path en = dir.resolve("guide_en.md");
         Path preferred = language != null && language.startsWith("zh") ? zh : en;
         Path target = Files.exists(preferred, LinkOption.NOFOLLOW_LINKS) ? preferred
                 : Files.exists(zh, LinkOption.NOFOLLOW_LINKS) ? zh
@@ -916,13 +980,14 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         t.text(this.font, HINT, fx, this.cardY + 32, 0xFFB8B8B8);
         t.text(this.font, FORMULA_LABEL, fx, this.formulaY - 12, MUTED_COLOR);
         t.text(this.font, NAME_LABEL, fx, this.nameY - 12, MUTED_COLOR);
+        t.text(this.font, INFO_LABEL, fx, this.statusY - 12, MUTED_COLOR);
+        tickInfoBox();
         // 名称框占位文字自绘：原版 EditBox 的 hint 颜色跨版本不一致（1.21.1 偏黑）
         if (this.nameInput.getValue().isEmpty() && !this.nameInput.isFocused()) {
             t.text(this.font, NAME_HINT, this.nameInput.getX() + 4, this.nameInput.getY() + 6, MUTED_COLOR);
         }
         tickPreview();
         drawPreview(t);
-        drawStatus(t, fx, this.statusY, this.cardW - 32 - (this.previewVisible ? PREVIEW_BOX + 12 : 0));
     }
 
     /** 预览区（含外框、框外坐标标尺与标题）；未就绪时只画框与提示。 */
@@ -1025,45 +1090,6 @@ public class CustomFlatScreen extends Screen implements PresetEditor {
         worker.setDaemon(true);
         worker.setPriority(Thread.MIN_PRIORITY);
         worker.start();
-    }
-
-    /** 状态区：短暂提示 > 错误列表 > 空输入提示 > 解析摘要（+ 原版主世界提醒）。 */
-    private void drawStatus(GuiCompat.Draw t, int x, int y, int width) {
-        if (this.statusMessage != null && System.currentTimeMillis() < this.statusUntil) {
-            t.text(this.font, this.statusMessage, x, y, this.statusColor);
-            return;
-        }
-        this.statusMessage = null;
-
-        if (!this.currentErrors.isEmpty()) {
-            t.text(this.font, Component.translatable("ohmyworld.custom_screen.errors", this.currentErrors.size()),
-                    x, y, ERROR_COLOR);
-            int lineY = y + 12;
-            int maxShow = Math.min(this.currentErrors.size(), 4);
-            for (int i = 0; i < maxShow; i++) {
-                String trimmed = this.font.plainSubstrByWidth(this.currentErrors.get(i), width);
-                t.text(this.font, Component.literal(trimmed), x, lineY, ERROR_COLOR);
-                lineY += 11;
-            }
-            if (this.currentErrors.size() > maxShow) {
-                t.text(this.font, Component.literal("..."), x, lineY, ERROR_COLOR);
-            }
-            return;
-        }
-
-        if (this.formulaBox.value().isBlank()) {
-            t.text(this.font, EMPTY, x, y, MUTED_COLOR);
-            return;
-        }
-
-        if (this.currentResult != null) {
-            t.text(this.font, summaryLine(this.currentResult), x, y, OK_COLOR);
-            if (this.currentResult.sectioned()
-                    && !this.currentResult.dimensions().containsKey(FormulaParser.DIM_OVERWORLD)) {
-                t.text(this.font, Component.translatable("ohmyworld.custom_screen.vanilla_overworld"),
-                        x, y + 13, WARN_COLOR);
-            }
-        }
     }
 
     /** 「已识别 N 个维度 · 主世界 12 层 · 下界 5 层」（主界面与全屏编辑共用）。 */
