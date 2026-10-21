@@ -146,6 +146,7 @@ public class OhMyWorldConfig {
         OhMyWorldConfig failed = new OhMyWorldConfig();
         failed.loadFailed = true;
         failed.jsonSyntaxFailed = true;
+        instance = failed;
         return failed;
     }
 
@@ -157,6 +158,7 @@ public class OhMyWorldConfig {
         OhMyWorldConfig failed = new OhMyWorldConfig();
         failed.loadFailed = true;
         failed.jsonSyntaxFailed = jsonSyntaxFailed;
+        instance = failed;
         return failed;
     }
 

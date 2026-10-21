@@ -2,6 +2,7 @@ package com.kncatl.ohmyworld;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -116,6 +117,7 @@ class OhMyWorldConfigTest {
         OhMyWorldConfig loaded = OhMyWorldConfig.reload();
         assertTrue(loaded.loadFailed());
         assertTrue(loaded.jsonSyntaxFailed());
+        assertSame(loaded, OhMyWorldConfig.load(), "失败结果必须缓存，避免重复读损坏配置");
     }
 
     @Test
